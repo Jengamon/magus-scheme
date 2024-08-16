@@ -11,28 +11,9 @@ fn process_piped_ident(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError>
         match chr {
             '\\' => match chars.peek() {
                 Some('x' | 'X') => {
-                    let mut char_code = 0u32;
-                    let _ = chars.next(); // consume 'x'
-                    while let Some(c) = chars.peek() {
-                        match c {
-                            ';' => break,
-                            c @ ('0'..='9' | 'a'..='f' | 'A'..='F') => {
-                                char_code = char_code
-                                    .checked_mul(16)
-                                    .ok_or(LexerError::CharacterTooBig)?
-                                    .checked_add(c.to_digit(16).unwrap())
-                                    .ok_or(LexerError::CharacterTooBig)?;
-                                _ = chars.next();
-                            }
-                            _ => Err(LexerError::MalformedIdent(Box::from(lexer.slice())))?,
-                        }
-                    }
-                    if chars.next() != Some(';') {
-                        return Err(LexerError::MalformedIdent(Box::from(lexer.slice())));
-                    }
-                    built_ident.push(
-                        char::from_u32(char_code).ok_or(LexerError::InvalidCodepoint(char_code))?,
-                    );
+                    built_ident.push(read_hex_escape(&mut chars, || {
+                        LexerError::MalformedIdent(Box::from(lexer.slice()))
+                    })?);
                 }
                 Some('a') => {
                     built_ident.push('\x07');
@@ -111,6 +92,97 @@ fn process_hex_character(lexer: &mut Lexer<Token>) -> Result<char, LexerError> {
     char::from_u32(value).ok_or(LexerError::InvalidCodepoint(value))
 }
 
+// reads hex escapes in the form `x[0-9a-fA-F]+` and outputs the corresponding character
+fn read_hex_escape<F>(
+    iter: &mut std::iter::Peekable<impl Iterator<Item = char>>,
+    on_malformed: F,
+) -> Result<char, LexerError>
+where
+    F: Fn() -> LexerError,
+{
+    // consume the x
+    let _ = iter.next();
+
+    let mut char_code = 0u32;
+    while let Some(c) = iter.peek() {
+        match c {
+            ';' => break,
+            c @ ('0'..='9' | 'a'..='f' | 'A'..='F') => {
+                char_code = char_code
+                    .checked_mul(16)
+                    .ok_or(LexerError::CharacterTooBig)?
+                    .checked_add(c.to_digit(16).unwrap())
+                    .ok_or(LexerError::CharacterTooBig)?;
+                _ = iter.next();
+            }
+            _ => Err(on_malformed())?,
+        }
+    }
+    if iter.next() != Some(';') {
+        return Err(on_malformed());
+    }
+    char::from_u32(char_code).ok_or(LexerError::InvalidCodepoint(char_code))
+}
+
+fn process_string(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError> {
+    // Our string syntax is described by /"([^\\"]|\\[abtnr"\\]|\\[ \t]*(\r|\n|\r\n)[ \t]*|\\x[0-9a-fA-f]+;)*"/
+    // We use a more permissive version of this on the Logos side, so that errors are neater.
+
+    let mut string = String::new();
+
+    let mut chars = lexer.slice().chars().skip(1).peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => break,
+            '\\' => match chars.peek() {
+                Some('a') => {
+                    string.push('\x07');
+                    _ = chars.next(); // consume
+                }
+                Some('b') => {
+                    string.push('\x08');
+                    _ = chars.next(); // consume
+                }
+                Some('t') => {
+                    string.push('\t');
+                    _ = chars.next(); // consume
+                }
+                Some('n') => {
+                    string.push('\n');
+                    _ = chars.next(); // consume
+                }
+                Some('r') => {
+                    string.push('\r');
+                    _ = chars.next(); // consume
+                }
+                Some('\\') => {
+                    string.push('\\');
+                    _ = chars.next(); // consume
+                }
+                Some('"') => {
+                    string.push('"');
+                    _ = chars.next(); // consume
+                }
+                Some(' ' | '\t' | '\r' | '\n') => {
+                    let _ = chars.next();
+                    while let Some(' ' | '\t' | '\r' | '\n') = chars.peek() {
+                        _ = chars.next();
+                    }
+                }
+                Some('x' | 'X') => string.push(read_hex_escape(&mut chars, || {
+                    LexerError::MalformedString(Box::from(lexer.slice()))
+                })?),
+                _ => todo!(),
+            },
+            c => string.push(c),
+        }
+    }
+
+    assert!(chars.next().is_none());
+    Ok(Box::from(string.as_str()))
+}
+
 #[derive(thiserror::Error, Debug, PartialEq, Clone, Default)]
 pub enum LexerError {
     #[default]
@@ -126,16 +198,18 @@ pub enum LexerError {
     InvalidDirective(Box<str>),
     #[error("invalid character name: {0}")]
     InvalidCharacterName(Box<str>),
+    #[error("malformed string: {0}")]
+    MalformedString(Box<str>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Hash)]
 pub enum Directive {
     FoldCase,
     NoFoldCase,
 }
 
 /// Tokens are lexed from some source, and can arbitrarily borrow from it.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Logos)]
+#[derive(Debug, Clone, PartialEq, Hash, Logos)]
 #[logos(error = LexerError)]
 pub enum Token {
     #[regex("[ \t]+")]
@@ -188,8 +262,10 @@ pub enum Token {
     Boolean(bool),
     #[regex(r"#\\.", callback = |l| l.slice().chars().nth(2).unwrap())] // Regex FTW
     #[regex(r"#\\[a-zA-Z]+", priority = 2, callback =  process_named_character)]
-    #[regex(r"#\\x[0-9a-fA-F]+", callback = process_hex_character)]
+    #[regex(r"(?i)#\\x[0-9a-f]+", callback = process_hex_character)]
     Character(char),
+    #[regex(r#""([^\\"]|\\[abntr"\\xX])*""#, process_string)]
+    String(Box<str>),
 }
 
 #[cfg(test)]
@@ -269,5 +345,24 @@ mod tests {
         check!(Token::lexer(r"#\newline").next() == Some(Ok(Token::Character('\n'))));
         check!(Token::lexer(r"#\0").next() == Some(Ok(Token::Character('0'))));
         check!(Token::lexer(r"#\xa").next() == Some(Ok(Token::Character('\n'))));
+        check!(Token::lexer(r"#\x03bb").next() == Some(Ok(Token::Character('\u{03bb}'))));
+    }
+
+    #[test]
+    fn test_string() {
+        macro_rules! verify_string {
+            ($source:literal as $target:literal) => {
+                let mut source = String::new();
+                source.push('"');
+                source.push_str($source);
+                source.push('"');
+                let token = Token::lexer(&source).next();
+                let_assert!(Some(Ok(Token::String(bs))) = token);
+                check!(bs.as_ref() == $target);
+            };
+        }
+
+        verify_string!(r#"apple"# as "apple");
+        verify_string!(r#"\xea;\n\"\a"# as "\u{ea}\n\"\u{7}");
     }
 }

@@ -27,7 +27,7 @@ fn make_block<'a>(
 }
 
 fn main() {
-    let src = r"|a\na| a #!A";
+    let src = r"|a\na|    a #!A";
     let idx = LineIndex::new(src);
     let tokens = Token::lexer(src);
 
@@ -48,7 +48,7 @@ fn main() {
         .into_iter()
         .filter_map(|blk| Some(blk?.map_code(|c| CodeWidth::new(c, c.len()))))
     {
-        println!("{}{}", block.prologue(), "[main.scm]");
+        println!("{}[main.scm]", block.prologue());
         print!("{block}");
         println!("{}", block.epilogue());
     }

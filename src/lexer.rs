@@ -129,18 +129,17 @@ pub enum Token {
     #[regex(r"(?i)#u8\(")]
     StartBytevector,
     #[regex(r#"[a-zA-Z!$%&*/:<=>?^_~][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*"#, |l| Box::from(l.slice()))]
-    #[regex(
-        r#"\|([^|\\]|(?i:\\x[0-9a-f]+;?)|\\[abtnr|])*\|"#,
-        priority = 2,
-        callback = process_piped_ident
-    )]
-    #[regex(r#"\|([^|\\]|(?i:\\x[0-9a-f]+;?)|\\[ABNTR])*\|"#, |l| Err(LexerError::MalformedIdent(Box::from(l.slice()))))]
+    #[regex(r#"\|([^|\\]|(?i:\\x[0-9a-f]+;?)|\\[abtnr|])*\|"#, process_piped_ident)]
+    #[regex(r#"\|([^|\\]|(?i:\\x[0-9a-f]+;?)|\\[ABNTR])*\|"#, priority = 2, callback = |l| Err(LexerError::MalformedIdent(Box::from(l.slice()))))]
     #[token("+", |l| Box::from(l.slice()))]
     #[token("-", |l| Box::from(l.slice()))]
     #[regex(r"[-+][a-zA-Z!$%&*/:<=>?^_~+\-@][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*", |l| Box::from(l.slice()))]
     #[regex(r"[-+]\.[a-zA-Z!$%&*/:<=>?^_~+\-.@][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*", |l| Box::from(l.slice()))]
     #[regex(r"\.[a-zA-Z!$%&*/:<=>?^_~+\-.@][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*", |l| Box::from(l.slice()))]
     Identifier(Box<str>),
+    #[regex("(?i)#t(rue)?", |_| true)]
+    #[regex("(?i)#f(alse)?", |_| false)]
+    Boolean(bool),
 }
 
 #[cfg(test)]
@@ -199,5 +198,17 @@ mod tests {
         check!(Token::lexer("#u8(").next() == Token::lexer("#U8(").next());
         check!(Token::lexer("#!fold-case").next() == Token::lexer("#!FOLD-CASE").next());
         check!(Token::lexer("#!no-fold-case").next() == Token::lexer("#!NO-FOLD-CASE").next());
+        check!(Token::lexer("#t").next() == Token::lexer("#T").next());
+        check!(Token::lexer("#true").next() == Token::lexer("#TrUe").next());
+        check!(Token::lexer("#f").next() == Token::lexer("#F").next());
+        check!(Token::lexer("#false").next() == Token::lexer("#FaLsE").next());
+    }
+
+    #[test]
+    fn test_boolean() {
+        assert!(Token::lexer("#t").next() == Some(Ok(Token::Boolean(true))));
+        assert!(Token::lexer("#true").next() == Some(Ok(Token::Boolean(true))));
+        assert!(Token::lexer("#f").next() == Some(Ok(Token::Boolean(false))));
+        assert!(Token::lexer("#false").next() == Some(Ok(Token::Boolean(false))));
     }
 }

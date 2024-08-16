@@ -1,17 +1,25 @@
+[workspace]
+resolver = "2"
+members = [".", "magus_repl"]
+
+[workspace.package]
+version = "0.1.0"
+rust-version = "1.80"
+
 [package]
 name = "magus"
-version = "0.1.0"
+version.workspace = true
+rust-version.workspace = true
 edition = "2021"
 description = "R7RS-scheme implementation in Rust using gc-arena"
 
 [dependencies]
-codesnake = "0.2.1"
 gc-arena = { git = "https://github.com/kyren/gc-arena", rev = "5a7534b883b703f23cfb8c3cfdf033460aa77ea9" }
 lasso = "0.7.2"
 logos = "0.14.1"
+regex = "1.10.6"
 rowan = "0.15.15"
 thiserror = "1.0.63"
-yansi = { version = "1.0.1", features = ["detect-tty", "detect-env"] }
 
 [dev-dependencies]
 assert2 = "0.3.14"

@@ -1,0 +1,12 @@
+[package]
+name = "magus_repl"
+edition = "2021"
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow = "1.0.86"
+codesnake = "0.2.1"
+magus = { version = "0.1.0", path = ".." }
+rustyline = "14.0.0"
+yansi = { version = "1.0.1", features = ["detect-env", "detect-tty"] }

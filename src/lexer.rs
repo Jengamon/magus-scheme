@@ -1,3 +1,5 @@
+use std::{collections::HashMap, sync::LazyLock};
+
 pub use logos::{Lexer, Logos};
 
 fn process_piped_ident(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError> {
@@ -52,9 +54,7 @@ fn process_piped_ident(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError>
                     built_ident.push('\r');
                     _ = chars.next(); // consume
                 }
-                Some(_) | None => unreachable!(
-                    "Logos lexer should validate the general shape of piped identfiers"
-                ),
+                Some(_) | None => Err(LexerError::MalformedIdent(Box::from(lexer.slice())))?,
             },
             // Stop consuming at the ending pipe
             '|' => break,
@@ -64,6 +64,51 @@ fn process_piped_ident(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError>
 
     assert!(chars.next().is_none());
     Ok(Box::from(built_ident.as_str()))
+}
+
+fn process_named_character(lexer: &mut Lexer<Token>) -> Result<char, LexerError> {
+    static NAMED_MAP: LazyLock<HashMap<&str, char>> = LazyLock::new(|| {
+        let mut named_map = HashMap::new();
+        named_map.insert("alarm", '\x07');
+        named_map.insert("backspace", '\x08');
+        named_map.insert("delete", '\x7f');
+        named_map.insert("escape", '\x1b');
+        named_map.insert("newline", '\n');
+        named_map.insert("null", '\x00');
+        named_map.insert("return", '\r');
+        named_map.insert("tab", '\t');
+        // Non-standard codes
+        named_map.insert("lambda", '\u{03bb}');
+        named_map.insert("Lambda", '\u{039b}');
+        named_map
+    });
+
+    // skip the #\ at the front
+    let name = &lexer.slice()[2..];
+    NAMED_MAP
+        .get(name)
+        .copied()
+        .ok_or_else(|| LexerError::InvalidCharacterName(Box::from(name)))
+}
+
+fn process_hex_character(lexer: &mut Lexer<Token>) -> Result<char, LexerError> {
+    let mut value = 0u32;
+
+    // Skip the #\x
+    for chr in lexer.slice().chars().skip(3) {
+        match chr {
+            c @ ('0'..='9' | 'a'..='f' | 'A'..='F') => {
+                value = value
+                    .checked_mul(16)
+                    .ok_or(LexerError::CharacterTooBig)?
+                    .checked_add(c.to_digit(16).unwrap())
+                    .ok_or(LexerError::CharacterTooBig)?;
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    char::from_u32(value).ok_or(LexerError::InvalidCodepoint(value))
 }
 
 #[derive(thiserror::Error, Debug, PartialEq, Clone, Default)]
@@ -79,6 +124,8 @@ pub enum LexerError {
     InvalidCodepoint(u32),
     #[error("invalid directive: {0}")]
     InvalidDirective(Box<str>),
+    #[error("invalid character name: {0}")]
+    InvalidCharacterName(Box<str>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -129,8 +176,7 @@ pub enum Token {
     #[regex(r"(?i)#u8\(")]
     StartBytevector,
     #[regex(r#"[a-zA-Z!$%&*/:<=>?^_~][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*"#, |l| Box::from(l.slice()))]
-    #[regex(r#"\|([^|\\]|(?i:\\x[0-9a-f]+;?)|\\[abtnr|])*\|"#, process_piped_ident)]
-    #[regex(r#"\|([^|\\]|(?i:\\x[0-9a-f]+;?)|\\[ABNTR])*\|"#, priority = 2, callback = |l| Err(LexerError::MalformedIdent(Box::from(l.slice()))))]
+    #[regex(r#"\|[^|]*\|"#, process_piped_ident)]
     #[token("+", |l| Box::from(l.slice()))]
     #[token("-", |l| Box::from(l.slice()))]
     #[regex(r"[-+][a-zA-Z!$%&*/:<=>?^_~+\-@][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*", |l| Box::from(l.slice()))]
@@ -140,6 +186,10 @@ pub enum Token {
     #[regex("(?i)#t(rue)?", |_| true)]
     #[regex("(?i)#f(alse)?", |_| false)]
     Boolean(bool),
+    #[regex(r"#\\.", callback = |l| l.slice().chars().nth(2).unwrap())] // Regex FTW
+    #[regex(r"#\\[a-zA-Z]+", priority = 2, callback =  process_named_character)]
+    #[regex(r"#\\x[0-9a-fA-F]+", callback = process_hex_character)]
+    Character(char),
 }
 
 #[cfg(test)]
@@ -206,9 +256,18 @@ mod tests {
 
     #[test]
     fn test_boolean() {
-        assert!(Token::lexer("#t").next() == Some(Ok(Token::Boolean(true))));
-        assert!(Token::lexer("#true").next() == Some(Ok(Token::Boolean(true))));
-        assert!(Token::lexer("#f").next() == Some(Ok(Token::Boolean(false))));
-        assert!(Token::lexer("#false").next() == Some(Ok(Token::Boolean(false))));
+        check!(Token::lexer("#t").next() == Some(Ok(Token::Boolean(true))));
+        check!(Token::lexer("#true").next() == Some(Ok(Token::Boolean(true))));
+        check!(Token::lexer("#f").next() == Some(Ok(Token::Boolean(false))));
+        check!(Token::lexer("#false").next() == Some(Ok(Token::Boolean(false))));
+    }
+
+    #[test]
+    fn test_character() {
+        check!(Token::lexer(r"#\a").next() == Some(Ok(Token::Character('a'))));
+        check!(Token::lexer(r"#\alarm").next() == Some(Ok(Token::Character('\u{7}'))));
+        check!(Token::lexer(r"#\newline").next() == Some(Ok(Token::Character('\n'))));
+        check!(Token::lexer(r"#\0").next() == Some(Ok(Token::Character('0'))));
+        check!(Token::lexer(r"#\xa").next() == Some(Ok(Token::Character('\n'))));
     }
 }

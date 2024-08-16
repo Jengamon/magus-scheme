@@ -19,6 +19,7 @@ fn make_block<'a>(
                 })
                 .with_style(move |s| match tok {
                     Ok(Token::Identifier(_)) => s.blue().to_string(),
+                    Ok(Token::Character(_)) => s.yellow().to_string(),
                     Ok(_) => s,
                     Err(_) => s.red().to_string(),
                 })
@@ -27,7 +28,7 @@ fn make_block<'a>(
 }
 
 fn main() {
-    let src = r"|a\na|    a #!A";
+    let src = r"|a\na||a\na\lambda|  #\lambda  a #!A";
     let idx = LineIndex::new(src);
     let tokens = Token::lexer(src);
 

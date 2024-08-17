@@ -14,7 +14,9 @@ fn process_piped_ident(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError>
         match chr {
             '\\' => match chars.peek() {
                 Some('x' | 'X') => {
-                    built_ident.push(read_hex_escape(&mut chars, || LexerError::MalformedIdent)?);
+                    built_ident.push(read_hex_escape(&mut chars, || {
+                        LexerError::MalformedIdentifier
+                    })?);
                 }
                 Some('a') => {
                     built_ident.push('\x07');
@@ -36,7 +38,7 @@ fn process_piped_ident(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError>
                     built_ident.push('\r');
                     _ = chars.next(); // consume
                 }
-                Some(_) | None => Err(LexerError::MalformedIdent)?,
+                Some(_) | None => Err(LexerError::MalformedIdentifier)?,
             },
             // Stop consuming at the ending pipe
             '|' => break,
@@ -584,7 +586,7 @@ pub enum LexerError {
     #[error("invalid token encountered")]
     Invalid,
     #[error("malformed identifier")]
-    MalformedIdent,
+    MalformedIdentifier,
     #[error("character literal too big")]
     CharacterTooBig,
     #[error("invalid Unicode codepoint: {0}")]
@@ -839,6 +841,8 @@ mod tests {
         test_valid!("|two words|" as "two words");
         test_valid!(r"|two\x20;words|" as "two words");
         test_valid!("the-word-recursion-has-many-meanings");
+        // My own
+        test_valid!(r"|λ\x3bb;|" as "λλ");
     }
 
     #[test]

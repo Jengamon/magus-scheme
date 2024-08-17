@@ -425,6 +425,42 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
                         _ => return Err(LexerError::MalformedNumber),
                     }
                 }
+                // read /, continue rational
+                State::ReadRational => match iter.peek().copied() {
+                    Some(c) if c.is_digit(radix) => {
+                        let _ = iter.next();
+                        if let Some(sn) = second_number_state {
+                            second_number_state = Some(
+                                sn.checked_mul(radix as u64)
+                                    .ok_or(LexerError::NumberTooBig)?
+                                    .checked_add(c.to_digit(radix).unwrap() as u64)
+                                    .ok_or(LexerError::NumberTooBig)?,
+                            );
+                        } else {
+                            second_number_state = Some(c.to_digit(radix).unwrap() as u64);
+                        }
+                        State::ReadRational
+                    }
+                    Some('+' | '-') | None if !is_imaginary && second_number_state.is_some() => {
+                        return Ok(ExactReal::Rational {
+                            numer: number_state.unwrap_or(0),
+                            denom: second_number_state.unwrap_or(0),
+                            is_neg: is_neg_state.unwrap_or(false),
+                        })
+                    }
+                    Some('i') if is_imaginary => State::FinishImaginaryRational,
+                    _ => return Err(LexerError::MalformedNumber),
+                },
+                State::FinishImaginaryRational => match iter.next() {
+                    Some('i') => {
+                        return Ok(ExactReal::Rational {
+                            numer: number_state.unwrap_or(0),
+                            denom: second_number_state.unwrap_or(0),
+                            is_neg: is_neg_state.unwrap_or(false),
+                        })
+                    }
+                    _ => return Err(LexerError::MalformedNumber),
+                },
                 // read [eE], read in the exponent (or jump straight to digits)
                 State::ReadExponent => {
                     assert!(radix == 10);
@@ -537,7 +573,6 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
                         _ => Err(LexerError::MalformedNumber),
                     };
                 }
-                s => todo!("unimplemented state {s:?}"),
             };
             s = ns;
         }
@@ -1101,7 +1136,7 @@ mod tests {
                 }
             }
             Ok(())
-        });
+        }).seed( 0x410c76a20000003e);
     }
 
     #[test]

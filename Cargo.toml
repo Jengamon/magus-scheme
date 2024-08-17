@@ -14,6 +14,7 @@ edition = "2021"
 description = "R7RS-scheme implementation in Rust using gc-arena"
 
 [dependencies]
+arbitrary = { version = "1", features = ["derive"] }
 gc-arena = { git = "https://github.com/kyren/gc-arena", rev = "5a7534b883b703f23cfb8c3cfdf033460aa77ea9" }
 lasso = "0.7.2"
 logos = { version = "0.14.1" }
@@ -21,4 +22,5 @@ rowan = "0.15.15"
 thiserror = "1.0.63"
 
 [dev-dependencies]
+arbtest = "0.3.1"
 assert2 = "0.3.14"

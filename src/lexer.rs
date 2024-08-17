@@ -705,25 +705,30 @@ pub enum Token {
     // decimal
     // - decimal real
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-](inf|nan).0", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+e[+-]?[0-9]+", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
     // - decimal complex
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-](inf|nan).0i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-]\.[0-9]+(e[+-]?[0-9]+)i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+[+-](inf|nan).0i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+[+-][0-9]*i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+[+-][0-9]+e[+-]?[0-9]+i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+[+-]\.[0-9]+(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-](inf|nan).0i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-]\.[0-9]+(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-](inf|nan).0i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-]\.[0-9]+(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
@@ -775,6 +780,7 @@ mod tests {
     use crate::lexer::SchemeNumber;
 
     use super::Token;
+    use arbtest::arbtest;
     use assert2::{assert, check, let_assert};
 
     #[test]
@@ -985,5 +991,19 @@ mod tests {
         verify_number!("42.4e-4" as SchemeNumber::real_decimal(false, 42, 4, true, 4));
         verify_number!(hex exact "-a0" as SchemeNumber::integer(true, 160));
         // todo more thorough tests
+    }
+
+    #[test]
+    fn test_number_arbtest_decimal() {
+        arbtest(|u| {
+            let number: SchemeNumber = u.arbitrary()?;
+            let decimal = number.display(10);
+            let_assert!(Some(sdecimal) = decimal);
+            assert!(
+                Token::lexer(&sdecimal).next() == Some(Ok(Token::Number(number))),
+                "{number:?} does not roundtrip"
+            );
+            Ok(())
+        });
     }
 }

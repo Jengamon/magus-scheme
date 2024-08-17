@@ -10,6 +10,16 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  arbtest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v1
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+      - name: Run arbtests
+        run: cargo nextest r -E "test(arbtest)" --verbose --success-output=final
   build:
     runs-on: ubuntu-latest
 

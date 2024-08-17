@@ -567,10 +567,10 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
         match chars.peek() {
             Some('+' | '-') => {
                 let im_part = read_number_part(&mut chars, radix, true)?;
-                Ok(SchemeNumber::InexactComplex(
-                    real_part.inexact(),
-                    im_part.inexact(),
-                ))
+                Ok(SchemeNumber::InexactComplex {
+                    real: real_part.inexact(),
+                    imaginary: im_part.inexact(),
+                })
             }
             Some(_) => Err(LexerError::MalformedNumber)?,
             None => Ok(SchemeNumber::Inexact(real_part.inexact())),
@@ -716,6 +716,11 @@ pub enum Token {
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-]\.[0-9]+(e[+-]?[0-9]+)i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-](inf|nan).0[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-](inf|nan).0[+-](inf|nan).0i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-](inf|nan).0[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-](inf|nan).0[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-](inf|nan).0[+-]\.[0-9]+(e[+-]?[0-9]+)i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+[+-](inf|nan).0i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+[+-][0-9]*i", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
@@ -734,24 +739,34 @@ pub enum Token {
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-]\.[0-9]+(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
     // - inexact decimal real
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-](inf|nan).0", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+/[0-9]+", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+e[+-]?[0-9]+", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
     // - inexact decimal complex
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+[+-](inf|nan).0i", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+[+-]\.[0-9]+(e[+-]?[0-9]+)i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-](inf|nan).0[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-](inf|nan).0[+-](inf|nan).0i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-](inf|nan).0[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-](inf|nan).0[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-](inf|nan).0[+-]\.[0-9]+(e[+-]?[0-9]+)i", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+/[0-9]+[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+/[0-9]+[+-](inf|nan).0i", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+/[0-9]+[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+/[0-9]+[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+/[0-9]+[+-]\.[0-9]+(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-](inf|nan).0i", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-]\.[0-9]+(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-](inf|nan).0i", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-]\.[0-9]+(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
@@ -777,7 +792,7 @@ impl Token {
 
 #[cfg(test)]
 mod tests {
-    use crate::lexer::SchemeNumber;
+    use crate::{lexer::SchemeNumber, ExactReal};
 
     use super::Token;
     use arbtest::arbtest;
@@ -996,13 +1011,104 @@ mod tests {
     #[test]
     fn test_number_arbtest_decimal() {
         arbtest(|u| {
-            let number: SchemeNumber = u.arbitrary()?;
-            let decimal = number.display(10);
-            let_assert!(Some(sdecimal) = decimal);
-            assert!(
-                Token::lexer(&sdecimal).next() == Some(Ok(Token::Number(number))),
-                "{number:?} does not roundtrip"
+            let number: ExactReal = u.arbitrary()?;
+            // Shortcircuit out of rationals (unimplemented)
+            if matches!(number, ExactReal::Rational { .. }) {
+                return Ok(());
+            }
+            let decimal = number.display(10).unwrap();
+            check!(
+                Token::lexer(&decimal).next()
+                    == Some(Ok(Token::Number(SchemeNumber::Exact(number)))),
+                "{number:?} `{decimal}` does not roundtrip"
             );
+            let inexact_decimal = format!("#i#d{}", number.display(10).unwrap());
+            // might be NaN
+            if matches!(number, ExactReal::Nan { .. }) {
+                let_assert!(
+                    Some(Ok(Token::Number(SchemeNumber::Inexact(inum)))) =
+                        Token::lexer(&inexact_decimal).next()
+                );
+                check!(inum.is_nan());
+            } else {
+                check!(
+                    Token::lexer(&inexact_decimal).next()
+                        == Some(Ok(Token::Number(SchemeNumber::Inexact(number.inexact())))),
+                    "inexact {number:?} `{inexact_decimal}` does not roundtrip"
+                );
+            }
+            let im: ExactReal = u.arbitrary()?;
+            // Shortcircuit out of rationals (unimplemented)
+            if matches!(im, ExactReal::Rational { .. }) {
+                return Ok(());
+            }
+            let im_decimal = format!(
+                "{}{}{}i",
+                number.display(10).unwrap(),
+                if im.is_numeric() && !im.is_neg() {
+                    "+"
+                } else {
+                    ""
+                },
+                im.display(10).unwrap(),
+            );
+            check!(
+                Token::lexer(&im_decimal).next()
+                    == Some(Ok(Token::Number(SchemeNumber::ExactComplex {
+                        real: number,
+                        imaginary: im,
+                    }))),
+                "(real {number:?}, im {im:?}) `{im_decimal}` does not roundtrip"
+            );
+            let inexact_im_decimal = format!(
+                "#d#i{}{}{}i",
+                number.display(10).unwrap(),
+                if im.is_numeric() && !im.is_neg() {
+                    "+"
+                } else {
+                    ""
+                },
+                im.display(10).unwrap(),
+            );
+            match (number, im) {
+                (ExactReal::Nan { .. }, ExactReal::Nan { .. }) => {
+                    let_assert!(
+                        Some(Ok(Token::Number(SchemeNumber::InexactComplex {
+                            real,
+                            imaginary
+                        }))) = Token::lexer(&inexact_im_decimal).next()
+                    );
+                    check!(real.is_nan() && imaginary.is_nan());
+                }
+                (ExactReal::Nan { .. }, _) => {
+                    let_assert!(
+                        Some(Ok(Token::Number(SchemeNumber::InexactComplex {
+                            real,
+                            imaginary
+                        }))) = Token::lexer(&inexact_im_decimal).next()
+                    );
+                    check!(real.is_nan() && imaginary == im.inexact());
+                }
+                (_, ExactReal::Nan { .. }) => {
+                    let_assert!(
+                        Some(Ok(Token::Number(SchemeNumber::InexactComplex {
+                            real,
+                            imaginary
+                        }))) = Token::lexer(&inexact_im_decimal).next()
+                    );
+                    check!(real == number.inexact() && imaginary.is_nan());
+                }
+                _ => {
+                    check!(
+                        Token::lexer(&inexact_im_decimal).next()
+                            == Some(Ok(Token::Number(SchemeNumber::InexactComplex {
+                                real: number.inexact(),
+                                imaginary: im.inexact(),
+                            }))),
+                        "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip"
+                    );
+                }
+            }
             Ok(())
         });
     }

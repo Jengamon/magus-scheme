@@ -21,4 +21,4 @@ jobs:
       - name: Build for wasm
         run: just build-wasm
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --verbose -- --show-output

@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::LazyLock};
 
+use arbitrary::Arbitrary;
 pub use logos::Span;
 use logos::{Lexer, Logos};
 
@@ -639,14 +640,14 @@ pub enum LexerError {
     NumberTooBig,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Arbitrary)]
 pub enum Directive {
     FoldCase,
     NoFoldCase,
 }
 
 /// Tokens are lexed from some source, and can arbitrarily borrow from it.
-#[derive(Debug, Clone, PartialEq, Logos)]
+#[derive(Debug, Clone, PartialEq, Logos, Arbitrary)]
 #[logos(error = LexerError)]
 pub enum Token {
     #[regex("[ \t]+")]

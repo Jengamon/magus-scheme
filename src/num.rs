@@ -19,6 +19,22 @@ impl SchemeNumber {
     pub fn integer(is_neg: bool, value: u64) -> Self {
         Self::ExactReal(ExactReal::Integer { is_neg, value })
     }
+
+    pub fn real_decimal(
+        is_neg: bool,
+        base: u64,
+        post_dot: u64,
+        exponent_neg: bool,
+        exponent: u64,
+    ) -> Self {
+        Self::ExactReal(ExactReal::Decimal {
+            base,
+            post_dot,
+            exponent,
+            exponent_neg,
+            is_neg,
+        })
+    }
 }
 
 /// Possible values to exactly represent real numbers

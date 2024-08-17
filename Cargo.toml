@@ -17,7 +17,6 @@ description = "R7RS-scheme implementation in Rust using gc-arena"
 gc-arena = { git = "https://github.com/kyren/gc-arena", rev = "5a7534b883b703f23cfb8c3cfdf033460aa77ea9" }
 lasso = "0.7.2"
 logos = { version = "0.14.1" }
-regex = "1.10.6"
 rowan = "0.15.15"
 thiserror = "1.0.63"
 

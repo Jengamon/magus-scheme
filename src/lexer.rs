@@ -2,7 +2,6 @@ use std::{collections::HashMap, sync::LazyLock};
 
 pub use logos::Span;
 use logos::{Lexer, Logos};
-use regex::Regex;
 
 use crate::{ExactReal, SchemeNumber};
 
@@ -185,11 +184,7 @@ fn process_string(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError> {
     Ok(Box::from(string.as_str()))
 }
 
-fn read_number(
-    lexer: &mut Lexer<Token>,
-    radix: u32,
-    is_exact: bool,
-) -> Result<SchemeNumber, LexerError> {
+fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, LexerError> {
     let mut chars = lexer.slice().chars().peekable();
 
     // Exact can look like #!#e, #e#! or #! where ! is the base character [boxd] (or not present in case of decimal)
@@ -251,6 +246,7 @@ fn read_number(
             ReadDecipoint,
             ReadExponentSign,
             ReadExponent,
+            FinishImaginaryDecimal,
             // on inf.0
             OnI,
             OnIn,
@@ -271,7 +267,7 @@ fn read_number(
         let mut exponent_sign_state = None::<bool>;
         let mut is_neg_state = None::<bool>;
         loop {
-            dbg!(&s);
+            eprintln!("State ({s:?}) (im? {is_imaginary}) ({number_state:?} {second_number_state:?} {third_number_state:?} {exponent_sign_state:?} {is_neg_state:?})");
             let ns = match s {
                 // Start
                 State::Start => match iter.next() {
@@ -283,7 +279,7 @@ fn read_number(
                         is_neg_state = Some(true);
                         State::ReadSign
                     }
-                    Some('.') if radix == 10 => todo!("decimal point"),
+                    Some('.') if radix == 10 => State::ReadDecipoint,
                     Some(c) if c.is_digit(radix) => {
                         number_state = Some(c.to_digit(radix).unwrap() as u64);
                         State::ReadDigit
@@ -294,6 +290,7 @@ fn read_number(
                 State::ReadSign => match iter.next() {
                     Some('i') => State::OnI,
                     Some('n') => State::OnN,
+                    Some('.') if radix == 10 => State::ReadDecipoint,
                     Some(c) if c.is_digit(radix) => {
                         number_state = Some(c.to_digit(radix).unwrap() as u64);
                         State::ReadDigit
@@ -378,9 +375,18 @@ fn read_number(
                 State::ReadDigit => {
                     assert!(number_state.is_some());
                     match iter.peek().copied() {
-                        Some('.') if radix == 10 => todo!("decimal point"),
-                        Some('e' | 'E') if radix == 10 => todo!("decimal exponent"),
-                        Some('/') => todo!("rational"),
+                        Some('.') if radix == 10 => {
+                            let _ = iter.next();
+                            State::ReadDecipoint
+                        }
+                        Some('e' | 'E') if radix == 10 => {
+                            let _ = iter.next();
+                            State::ReadExponent
+                        }
+                        Some('/') => {
+                            let _ = iter.next();
+                            todo!("rational")
+                        }
                         Some('+' | '-') | None => {
                             // What follows must be an imaginary number, so break successfully if we are a real number
                             return if !is_imaginary {
@@ -415,6 +421,118 @@ fn read_number(
                         }
                         _ => return Err(LexerError::MalformedNumber),
                     }
+                }
+                // read [eE], read in the exponent (or jump straight to digits)
+                State::ReadExponent => {
+                    assert!(radix == 10);
+                    match iter.next() {
+                        Some('+') => {
+                            exponent_sign_state = Some(false);
+                            State::ReadExponentSign
+                        }
+                        Some('-') => {
+                            exponent_sign_state = Some(true);
+                            State::ReadExponentSign
+                        }
+                        Some(c @ '0'..='9') => {
+                            third_number_state = Some(c.to_digit(10).unwrap() as u64);
+                            State::ReadExponentSign
+                        }
+                        _ => return Err(LexerError::MalformedNumber),
+                    }
+                }
+                // read ., read the postdot and/or exponent
+                State::ReadDecipoint => {
+                    assert!(radix == 10);
+                    match iter.peek().copied() {
+                        // to allow writing NN[.]e10, but not .e10 (.1e10 is allowed)
+                        Some('e' | 'E')
+                            if number_state.is_some() || second_number_state.is_some() =>
+                        {
+                            let _ = iter.next();
+                            State::ReadExponent
+                        }
+                        Some(c @ '0'..='9') => {
+                            let _ = iter.next();
+                            if let Some(sn) = second_number_state {
+                                second_number_state = Some(
+                                    sn.checked_mul(10)
+                                        .ok_or(LexerError::NumberTooBig)?
+                                        .checked_add(c.to_digit(radix).unwrap() as u64)
+                                        .ok_or(LexerError::NumberTooBig)?,
+                                );
+                            } else {
+                                second_number_state = Some(c.to_digit(radix).unwrap() as u64);
+                            }
+                            State::ReadDecipoint
+                        }
+                        Some('+' | '-') if !is_imaginary => {
+                            // Next is an imaginary number
+                            return Ok(ExactReal::Decimal {
+                                base: number_state.unwrap_or(0),
+                                post_dot: second_number_state.unwrap_or(0),
+                                exponent: 0,
+                                exponent_neg: false,
+                                is_neg: is_neg_state.unwrap_or(false),
+                            });
+                        }
+                        None if !is_imaginary => {
+                            // Number ended
+                            return Ok(ExactReal::Decimal {
+                                base: number_state.unwrap_or(0),
+                                post_dot: second_number_state.unwrap_or(0),
+                                exponent: 0,
+                                exponent_neg: false,
+                                is_neg: is_neg_state.unwrap_or(false),
+                            });
+                        }
+                        Some('i') => State::FinishImaginaryDecimal,
+                        _ => return Err(LexerError::MalformedNumber),
+                    }
+                }
+                // get trailing digits of a decimal
+                State::ReadExponentSign => {
+                    assert!(radix == 10);
+                    match iter.peek().copied() {
+                        Some(c @ '0'..='9') => {
+                            let _ = iter.next();
+                            if let Some(tn) = third_number_state {
+                                third_number_state = Some(
+                                    tn.checked_mul(10)
+                                        .ok_or(LexerError::NumberTooBig)?
+                                        .checked_add(c.to_digit(radix).unwrap() as u64)
+                                        .ok_or(LexerError::NumberTooBig)?,
+                                );
+                            } else {
+                                third_number_state = Some(c.to_digit(radix).unwrap() as u64);
+                            }
+                            State::ReadExponentSign
+                        }
+                        Some('+' | '-') | None if !is_imaginary => {
+                            return Ok(ExactReal::Decimal {
+                                base: number_state.unwrap_or(0),
+                                post_dot: second_number_state.unwrap_or(0),
+                                exponent: third_number_state.unwrap_or(0),
+                                exponent_neg: exponent_sign_state.unwrap_or(false),
+                                is_neg: is_neg_state.unwrap_or(false),
+                            })
+                        }
+                        Some('i') if is_imaginary => State::FinishImaginaryDecimal,
+                        _ => return Err(LexerError::MalformedNumber),
+                    }
+                }
+                State::FinishImaginaryDecimal => {
+                    assert!(is_imaginary && radix == 10);
+                    return match iter.next() {
+                        Some('i') => Ok(ExactReal::Decimal {
+                            base: number_state.unwrap_or(0),
+                            post_dot: second_number_state.unwrap_or(0),
+                            exponent: third_number_state.unwrap_or(0),
+                            exponent_neg: exponent_sign_state.unwrap_or(false),
+                            is_neg: is_neg_state.unwrap_or(false),
+                        }),
+                        _ => Err(LexerError::MalformedNumber),
+                    };
                 }
                 s => todo!("unimplemented state {s:?}"),
             };
@@ -541,16 +659,62 @@ pub enum Token {
     // Same as all the others, the lexer here is a bit more permissive to allow for better errors
     // I wish i could template these regexes... w/e
     // binary
-    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?", |l| read_number(l, 2, true))]
-    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-](inf|nan).0", |l| read_number(l, 2, true))]
-    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?[+-][01]*(/[01]+)?i", |l| read_number(l, 2, true))]
-    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-](inf|nan).0[+-][01]*(/[01]+)?i", |l| read_number(l, 2, true))]
-    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?[+-](inf|nan).0i", |l| read_number(l, 2, true))]
-    #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?", |l| read_number(l, 2, false))]
-    #[regex(r"(?i)(#i#b|#b#i)[+-](inf|nan).0", |l| read_number(l, 2, false))]
-    #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?[+-][01]*(/[01]+)?i", |l| read_number(l, 2, false))]
-    #[regex(r"(?i)(#i#b|#b#i)[+-](inf|nan).0[+-][01]*(/[01]+)?i", |l| read_number(l, 2, false))]
-    #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?[+-](inf|nan).0i", |l| read_number(l, 2, false))]
+    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?", |l| read_number(l, 2))]
+    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-](inf|nan).0", |l| read_number(l, 2))]
+    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?[+-][01]*(/[01]+)?i", |l| read_number(l, 2))]
+    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-](inf|nan).0[+-][01]*(/[01]+)?i", |l| read_number(l, 2))]
+    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?[+-](inf|nan).0i", |l| read_number(l, 2))]
+    #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?", |l| read_number(l, 2))]
+    #[regex(r"(?i)(#i#b|#b#i)[+-](inf|nan).0", |l| read_number(l, 2))]
+    #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?[+-][01]*(/[01]+)?i", |l| read_number(l, 2))]
+    #[regex(r"(?i)(#i#b|#b#i)[+-](inf|nan).0[+-][01]*(/[01]+)?i", |l| read_number(l, 2))]
+    #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?[+-](inf|nan).0i", |l| read_number(l, 2))]
+    // octal
+    // hex
+    // decimal
+    // - decimal real
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+e[+-]?[0-9]+", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-]\.[0-9]+(e[+-]?[0-9]+)i", |l| read_number(l, 10))]
+    // - decimal complex
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+[+-][0-9]+e[+-]?[0-9]+i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+[+-]\.[0-9]+(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-]\.[0-9]+(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-]\.[0-9]+(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
+    // - inexact decimal real
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+/[0-9]+", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+e[+-]?[0-9]+", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
+    // - inexact decimal complex
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+/[0-9]+[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+/[0-9]+[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+/[0-9]+[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+/[0-9]+[+-]\.[0-9]+(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?[+-]\.[0-9]+(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]*i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+/[0-9]+i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-]\.[0-9]+(e[+-]?[0-9]+)?i", |l| read_number(l, 10))]
     // FIXME rewrite these into many smaller regexes because this is just unmaintainable.
     // #[regex(r"(?i)((#e)?#b|#b(#e)?)([+-]?[01]+(/[01]+)?([+-]([01]+(/[01]+)?)?i)?|[-+](inf|nan).0i)?", |l| read_number(l, 2, true))]
     // #[regex(r"(?i)((#e)?#o|#o(#e)?)([+-]?[0-7]+(/[0-7]+)?([+-]([0-7]+(/[0-7]+)?)?i)?|[-+](inf|nan).0i)?", |l| read_number(l, 8, true))]
@@ -783,6 +947,7 @@ mod tests {
         verify_number!(binary exact "0" as SchemeNumber::integer(false, 0));
         verify_number!(exact binary "-0" as SchemeNumber::integer(true, 0));
         verify_number!(binary "110" as SchemeNumber::integer(false, 6));
-        verify_number!(hex exact "-a0" as SchemeNumber::integer(true, 160));
+        verify_number!("42.4e-4" as SchemeNumber::real_decimal(false, 42, 4, true, 4));
+        //verify_number!(hex exact "-a0" as SchemeNumber::integer(true, 160));
     }
 }

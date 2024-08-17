@@ -181,7 +181,7 @@ impl ExactReal {
                 exponent,
                 exponent_neg,
                 is_neg,
-            } => {
+            } if radix == 10 => {
                 if is_neg {
                     output.push('-');
                 }
@@ -194,6 +194,7 @@ impl ExactReal {
                 }
                 output.push_str(&Self::to_string_radix(exponent, radix)?);
             }
+            ExactReal::Decimal { .. } => return None,
         }
         Some(Box::from(output.as_str()))
     }

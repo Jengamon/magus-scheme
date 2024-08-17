@@ -224,20 +224,6 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
         Err(LexerError::MalformedNumber)?
     }
 
-    // fn read_sign(chars: &mut std::iter::Peekable<impl Iterator<Item = char>>) -> bool {
-    //     match chars.peek() {
-    //         Some('+') => {
-    //             _ = chars.next();
-    //             false
-    //         }
-    //         Some('-') => {
-    //             _ = chars.next();
-    //             true
-    //         }
-    //         _ => false,
-    //     }
-    // }
-
     fn read_number_part(
         iter: &mut std::iter::Peekable<impl Iterator<Item = char>>,
         radix: u32,
@@ -275,7 +261,7 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
         let mut exponent_sign_state = None::<bool>;
         let mut is_neg_state = None::<bool>;
         loop {
-            eprintln!("State ({s:?}) (im? {is_imaginary}) ({number_state:?} {second_number_state:?} {third_number_state:?} {exponent_sign_state:?} {is_neg_state:?})");
+            // eprintln!("State ({s:?}) (im? {is_imaginary}) ({number_state:?} {second_number_state:?} {third_number_state:?} {exponent_sign_state:?} {is_neg_state:?})");
             let ns = match s {
                 // Start
                 State::Start => match iter.next() {

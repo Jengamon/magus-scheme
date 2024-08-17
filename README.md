@@ -25,7 +25,7 @@ that can't be (nested comments, datum, datum comments, bytevectors, vectors) (an
 
 This forms the GAST which is just s-expressions, (byte)vectors, and nested items. (these should map to a backing CST from `rowan`).
 
-A World defines *all* modules that can possibly exist. A script is only allowed to import modules from its World.
+A World defines *all* modules that can possibly exist. A script is only allowed to import libraries defined by modules from its World.
 
 The parser then reads the GAST (which can possibly contain macros which define how items in the
 GAST should be parsed) from a specified module of a World to produce AST that can be executed.

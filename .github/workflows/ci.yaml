@@ -28,6 +28,8 @@ jobs:
       - uses: extractions/setup-just@v1
       - name: Install nextest
         uses: taiki-e/install-action@nextest
+      - name: Install icu_datagen
+        uses: taiki-e/install-action@icu_datagen
       - name: Add WASM target
         run: rustup target add wasm32-unknown-unknown
       - name: Build for wasm

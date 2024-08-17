@@ -1,20 +1,19 @@
 //! A World defines all modules that a R7RS script is allowed to reference, whether it is implemented as Scheme,
 //! or natively
 
-// These interner should be multi-thread safe
 use core::fmt;
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
-use crate::general_parser::GAst;
+use crate::general_parser::Module;
 
 // QUESTION should the *entire* world be multi-thread safe?
 // It *could* probably be, as there is no state to be shared...
 // I think try Arc, and if it becomes a problem, think through it then.
 #[derive(Hash, Debug, Clone, PartialEq, Eq)]
-struct InternalLibraryName(Arc<[lasso::Spur]>);
+struct InternalLibraryName(Box<[lasso::Spur]>);
 
 #[derive(Hash, Debug, Clone)]
-pub struct LibraryName(Arc<[Box<str>]>);
+pub struct LibraryName(Box<[Box<str>]>);
 
 impl LibraryName {
     pub fn name(&self) -> &[Box<str>] {
@@ -31,8 +30,6 @@ impl fmt::Display for LibraryName {
             // r"[-+][a-zA-Z!$%&*/:<=>?^_~+\-@][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*"
             // r"[-+]\.[a-zA-Z!$%&*/:<=>?^_~+\-.@][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*"
             // r"\.[a-zA-Z!$%&*/:<=>?^_~+\-.@][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*"
-            // TODO This should not panic as we only have 1 interner per world, and LibraryName
-            // should never leave that world, so all Spur's a particular world references should be valid in that world.
             if name.chars().enumerate().all(|(idx, c)| {
                 if idx == 0 {
                     c.is_ascii_alphabetic() || "!$%&*/:<=>?^_~".contains(c)
@@ -58,19 +55,10 @@ impl<T: IntoIterator<Item = impl AsRef<str>>> From<T> for LibraryName {
     }
 }
 
-#[derive(Debug)]
-pub enum Loaded {
-    Source {
-        // Did our source replace any source that already existed?
-        replaced: bool,
-    },
-    Library(LibraryName),
-}
-
 #[derive(Default)]
 pub struct World {
     /// interner
-    rodeo: lasso::ThreadedRodeo,
+    rodeo: lasso::Rodeo,
     /// scripts that can be requested for execution
     // TODO switch to hashbrown or ahash? might be faster maybe probably?
     // we use Spurs b/c we have the interner
@@ -88,7 +76,21 @@ pub enum LoadSourceError {
 }
 
 impl World {
-    fn library_name(&self, name: impl IntoIterator<Item = impl AsRef<str>>) -> InternalLibraryName {
+    fn library_name(
+        &self,
+        name: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> Option<InternalLibraryName> {
+        Some(InternalLibraryName(
+            name.into_iter()
+                .map(|s| self.rodeo.get(s.as_ref()))
+                .collect::<Option<_>>()?,
+        ))
+    }
+
+    fn library_name_mut(
+        &mut self,
+        name: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> InternalLibraryName {
         InternalLibraryName(
             name.into_iter()
                 .map(|s| self.rodeo.get_or_intern(s.as_ref()))
@@ -97,14 +99,14 @@ impl World {
     }
 
     pub fn library(&self, name: impl Into<LibraryName>) -> Option<&SchemeLibrary> {
-        self.libraries.get(&self.library_name(name.into().name()))
+        self.libraries.get(&self.library_name(name.into().name())?)
     }
 
     pub fn load_source(
         &mut self,
         filename: impl AsRef<str>,
-        ast: GAst,
-    ) -> Result<Loaded, LoadSourceError> {
+        module: Module,
+    ) -> Result<(), LoadSourceError> {
         // TODO Detect if a given GAst is a library or a program by checking:
         // Libraries are scheme files where the only top-level datum is a s-expr where the first element is "define-library"
         //
@@ -113,6 +115,9 @@ impl World {
         //
         // NOTE Nahh looking at the chibi-scheme codebase, it seems that libraries are their own separate files (*.sld)
         // that can (include ...) source files if they so please, so this will be our pattern too (except we'll just have *-lib.scm files)
+        //
+        // NOTE Actually we will allow multiple libraries within a module, but
+        // all libraries *must* precede any part of the program
         todo!()
     }
 }
@@ -126,14 +131,6 @@ pub enum SchemeLibrary {
     Scheme { filename: lasso::Spur, data: () },
     Native(()),
 }
-
-/// Modules correspond to a single source file that can be executed
-///
-/// A module cannot import from another module directly, but that other module must be defined as a library,
-/// which will let the world store it in such a way that its definitions can be imported
-// Native modules make 0 sense.
-#[derive(Debug)]
-pub struct Module(GAst);
 
 #[cfg(test)]
 mod tests {
@@ -154,18 +151,18 @@ mod tests {
 
     #[test]
     fn display_library_names() {
-        let world = World::default();
+        let mut world = World::default();
 
-        let ln: InternalLibraryName = world.library_name(["lib"]);
+        let ln: InternalLibraryName = world.library_name_mut(["lib"]);
         check!(ln.display(&world.rodeo).to_string() == "(lib)");
 
-        let ln: InternalLibraryName = world.library_name(["lib", "apple"]);
+        let ln: InternalLibraryName = world.library_name_mut(["lib", "apple"]);
         check!(ln.display(&world.rodeo).to_string() == "(lib apple)");
 
-        let ln: InternalLibraryName = world.library_name(["lib", "apple", "λ"]);
+        let ln: InternalLibraryName = world.library_name_mut(["lib", "apple", "λ"]);
         check!(ln.display(&world.rodeo).to_string() == "(lib apple |λ|)");
 
-        let ln: InternalLibraryName = world.library_name(["lib", "apple", "λ", "pip|e"]);
+        let ln: InternalLibraryName = world.library_name_mut(["lib", "apple", "λ", "pip|e"]);
         check!(ln.display(&world.rodeo).to_string() == r"(lib apple |λ| |pip\|e|)");
     }
 }

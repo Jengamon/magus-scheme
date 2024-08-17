@@ -1,5 +1,5 @@
 use codesnake::{Block, CodeWidth, Label, LineIndex};
-use magus::lexer::{LexerError, Span, Token};
+use magus::lexer::{LexerError, Span, SyntaxToken, Token};
 use rustyline::{history::MemHistory, Config};
 use yansi::Paint;
 
@@ -18,10 +18,10 @@ fn make_block<'a>(
                     text.red().to_string()
                 })
                 .with_style(move |s| match tok {
-                    Ok(Token::Identifier(_)) => s.blue().to_string(),
-                    Ok(Token::Character(_)) => s.yellow().to_string(),
-                    Ok(Token::String(_)) => s.cyan().to_string(),
-                    Ok(Token::Number(_)) => s.bright_magenta().to_string(),
+                    Ok(Token::Syntax(SyntaxToken::Identifier(_))) => s.blue().to_string(),
+                    Ok(Token::Syntax(SyntaxToken::Character(_))) => s.yellow().to_string(),
+                    Ok(Token::Syntax(SyntaxToken::String(_))) => s.cyan().to_string(),
+                    Ok(Token::Syntax(SyntaxToken::Number(_))) => s.bright_magenta().to_string(),
                     Ok(_) => s,
                     Err(_) => s.red().to_string(),
                 })
@@ -42,9 +42,11 @@ fn main() -> anyhow::Result<()> {
 
         let mut blocks = vec![];
         let mut line_labels = vec![];
-        for (token, span) in tokens.spanned() {
+        for (token, span) in tokens {
             match token {
-                Ok(Token::LineEnding) => blocks.push(make_block(&idx, line_labels.drain(..))),
+                Ok(Token::Syntax(SyntaxToken::LineEnding)) => {
+                    blocks.push(make_block(&idx, line_labels.drain(..)))
+                }
                 tok => line_labels.push((span.clone(), tok)),
             }
         }
@@ -61,6 +63,10 @@ fn main() -> anyhow::Result<()> {
             print!("{block}");
             println!("{}", block.epilogue());
         }
+
+        // General parse
+        let gast = magus::general_parser::general_parse(&input);
+        println!("{:#?}", gast.syntax());
 
         readline.add_history_entry(input)?;
     }

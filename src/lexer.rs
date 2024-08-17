@@ -681,7 +681,27 @@ pub enum Token {
     #[regex(r"(?i)(#i#b|#b#i)[+-](inf|nan).0[+-][01]*(/[01]+)?i", |l| read_number(l, 2))]
     #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?[+-](inf|nan).0i", |l| read_number(l, 2))]
     // octal
+    #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-]?[0-7]+(/[0-7]+)?", |l| read_number(l, 8))]
+    #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-](inf|nan).0", |l| read_number(l, 8))]
+    #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-]?[0-7]+(/[0-7]+)?[+-][0-7]*(/[0-7]+)?i", |l| read_number(l, 8))]
+    #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-](inf|nan).0[+-][0-7]*(/[0-7]+)?i", |l| read_number(l, 8))]
+    #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-]?[0-7]+(/[0-7]+)?[+-](inf|nan).0i", |l| read_number(l, 8))]
+    #[regex(r"(?i)(#i#o|#o#i)[+-]?[0-7]+(/[0-7]+)?", |l| read_number(l, 8))]
+    #[regex(r"(?i)(#i#o|#o#i)[+-](inf|nan).0", |l| read_number(l, 8))]
+    #[regex(r"(?i)(#i#o|#o#i)[+-]?[0-7]+(/[0-7]+)?[+-][0-7]*(/[0-7]+)?i", |l| read_number(l, 8))]
+    #[regex(r"(?i)(#i#o|#o#i)[+-](inf|nan).0[+-][0-7]*(/[0-7]+)?i", |l| read_number(l, 8))]
+    #[regex(r"(?i)(#i#o|#o#i)[+-]?[0-7]+(/[0-7]+)?[+-](inf|nan).0i", |l| read_number(l, 8))]
     // hex
+    #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-]?[0-9a-f]+(/[0-9a-f]+)?", |l| read_number(l, 16))]
+    #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-](inf|nan).0", |l| read_number(l, 16))]
+    #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-]?[0-9a-f]+(/[0-9a-f]+)?[+-][0-9a-f]*(/[0-9a-f]+)?i", |l| read_number(l, 16))]
+    #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-](inf|nan).0[+-][0-9a-f]*(/[0-9a-f]+)?i", |l| read_number(l, 16))]
+    #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-]?[0-9a-f]+(/[0-9a-f]+)?[+-](inf|nan).0i", |l| read_number(l, 16))]
+    #[regex(r"(?i)(#i#x|#x#i)[+-]?[0-9a-f]+(/[0-9a-f]+)?", |l| read_number(l, 16))]
+    #[regex(r"(?i)(#i#x|#x#i)[+-](inf|nan).0", |l| read_number(l, 16))]
+    #[regex(r"(?i)(#i#x|#x#i)[+-]?[0-9a-f]+(/[0-9a-f]+)?[+-][0-9a-f]*(/[0-9a-f]+)?i", |l| read_number(l, 16))]
+    #[regex(r"(?i)(#i#x|#x#i)[+-](inf|nan).0[+-][0-9a-f]*(/[0-9a-f]+)?i", |l| read_number(l, 16))]
+    #[regex(r"(?i)(#i#x|#x#i)[+-]?[0-9a-f]+(/[0-9a-f]+)?[+-](inf|nan).0i", |l| read_number(l, 16))]
     // decimal
     // - decimal real
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+", |l| read_number(l, 10))]
@@ -963,6 +983,7 @@ mod tests {
         verify_number!(exact binary "-0" as SchemeNumber::integer(true, 0));
         verify_number!(binary "110" as SchemeNumber::integer(false, 6));
         verify_number!("42.4e-4" as SchemeNumber::real_decimal(false, 42, 4, true, 4));
-        //verify_number!(hex exact "-a0" as SchemeNumber::integer(true, 160));
+        verify_number!(hex exact "-a0" as SchemeNumber::integer(true, 160));
+        // todo more thorough tests
     }
 }

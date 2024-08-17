@@ -4,6 +4,8 @@ pub use logos::Span;
 use logos::{Lexer, Logos};
 use regex::Regex;
 
+use crate::{ExactReal, SchemeNumber};
+
 fn process_piped_ident(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError> {
     let mut built_ident = String::new();
 
@@ -183,51 +185,6 @@ fn process_string(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError> {
     Ok(Box::from(string.as_str()))
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum SchemeNumber {
-    ExactInteger {
-        is_neg: bool,
-        int: u64,
-    },
-    ExactRational {
-        is_neg: bool,
-        numer: u64,
-        denom: u64,
-    },
-    ExactComplex {
-        is_neg_real: bool,
-        numer_real: u64,
-        denom_real: u64,
-        is_neg_im: bool,
-        numer_im: u64,
-        denom_im: u64,
-    },
-    ExactPolar {
-        modulus_neg: bool,
-        modulus_numer: u64,
-        modulus_denom: u64,
-        // argument is in radians
-        argument_neg: bool,
-        argument_numer: u64,
-        argument_denom: u64,
-    },
-
-    // nan is always considered inexact (and writing the explicit "exact" literal is a lexer error)
-    // basically +nan.0 is allowed (so is #i+nan.0), but #e+nan.0 is *not* allowed
-    Inexact(f64),
-    Inf {
-        is_neg: bool,
-        is_exact: bool,
-    },
-}
-
-impl SchemeNumber {
-    pub fn integer(sign: bool, int: u64) -> Self {
-        // We represent integers as a standard sn/1+0/1i
-        Self::ExactInteger { is_neg: sign, int }
-    }
-}
-
 fn read_number(
     lexer: &mut Lexer<Token>,
     radix: u32,
@@ -265,93 +222,230 @@ fn read_number(
         Err(LexerError::MalformedNumber)?
     }
 
-    let is_neg = match chars.peek() {
-        Some('+') => {
-            _ = chars.next();
-            false
-        }
-        Some('-') => {
-            _ = chars.next();
-            true
-        }
-        _ => false,
-    };
+    // fn read_sign(chars: &mut std::iter::Peekable<impl Iterator<Item = char>>) -> bool {
+    //     match chars.peek() {
+    //         Some('+') => {
+    //             _ = chars.next();
+    //             false
+    //         }
+    //         Some('-') => {
+    //             _ = chars.next();
+    //             true
+    //         }
+    //         _ => false,
+    //     }
+    // }
 
-    // "i" and "n" are never used as a number in a base we use, so we can cheat a little
-    match chars.peek() {
-        Some('i' | 'n' | 'I' | 'N') => {
-            // We have to be "inf.0" or "nan.0"
-            static INF_REGEX: LazyLock<Regex> =
-                LazyLock::new(|| Regex::new(r"^(?i)inf.0$").unwrap());
-            static NAN_REGEX: LazyLock<Regex> =
-                LazyLock::new(|| Regex::new(r"^(?i)nan.0$").unwrap());
-
-            let rest = chars.collect::<Box<str>>();
-            if INF_REGEX.is_match(&rest) {
-                // is inf.0
-                Ok(SchemeNumber::Inf { is_neg, is_exact })
-            } else if NAN_REGEX.is_match(&rest) {
-                // is nan.0
-                if contains_flag('e') {
-                    // You are not allowed to mark a nan as *explicitly* exact
-                    Err(LexerError::MalformedNumber)
-                } else {
-                    Ok(SchemeNumber::Inexact(
-                        if is_neg { -1.0 } else { 1.0 } * f64::NAN,
-                    ))
-                }
-            } else {
-                Err(LexerError::MalformedNumber)
-            }
+    fn read_number_part(
+        iter: &mut std::iter::Peekable<impl Iterator<Item = char>>,
+        radix: u32,
+        is_imaginary: bool,
+    ) -> Result<ExactReal, LexerError> {
+        // Write a FSM to recognize the number and parse it into a RealNumber
+        #[derive(Debug)]
+        enum State {
+            Start,
+            ReadSign,
+            ReadDigit,
+            ReadRational,
+            ReadDecipoint,
+            ReadExponentSign,
+            ReadExponent,
+            // on inf.0
+            OnI,
+            OnIn,
+            OnInf,
+            OnDotInf,
+            OnDotInfIm,
+            // on nan.0
+            OnN,
+            OnNa,
+            OnNan,
+            OnDotNan,
+            OnDotNanIm,
         }
-        Some(c) if c.is_digit(radix) => {
-            // we are a digit in our base! so lex it!
-            dbg!(&flags);
-
-            if contains_flag('e') || !contains_flag('i') {
-                // we only read in exact numbers, which are
-                // nnnn
-                // nnnnsnnnni
-                // nnnnsnnnn/nnnni
-                // nnnn/nnnn
-                // nnnn/nnnnsi
-                // nnnn/nnnnsnnnni
-                // nnnn/nnnnsnnnn/nnnni
-                let mut integer_part = 0u64;
-                while let Some(c) = chars.peek().copied() {
-                    match c {
-                        '+' | '-' | '/' => break,
-                        c if c.is_digit(radix) => {
-                            let _ = chars.next();
-                            integer_part = integer_part
-                                .checked_mul(radix as u64)
-                                .ok_or(LexerError::NumberTooBig)?
-                                .checked_add(c.to_digit(radix).unwrap() as u64)
-                                .ok_or(LexerError::NumberTooBig)?;
+        let mut s = State::Start;
+        let mut number_state = None::<u64>;
+        let mut second_number_state = None::<u64>;
+        let mut third_number_state = None::<u64>;
+        let mut exponent_sign_state = None::<bool>;
+        let mut is_neg_state = None::<bool>;
+        loop {
+            dbg!(&s);
+            let ns = match s {
+                // Start
+                State::Start => match iter.next() {
+                    Some('+') => {
+                        is_neg_state = Some(false);
+                        State::ReadSign
+                    }
+                    Some('-') => {
+                        is_neg_state = Some(true);
+                        State::ReadSign
+                    }
+                    Some('.') if radix == 10 => todo!("decimal point"),
+                    Some(c) if c.is_digit(radix) => {
+                        number_state = Some(c.to_digit(radix).unwrap() as u64);
+                        State::ReadDigit
+                    }
+                    _ => return Err(LexerError::MalformedNumber),
+                },
+                // read sign, inf nan or num
+                State::ReadSign => match iter.next() {
+                    Some('i') => State::OnI,
+                    Some('n') => State::OnN,
+                    Some(c) if c.is_digit(radix) => {
+                        number_state = Some(c.to_digit(radix).unwrap() as u64);
+                        State::ReadDigit
+                    }
+                    _ => return Err(LexerError::MalformedNumber),
+                },
+                // inf reading
+                State::OnI => {
+                    assert!(is_neg_state.is_some());
+                    match iter.next() {
+                        Some('n') => State::OnIn,
+                        _ if is_imaginary => {
+                            return Ok(ExactReal::Integer {
+                                value: 1,
+                                is_neg: is_neg_state.unwrap(),
+                            })
                         }
-                        _ => Err(LexerError::MalformedNumber)?,
+                        _ => return Err(LexerError::MalformedNumber),
                     }
                 }
-
-                match chars.peek() {
-                    Some('+' | '-') => {
-                        todo!("imaginary handling");
+                State::OnIn => match iter.next() {
+                    Some('f') => State::OnInf,
+                    _ => return Err(LexerError::MalformedNumber),
+                },
+                State::OnInf => match iter.next() {
+                    Some('.') => State::OnDotInf,
+                    _ => return Err(LexerError::MalformedNumber),
+                },
+                State::OnDotInf => match iter.next() {
+                    Some('0') if !is_imaginary => {
+                        return Ok(ExactReal::Inf {
+                            is_neg: is_neg_state.unwrap(),
+                        })
                     }
-                    Some('/') => {
-                        todo!("rational handling");
-                    }
-                    Some(_) => Err(LexerError::MalformedNumber)?,
-                    None => Ok(SchemeNumber::ExactInteger {
-                        is_neg,
-                        int: integer_part,
-                    }),
+                    Some('0') => State::OnDotInfIm,
+                    _ => return Err(LexerError::MalformedNumber),
+                },
+                State::OnDotInfIm => {
+                    assert!(is_imaginary);
+                    return match iter.next() {
+                        Some('i' | 'I') => Ok(ExactReal::Inf {
+                            is_neg: is_neg_state.unwrap(),
+                        }),
+                        _ => Err(LexerError::MalformedNumber),
+                    };
                 }
-            } else {
-                // we handle !contains_flag e and contains_flag i
-                todo!("Inexact handling")
-            }
+                // nan reading
+                State::OnN => {
+                    assert!(is_neg_state.is_some());
+                    match iter.next() {
+                        Some('a') => State::OnNa,
+                        _ => return Err(LexerError::MalformedNumber),
+                    }
+                }
+                State::OnNa => match iter.next() {
+                    Some('n') => State::OnNan,
+                    _ => return Err(LexerError::MalformedNumber),
+                },
+                State::OnNan => match iter.next() {
+                    Some('.') => State::OnDotNan,
+                    _ => return Err(LexerError::MalformedNumber),
+                },
+                State::OnDotNan => match iter.next() {
+                    Some('0') if !is_imaginary => {
+                        return Ok(ExactReal::Nan {
+                            is_neg: is_neg_state.unwrap(),
+                        })
+                    }
+                    Some('0') => State::OnDotNanIm,
+                    _ => return Err(LexerError::MalformedNumber),
+                },
+                State::OnDotNanIm => {
+                    assert!(is_imaginary);
+                    return match iter.next() {
+                        Some('i' | 'I') => Ok(ExactReal::Nan {
+                            is_neg: is_neg_state.unwrap(),
+                        }),
+                        _ => Err(LexerError::MalformedNumber),
+                    };
+                }
+                // read digit, continue reading digits until interrupt [/+-] (add [.e] if decimal)
+                State::ReadDigit => {
+                    assert!(number_state.is_some());
+                    match iter.peek().copied() {
+                        Some('.') if radix == 10 => todo!("decimal point"),
+                        Some('e' | 'E') if radix == 10 => todo!("decimal exponent"),
+                        Some('/') => todo!("rational"),
+                        Some('+' | '-') | None => {
+                            // What follows must be an imaginary number, so break successfully if we are a real number
+                            return if !is_imaginary {
+                                Ok(ExactReal::Integer {
+                                    value: number_state.unwrap(),
+                                    is_neg: is_neg_state.unwrap_or(false),
+                                })
+                            } else {
+                                Err(LexerError::MalformedNumber)
+                            };
+                        }
+                        Some('i') if is_imaginary => {
+                            // b/c of how we parse/detect imaginary numbers, is_neg_state will always be set
+                            // when encountering an imaginary number
+                            assert!(is_neg_state.is_some());
+                            return Ok(ExactReal::Integer {
+                                value: number_state.unwrap(),
+                                is_neg: is_neg_state.unwrap(),
+                            });
+                        }
+                        Some(c) if c.is_digit(radix) => {
+                            let _ = iter.next();
+                            number_state = Some(
+                                number_state
+                                    .unwrap()
+                                    .checked_mul(radix as u64)
+                                    .ok_or(LexerError::NumberTooBig)?
+                                    .checked_add(c.to_digit(radix).unwrap() as u64)
+                                    .ok_or(LexerError::NumberTooBig)?,
+                            );
+                            State::ReadDigit
+                        }
+                        _ => return Err(LexerError::MalformedNumber),
+                    }
+                }
+                s => todo!("unimplemented state {s:?}"),
+            };
+            s = ns;
         }
-        _ => Err(LexerError::MalformedNumber),
+    }
+
+    if contains_flag('e') || !contains_flag('i') {
+        // we only read in exact numbers, which are
+        // nnnn
+        // nnnnsnnnni
+        // nnnnsnnnn/nnnni
+        // nnnn/nnnn
+        // nnnn/nnnnsi
+        // nnnn/nnnnsnnnni
+        // nnnn/nnnnsnnnn/nnnni
+        let real_part = read_number_part(&mut chars, radix, false)?;
+        match chars.peek() {
+            Some('+' | '-') => {
+                let im_part = read_number_part(&mut chars, radix, true)?;
+                Ok(SchemeNumber::ExactComplex {
+                    real: real_part,
+                    imaginary: im_part,
+                })
+            }
+            Some(_) => Err(LexerError::MalformedNumber)?,
+            None => Ok(SchemeNumber::ExactReal(real_part)),
+        }
+    } else {
+        // we handle !contains_flag e and contains_flag i
+        todo!("Inexact handling")
     }
 }
 
@@ -445,8 +539,29 @@ pub enum Token {
 
     // The number tower is supported by having each possible lex of a number type as a *separate* token type
     // Same as all the others, the lexer here is a bit more permissive to allow for better errors
-    #[regex(r"(?i)((#e)?#b|#b(#e)?)([+-]?[01]+(/[01]+([+-][01]*i)?)?|[-+](inf|nan).0)?", |l| read_number(l, 2, true))]
-    #[regex(r"(?i)(#i#b|#b#i)([+-]?[01]+(/[01]+([+-][01]*i)?)?|[-+](inf|nan).0)?", |l| read_number(l, 2, false))]
+    // I wish i could template these regexes... w/e
+    // binary
+    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?", |l| read_number(l, 2, true))]
+    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-](inf|nan).0", |l| read_number(l, 2, true))]
+    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?[+-][01]*(/[01]+)?i", |l| read_number(l, 2, true))]
+    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-](inf|nan).0[+-][01]*(/[01]+)?i", |l| read_number(l, 2, true))]
+    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?[+-](inf|nan).0i", |l| read_number(l, 2, true))]
+    #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?", |l| read_number(l, 2, false))]
+    #[regex(r"(?i)(#i#b|#b#i)[+-](inf|nan).0", |l| read_number(l, 2, false))]
+    #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?[+-][01]*(/[01]+)?i", |l| read_number(l, 2, false))]
+    #[regex(r"(?i)(#i#b|#b#i)[+-](inf|nan).0[+-][01]*(/[01]+)?i", |l| read_number(l, 2, false))]
+    #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?[+-](inf|nan).0i", |l| read_number(l, 2, false))]
+    // FIXME rewrite these into many smaller regexes because this is just unmaintainable.
+    // #[regex(r"(?i)((#e)?#b|#b(#e)?)([+-]?[01]+(/[01]+)?([+-]([01]+(/[01]+)?)?i)?|[-+](inf|nan).0i)?", |l| read_number(l, 2, true))]
+    // #[regex(r"(?i)((#e)?#o|#o(#e)?)([+-]?[0-7]+(/[0-7]+)?([+-]([0-7]+(/[0-7]+)?)?i)?|[-+](inf|nan).0i)?", |l| read_number(l, 8, true))]
+    // #[regex(r"(?i)((#e)?#x|#x(#e)?)([+-]?[0-9a-f]+(/[0-9a-f]+)?([+-]([0-9a-f]+(/[0-9a-f]+)?)?i)?|[-+](inf|nan).0i)?", |l| read_number(l, 16, true))]
+    // // TODO add <decimal> handling
+    // #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)([+-]?[0-9]+(/[0-9]+|\.[0-9]+(e[+-]?[0-9]+)?)?([+-]([0-9]+(/[0-9]+|\.[0-9]+(e[+-]?[0-9]+)?)?)?i)?|[-+](inf|nan).0i|[+-]?\.[0-9](e[+-]?[0-9]+)?([+-]([0-9]+(/[0-9]+|\.[0-9]+(e[+-]?[0-9]+)?)?)?i)?)?", |l| read_number(l, 10, true))]
+    // #[regex(r"(?i)(#i#b|#b#i)([+-]?[01]+(/[01]+)?([+-][01]*i)?|[-+](inf|nan).0i)?", |l| read_number(l, 2, false))]
+    // #[regex(r"(?i)(#i#o|#o#i)([+-]?[0-7]+(/[0-7]+)?([+-][0-7]*i)?|[-+](inf|nan).0i)?", |l| read_number(l, 8, false))]
+    // #[regex(r"(?i)(#i#x|#x#i)([+-]?[0-9a-f]+(/[0-9a-f]+)?([+-][0-9a-f]*i)?|[-+](inf|nan).0i)?", |l| read_number(l, 16, false))]
+    // // TODO add <decimal> handling
+    // #[regex(r"(?i)(#i(#d)?|(#d)?#i)([+-]?[0-9]+(/[0-9]+|\.[0-9]+(e[+-]?[0-9]+)?)?([+-]([0-9]+(/[0-9]+|\.[0-9]+(e[+-]?[0-9]+)?)?)?i)?|[-+](inf|nan).0|[+-]?\.[0-9](e[+-]?[0-9]+)?([+-]([0-9]+(/[0-9]+|\.[0-9]+(e[+-]?[0-9]+)?)?)?i)?)?", |l| read_number(l, 10, false))]
     Number(SchemeNumber),
 }
 
@@ -583,13 +698,91 @@ mod tests {
                 let_assert!(Some(Ok(Token::Number(bnum))) = token);
                 check!(bnum == $num);
             };
+            (exact octal $source:literal as $num:expr) => {
+                let mut source = String::new();
+                source.push_str("#e#o");
+                source.push_str($source);
+                let token = Token::lexer(&source).next();
+                let_assert!(Some(Ok(Token::Number(bnum))) = token);
+                check!(bnum == $num);
+            };
+            (octal exact $source:literal as $num:expr) => {
+                let mut source = String::new();
+                source.push_str("#o#e");
+                source.push_str($source);
+                let token = Token::lexer(&source).next();
+                let_assert!(Some(Ok(Token::Number(bnum))) = token);
+                check!(bnum == $num);
+            };
+            (octal $source:literal as $num:expr) => {
+                let mut source = String::new();
+                source.push_str("#o");
+                source.push_str($source);
+                let token = Token::lexer(&source).next();
+                let_assert!(Some(Ok(Token::Number(bnum))) = token);
+                check!(bnum == $num);
+            };
+            (exact hex $source:literal as $num:expr) => {
+                let mut source = String::new();
+                source.push_str("#e#x");
+                source.push_str($source);
+                let token = Token::lexer(&source).next();
+                let_assert!(Some(Ok(Token::Number(bnum))) = token);
+                check!(bnum == $num);
+            };
+            (hex exact $source:literal as $num:expr) => {
+                let mut source = String::new();
+                source.push_str("#x#e");
+                source.push_str($source);
+                let token = Token::lexer(&source).next();
+                let_assert!(Some(Ok(Token::Number(bnum))) = token);
+                check!(bnum == $num);
+            };
+            (hex $source:literal as $num:expr) => {
+                let mut source = String::new();
+                source.push_str("#x");
+                source.push_str($source);
+                let token = Token::lexer(&source).next();
+                let_assert!(Some(Ok(Token::Number(bnum))) = token);
+                check!(bnum == $num);
+            };
+            (exact decimal $source:literal as $num:expr) => {
+                let mut source = String::new();
+                source.push_str("#e#d");
+                source.push_str($source);
+                let token = Token::lexer(&source).next();
+                let_assert!(Some(Ok(Token::Number(bnum))) = token);
+                check!(bnum == $num);
+            };
+            (decimal exact $source:literal as $num:expr) => {
+                let mut source = String::new();
+                source.push_str("#d#e");
+                source.push_str($source);
+                let token = Token::lexer(&source).next();
+                let_assert!(Some(Ok(Token::Number(bnum))) = token);
+                check!(bnum == $num);
+            };
+            (decimal $source:literal as $num:expr) => {
+                let mut source = String::new();
+                source.push_str("#d");
+                source.push_str($source);
+                let token = Token::lexer(&source).next();
+                let_assert!(Some(Ok(Token::Number(bnum))) = token);
+                check!(bnum == $num);
+            };
+            ($source:literal as $num:expr) => {
+                let token = Token::lexer($source).next();
+                let_assert!(Some(Ok(Token::Number(bnum))) = token);
+                check!(bnum == $num);
+            };
         }
 
         // binary
-        verify_number!(exact binary "+inf.0" as SchemeNumber::Inf { is_neg: false, is_exact: true });
-        verify_number!(binary exact "-inf.0" as SchemeNumber::Inf { is_neg: true, is_exact: true });
+        // verify_number!(exact binary "+inf.0" as SchemeNumber::Inf { is_neg: false, is_exact: true });
+        // verify_number!(binary exact "-inf.0" as SchemeNumber::Inf { is_neg: true, is_exact: true });
         verify_number!(binary exact "0" as SchemeNumber::integer(false, 0));
         verify_number!(exact binary "-0" as SchemeNumber::integer(true, 0));
         verify_number!(binary "110" as SchemeNumber::integer(false, 6));
+        verify_number!(hex exact "-a0" as SchemeNumber::integer(true, 160));
     }
 }

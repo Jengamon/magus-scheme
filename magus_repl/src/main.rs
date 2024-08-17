@@ -1,5 +1,6 @@
 use codesnake::{Block, CodeWidth, Label, LineIndex};
 use magus::lexer::{LexerError, Span, Token};
+use rustyline::{history::MemHistory, Config};
 use yansi::Paint;
 
 fn make_block<'a>(
@@ -27,8 +28,11 @@ fn make_block<'a>(
     )
 }
 
+// TODO Make SchemeHelper for all the REPL goodies
+
 fn main() -> anyhow::Result<()> {
-    let mut readline = rustyline::DefaultEditor::new()?;
+    let mut readline =
+        rustyline::Editor::<(), _>::with_history(Config::default(), MemHistory::new())?;
 
     while let Ok(input) = readline.readline(">> ") {
         let src = input.as_str();
@@ -52,10 +56,12 @@ fn main() -> anyhow::Result<()> {
             .into_iter()
             .filter_map(|blk| Some(blk?.map_code(|c| CodeWidth::new(c, c.len()))))
         {
-            println!("{}[main.scm]", block.prologue());
+            println!("{}[repl.scm]", block.prologue());
             print!("{block}");
             println!("{}", block.epilogue());
         }
+
+        readline.add_history_entry(input)?;
     }
 
     Ok(())

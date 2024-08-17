@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [$default-branch]
+  pull_request:
+    branches: [$default-branch]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v1
+      - name: Add WASM target
+        run: rustup add target wasm32-unknown-unknown
+      - name: Build for wasm
+        run: just build-wasm
+      - name: Run tests
+        run: cargo test --verbose

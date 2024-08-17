@@ -13,9 +13,7 @@ fn process_piped_ident(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError>
         match chr {
             '\\' => match chars.peek() {
                 Some('x' | 'X') => {
-                    built_ident.push(read_hex_escape(&mut chars, || {
-                        LexerError::MalformedIdent(Box::from(lexer.slice()))
-                    })?);
+                    built_ident.push(read_hex_escape(&mut chars, || LexerError::MalformedIdent)?);
                 }
                 Some('a') => {
                     built_ident.push('\x07');
@@ -37,7 +35,7 @@ fn process_piped_ident(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError>
                     built_ident.push('\r');
                     _ = chars.next(); // consume
                 }
-                Some(_) | None => Err(LexerError::MalformedIdent(Box::from(lexer.slice())))?,
+                Some(_) | None => Err(LexerError::MalformedIdent)?,
             },
             // Stop consuming at the ending pipe
             '|' => break,
@@ -172,9 +170,9 @@ fn process_string(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError> {
                         _ = chars.next();
                     }
                 }
-                Some('x' | 'X') => string.push(read_hex_escape(&mut chars, || {
-                    LexerError::MalformedString(Box::from(lexer.slice()))
-                })?),
+                Some('x' | 'X') => {
+                    string.push(read_hex_escape(&mut chars, || LexerError::MalformedString)?)
+                }
                 _ => todo!(),
             },
             c => string.push(c),
@@ -187,6 +185,10 @@ fn process_string(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError> {
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum SchemeNumber {
+    ExactInteger {
+        is_neg: bool,
+        int: u64,
+    },
     ExactRational {
         is_neg: bool,
         numer: u64,
@@ -209,12 +211,10 @@ pub enum SchemeNumber {
         argument_numer: u64,
         argument_denom: u64,
     },
-    // Floating point is *implied* to be inexact (and is in-fact the type always used if inexact)
-    // We use the "ExactRational" to represent general exact floats,
-    // and the special "Inf" to represent infinity
+
     // nan is always considered inexact (and writing the explicit "exact" literal is a lexer error)
     // basically +nan.0 is allowed (so is #i+nan.0), but #e+nan.0 is *not* allowed
-    Float(f64),
+    Inexact(f64),
     Inf {
         is_neg: bool,
         is_exact: bool,
@@ -222,16 +222,9 @@ pub enum SchemeNumber {
 }
 
 impl SchemeNumber {
-    pub fn integer(sign: bool, num: u64) -> Self {
+    pub fn integer(sign: bool, int: u64) -> Self {
         // We represent integers as a standard sn/1+0/1i
-        Self::ExactComplex {
-            is_neg_real: sign,
-            numer_real: num,
-            denom_real: 1,
-            is_neg_im: false,
-            numer_im: 0,
-            denom_im: 1,
-        }
+        Self::ExactInteger { is_neg: sign, int }
     }
 }
 
@@ -252,7 +245,7 @@ fn read_number(
                 flag @ ('e' | 'i' | 'b' | 'o' | 'x' | 'd' | 'E' | 'I' | 'B' | 'O' | 'X' | 'D'),
             ) = chars.next()
             else {
-                Err(LexerError::MalformedNumber(Box::from(lexer.slice())))?
+                Err(LexerError::MalformedNumber)?
             };
             flags.push(flag);
         }
@@ -269,7 +262,7 @@ fn read_number(
         || contains_flag('d') && radix != 10
     {
         // Radix mismatch
-        Err(LexerError::MalformedNumber(Box::from(lexer.slice())))?
+        Err(LexerError::MalformedNumber)?
     }
 
     let is_neg = match chars.peek() {
@@ -301,14 +294,14 @@ fn read_number(
                 // is nan.0
                 if contains_flag('e') {
                     // You are not allowed to mark a nan as *explicitly* exact
-                    Err(LexerError::MalformedNumber(Box::from(lexer.slice())))
+                    Err(LexerError::MalformedNumber)
                 } else {
-                    Ok(SchemeNumber::Float(
+                    Ok(SchemeNumber::Inexact(
                         if is_neg { -1.0 } else { 1.0 } * f64::NAN,
                     ))
                 }
             } else {
-                Err(LexerError::MalformedNumber(Box::from(lexer.slice())))
+                Err(LexerError::MalformedNumber)
             }
         }
         Some(c) if c.is_digit(radix) => {
@@ -317,18 +310,48 @@ fn read_number(
 
             if contains_flag('e') || !contains_flag('i') {
                 // we only read in exact numbers, which are
-                // snnnn
-                // snnnn/nnnn
-                // snnnn/nnnnsi
-                // snnnn/nnnnsnnnni
-                // snnnn/nnnnsnnnn/nnnni
-                todo!("Exact handling")
+                // nnnn
+                // nnnnsnnnni
+                // nnnnsnnnn/nnnni
+                // nnnn/nnnn
+                // nnnn/nnnnsi
+                // nnnn/nnnnsnnnni
+                // nnnn/nnnnsnnnn/nnnni
+                let mut integer_part = 0u64;
+                while let Some(c) = chars.peek().copied() {
+                    match c {
+                        '+' | '-' | '/' => break,
+                        c if c.is_digit(radix) => {
+                            let _ = chars.next();
+                            integer_part = integer_part
+                                .checked_mul(radix as u64)
+                                .ok_or(LexerError::NumberTooBig)?
+                                .checked_add(c.to_digit(radix).unwrap() as u64)
+                                .ok_or(LexerError::NumberTooBig)?;
+                        }
+                        _ => Err(LexerError::MalformedNumber)?,
+                    }
+                }
+
+                match chars.peek() {
+                    Some('+' | '-') => {
+                        todo!("imaginary handling");
+                    }
+                    Some('/') => {
+                        todo!("rational handling");
+                    }
+                    Some(_) => Err(LexerError::MalformedNumber)?,
+                    None => Ok(SchemeNumber::ExactInteger {
+                        is_neg,
+                        int: integer_part,
+                    }),
+                }
             } else {
                 // we handle !contains_flag e and contains_flag i
                 todo!("Inexact handling")
             }
         }
-        _ => Err(LexerError::MalformedNumber(Box::from(lexer.slice()))),
+        _ => Err(LexerError::MalformedNumber),
     }
 }
 
@@ -337,8 +360,8 @@ pub enum LexerError {
     #[default]
     #[error("invalid token encountered")]
     Invalid,
-    #[error("malformed identifier: {0}")]
-    MalformedIdent(Box<str>),
+    #[error("malformed identifier")]
+    MalformedIdent,
     #[error("character literal too big")]
     CharacterTooBig,
     #[error("invalid Unicode codepoint: {0}")]
@@ -347,10 +370,12 @@ pub enum LexerError {
     InvalidDirective(Box<str>),
     #[error("invalid character name: {0}")]
     InvalidCharacterName(Box<str>),
-    #[error("malformed string: {0}")]
-    MalformedString(Box<str>),
-    #[error("malformed number: {0}")]
-    MalformedNumber(Box<str>),
+    #[error("malformed string")]
+    MalformedString,
+    #[error("malformed number")]
+    MalformedNumber,
+    #[error("number literal too big")]
+    NumberTooBig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash)]
@@ -550,12 +575,21 @@ mod tests {
                 let_assert!(Some(Ok(Token::Number(bnum))) = token);
                 check!(bnum == $num);
             };
+            (binary $source:literal as $num:expr) => {
+                let mut source = String::new();
+                source.push_str("#b");
+                source.push_str($source);
+                let token = Token::lexer(&source).next();
+                let_assert!(Some(Ok(Token::Number(bnum))) = token);
+                check!(bnum == $num);
+            };
         }
 
         // binary
         verify_number!(exact binary "+inf.0" as SchemeNumber::Inf { is_neg: false, is_exact: true });
         verify_number!(binary exact "-inf.0" as SchemeNumber::Inf { is_neg: true, is_exact: true });
-        verify_number!(exact binary "0" as SchemeNumber::integer(false, 0));
-        verify_number!(exact binary "-0" as SchemeNumber::integer(false, 0));
+        verify_number!(binary exact "0" as SchemeNumber::integer(false, 0));
+        verify_number!(exact binary "-0" as SchemeNumber::integer(true, 0));
+        verify_number!(binary "110" as SchemeNumber::integer(false, 6));
     }
 }

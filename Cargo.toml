@@ -24,3 +24,4 @@ thiserror = "1.0.63"
 [dev-dependencies]
 arbtest = "0.3.1"
 assert2 = "0.3.14"
+datatest-stable = "0.2.9"

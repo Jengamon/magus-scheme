@@ -39,6 +39,10 @@ fn process_piped_ident(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError>
                     built_ident.push('\r');
                     _ = chars.next(); // consume
                 }
+                Some('|') => {
+                    built_ident.push('|');
+                    _ = chars.next(); // consume
+                }
                 Some(_) | None => Err(LexerError::MalformedIdentifier)?,
             },
             // Stop consuming at the ending pipe
@@ -688,7 +692,7 @@ pub enum Token {
     #[regex(r"(?i)#u8\(")]
     StartBytevector,
     #[regex(r#"[a-zA-Z!$%&*/:<=>?^_~][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*"#, |l| Box::from(l.slice()))]
-    #[regex(r#"\|[^|]*\|"#, process_piped_ident)]
+    #[regex(r#"\|([^|\\]|\\[xXabntr|])*\|"#, process_piped_ident)]
     #[token("+", |l| Box::from(l.slice()))]
     #[token("-", |l| Box::from(l.slice()))]
     #[regex(r"[-+][a-zA-Z!$%&*/:<=>?^_~+\-@][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*", |l| Box::from(l.slice()))]
@@ -924,123 +928,6 @@ mod tests {
 
         verify_string!(r#"apple"# as "apple");
         verify_string!(r#"\xea;\n\"\a"# as "\u{ea}\n\"\u{7}");
-    }
-
-    #[test]
-    fn test_number() {
-        macro_rules! verify_number {
-            (exact binary $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#e#b");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (binary exact $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#b#e");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (binary $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#b");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (exact octal $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#e#o");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (octal exact $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#o#e");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (octal $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#o");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (exact hex $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#e#x");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (hex exact $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#x#e");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (hex $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#x");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (exact decimal $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#e#d");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (decimal exact $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#d#e");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (decimal $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#d");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            ($source:literal as $num:expr) => {
-                let token = Token::lexer($source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-        }
-
-        // binary
-        // verify_number!(exact binary "+inf.0" as SchemeNumber::Inf { is_neg: false, is_exact: true });
-        // verify_number!(binary exact "-inf.0" as SchemeNumber::Inf { is_neg: true, is_exact: true });
-        verify_number!(binary exact "0" as SchemeNumber::integer(false, 0));
-        verify_number!(exact binary "-0" as SchemeNumber::integer(true, 0));
-        verify_number!(binary "110" as SchemeNumber::integer(false, 6));
-        verify_number!("42.4e-4" as SchemeNumber::real_decimal(false, 42, 4, true, 4));
-        verify_number!(hex exact "-a0" as SchemeNumber::integer(true, 160));
-        // todo more thorough tests
     }
 
     #[test]

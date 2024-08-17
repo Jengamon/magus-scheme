@@ -21,6 +21,7 @@ fn make_block<'a>(
                     Ok(Token::Identifier(_)) => s.blue().to_string(),
                     Ok(Token::Character(_)) => s.yellow().to_string(),
                     Ok(Token::String(_)) => s.cyan().to_string(),
+                    Ok(Token::Number(_)) => s.bright_magenta().to_string(),
                     Ok(_) => s,
                     Err(_) => s.red().to_string(),
                 })

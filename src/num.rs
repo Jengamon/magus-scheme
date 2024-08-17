@@ -2,7 +2,7 @@
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum SchemeNumber {
-    ExactReal(ExactReal),
+    Exact(ExactReal),
     ExactComplex {
         real: ExactReal,
         imaginary: ExactReal,
@@ -17,7 +17,7 @@ pub enum SchemeNumber {
 
 impl SchemeNumber {
     pub fn integer(is_neg: bool, value: u64) -> Self {
-        Self::ExactReal(ExactReal::Integer { is_neg, value })
+        Self::Exact(ExactReal::Integer { is_neg, value })
     }
 
     pub fn real_decimal(
@@ -27,7 +27,7 @@ impl SchemeNumber {
         exponent_neg: bool,
         exponent: u64,
     ) -> Self {
-        Self::ExactReal(ExactReal::Decimal {
+        Self::Exact(ExactReal::Decimal {
             base,
             post_dot,
             exponent,

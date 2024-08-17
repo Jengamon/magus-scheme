@@ -7,7 +7,7 @@ use crate::lexer::Token;
 pub struct GeneralParser;
 
 impl GeneralParser {
-    fn parse(lexer: Lexer<Token>) -> ! {
+    pub fn parse(lexer: Lexer<Token>) -> GAst {
         _ = lexer;
         todo!()
     }
@@ -16,6 +16,10 @@ impl GeneralParser {
 // Using rowan and CST should (and hopefully does) give us a nice property that
 // calculating lines should be possible (as it is a full fidelity structure)
 
-/// Any possible GAST node
+/// GAst top level
 #[derive(Debug)]
-pub enum GAst {}
+pub struct GAst(pub(crate) Box<[GAstNode]>);
+
+/// Any possible GAst node
+#[derive(Debug)]
+pub enum GAstNode {}

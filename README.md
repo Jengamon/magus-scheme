@@ -8,16 +8,15 @@
 graph TD
     lex[Lexer] -->|Tokens| gparse[General Parser]
     lex2[Lexer] -->|Tokens| gparse2[General Parser]
-    gparse --> wd
-    gparse2 --> wd
-    wd[World] -->|+ Module Identifier| parser[Parser]
-    parser -.->|AST| backend[Backend]
+    gparse -->|GAst| wd
+    gparse2 -->|GAst| wd
+    ext[External Code] --> |NativeLibrary| wd
+    wd[World] -.-> Backend
 ```
 
-There are 3 parts of the frontend:
+There are 2 parts of the frontend:
 - Lexer
 - General Parser
-- Parser
 
 The formal syntax of R7RS is encoded in the lexer and general parser, where the lexer handles things that can be
 recognized by regular expressions (identifiers, numbers, strings, etc.) while the general parser handles things
@@ -27,8 +26,7 @@ This forms the GAST which is just s-expressions, (byte)vectors, and nested items
 
 A World defines *all* modules that can possibly exist. A script is only allowed to import libraries defined by modules from its World.
 
-The parser then reads the GAST (which can possibly contain macros which define how items in the
-GAST should be parsed) from a specified module of a World to produce AST that can be executed.
+The backend is responsible for reading and executing on a World's GAst.
 
 ## Numbers and exactness
 

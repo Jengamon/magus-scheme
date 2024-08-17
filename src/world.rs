@@ -64,9 +64,18 @@ pub struct World {
     rodeo: lasso::ThreadedRodeo,
     /// scripts that can be requested for execution
     // TODO switch to hashbrown or ahash? might be faster maybe probably?
-    modules: HashMap<Box<str>, Module>,
+    // we use Spurs b/c we have the interner
+    modules: HashMap<lasso::Spur, Module>,
     /// libraries that can be imported from
     libraries: HashMap<InternalLibraryName, SchemeLibrary>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum LoadSourceError {
+    #[error("invalid general AST")]
+    InvalidGAst,
+    #[error("library already exists: {0}")]
+    LibraryAlreadyExists(LibraryName),
 }
 
 impl World {
@@ -81,6 +90,23 @@ impl World {
     pub fn library(&self, name: impl Into<LibraryName>) -> Option<&SchemeLibrary> {
         self.libraries.get(&self.library_name(name.into().name()))
     }
+
+    pub fn load_source(
+        &mut self,
+        filename: impl AsRef<str>,
+        ast: GAst,
+    ) -> Result<(), LoadSourceError> {
+        // TODO Detect if a given GAst is a library or a program by checking:
+        // carefully re-reading the spec has made me aware that
+        // a Scheme "module"/file consists of 0+ libraries and 1 program
+        // so first we go over top-level s-exps and extract the ones that are libraries,
+        // store them for evaluation/ease of execution, then bundle the rest of the file into
+        // a program.
+        //
+        // parser might be a misnomer, and instead should be "evaluator" b/c it is when it comes to evaluation time
+        // that understanding what macros are defined in what order is extremely useful.
+        todo!()
+    }
 }
 
 // there is only 1 s-exp in the GAst, and it has "define-library" as it's first element. "(define-library ...)"
@@ -89,7 +115,7 @@ impl World {
 // (how I wiss traits had narrowing...)
 #[derive(Debug)]
 pub enum SchemeLibrary {
-    Scheme(GAst),
+    Scheme { filename: lasso::Spur, data: () },
     Native(()),
 }
 

@@ -628,6 +628,8 @@ pub enum LexerError {
     MalformedNumber,
     #[error("number literal too big")]
     NumberTooBig,
+    #[error("label too big")]
+    LabelTooBig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Arbitrary)]
@@ -805,6 +807,10 @@ pub enum Token {
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-]\.[0-9]+(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     Number(SchemeNumber),
+    #[regex(r"#[0-9]+=", |l| l.slice().chars().skip(1).take(l.slice().len()-2).collect::<Box<str>>().parse::<usize>().map_err(|_| LexerError::LabelTooBig))]
+    DatumLabel(usize),
+    #[regex(r"#[0-9]+#", |l| l.slice().chars().skip(1).take(l.slice().len()-2).collect::<Box<str>>().parse::<usize>().map_err(|_| LexerError::LabelTooBig))]
+    DatumLabelValue(usize),
 }
 
 impl Token {

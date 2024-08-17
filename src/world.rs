@@ -58,6 +58,15 @@ impl<T: IntoIterator<Item = impl AsRef<str>>> From<T> for LibraryName {
     }
 }
 
+#[derive(Debug)]
+pub enum Loaded {
+    Source {
+        // Did our source replace any source that already existed?
+        replaced: bool,
+    },
+    Library(LibraryName),
+}
+
 #[derive(Default)]
 pub struct World {
     /// interner
@@ -95,16 +104,15 @@ impl World {
         &mut self,
         filename: impl AsRef<str>,
         ast: GAst,
-    ) -> Result<(), LoadSourceError> {
+    ) -> Result<Loaded, LoadSourceError> {
         // TODO Detect if a given GAst is a library or a program by checking:
-        // carefully re-reading the spec has made me aware that
-        // a Scheme "module"/file consists of 0+ libraries and 1 program
-        // so first we go over top-level s-exps and extract the ones that are libraries,
-        // store them for evaluation/ease of execution, then bundle the rest of the file into
-        // a program.
+        // Libraries are scheme files where the only top-level datum is a s-expr where the first element is "define-library"
         //
         // parser might be a misnomer, and instead should be "evaluator" b/c it is when it comes to evaluation time
         // that understanding what macros are defined in what order is extremely useful.
+        //
+        // NOTE Nahh looking at the chibi-scheme codebase, it seems that libraries are their own separate files (*.sld)
+        // that can (include ...) source files if they so please, so this will be our pattern too (except we'll just have *-lib.scm files)
         todo!()
     }
 }

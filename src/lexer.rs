@@ -1023,10 +1023,6 @@ mod tests {
     fn test_number_arbtest_decimal() {
         arbtest(|u| {
             let number: ExactReal = u.arbitrary()?;
-            // Shortcircuit out of rationals (unimplemented)
-            if matches!(number, ExactReal::Rational { .. }) {
-                return Ok(());
-            }
             let decimal = number.display(10).unwrap();
             check!(
                 Token::lexer(&decimal).next()
@@ -1049,10 +1045,6 @@ mod tests {
                 );
             }
             let im: ExactReal = u.arbitrary()?;
-            // Shortcircuit out of rationals (unimplemented)
-            if matches!(im, ExactReal::Rational { .. }) {
-                return Ok(());
-            }
             let im_decimal = format!(
                 "{}{}{}i",
                 number.display(10).unwrap(),
@@ -1152,10 +1144,6 @@ mod tests {
 
         arbtest(move |u| {
             let number: ExactReal = u.arbitrary()?;
-            // Shortcircuit out of rationals (unimplemented)
-            if matches!(number, ExactReal::Rational { .. }) {
-                return Ok(());
-            }
             let decimal = format!(
                 "{radix_str}{}",
                 match number.display(radix) {
@@ -1190,10 +1178,6 @@ mod tests {
                 );
             }
             let im: ExactReal = u.arbitrary()?;
-            // Shortcircuit out of rationals (unimplemented)
-            if matches!(im, ExactReal::Rational { .. }) {
-                return Ok(());
-            }
             let im_decimal = format!(
                 "{radix_str}{}{}{}i",
                 match number.display(radix) {

@@ -101,13 +101,10 @@ fn process_hex_character(lexer: &mut logos::Lexer<SyntaxToken>) -> Result<char, 
 }
 
 // reads hex escapes in the form `x[0-9a-fA-F]+` and outputs the corresponding character
-fn read_hex_escape<F>(
+fn read_hex_escape(
     iter: &mut std::iter::Peekable<impl Iterator<Item = char>>,
-    on_malformed: F,
-) -> Result<char, LexerError>
-where
-    F: Fn() -> LexerError,
-{
+    on_malformed: impl Fn() -> LexerError,
+) -> Result<char, LexerError> {
     // consume the x
     let _ = iter.next();
 
@@ -118,9 +115,9 @@ where
             c @ ('0'..='9' | 'a'..='f' | 'A'..='F') => {
                 char_code = char_code
                     .checked_mul(16)
-                    .ok_or(LexerError::CharacterTooBig)?
+                    .ok_or(on_malformed())?
                     .checked_add(c.to_digit(16).unwrap())
-                    .ok_or(LexerError::CharacterTooBig)?;
+                    .ok_or(on_malformed())?;
                 _ = iter.next();
             }
             _ => Err(on_malformed())?,
@@ -129,7 +126,7 @@ where
     if iter.next() != Some(';') {
         return Err(on_malformed());
     }
-    char::from_u32(char_code).ok_or(LexerError::InvalidCodepoint(char_code))
+    char::from_u32(char_code).ok_or(on_malformed())
 }
 
 fn process_string(lexer: &mut logos::Lexer<SyntaxToken>) -> Result<Box<str>, LexerError> {
@@ -647,7 +644,9 @@ pub enum NestedCommentToken {
     EndNestedComment,
     #[token("#|")]
     StartNestedComment,
-    #[regex(r"([^#|]|#[^|]|\|[^#])+")]
+    #[regex(r"[^|#]+")]
+    #[token("#")]
+    #[token("|")]
     CommentText,
 }
 
@@ -895,7 +894,7 @@ impl<'src> Iterator for Lexer<'src> {
                     Some(Ok(t @ NestedCommentToken::CommentText)) => {
                         Some((Ok(Token::NestedComment(t)), nc.span()))
                     }
-                    Some(Err(_)) => unreachable!("nested tokens do not use lexer errors"),
+                    Some(Err(e)) => Some((Err(LexerError::Invalid), nc.span())),
                     None => None,
                 }
             }

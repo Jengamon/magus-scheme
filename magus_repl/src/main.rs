@@ -1,33 +1,7 @@
 use codesnake::{Block, CodeWidth, Label, LineIndex};
-use magus::lexer::{LexerError, Span, SyntaxToken, Token};
+use magus::lexer::Token;
 use rustyline::{history::MemHistory, Config};
 use yansi::Paint;
-
-fn make_block<'a>(
-    idx: &'a LineIndex,
-    labels: impl IntoIterator<Item = (Span, Result<Token, LexerError>)>,
-) -> Option<Block<&'a str, String>> {
-    Block::new(
-        idx,
-        labels.into_iter().map(|(range, tok)| {
-            let text = format!("{tok:?}");
-            Label::new(range)
-                .with_text(if tok.is_ok() {
-                    text.green().to_string()
-                } else {
-                    text.red().to_string()
-                })
-                .with_style(move |s| match tok {
-                    Ok(Token::Syntax(SyntaxToken::Identifier(_))) => s.blue().to_string(),
-                    Ok(Token::Syntax(SyntaxToken::Character(_))) => s.yellow().to_string(),
-                    Ok(Token::Syntax(SyntaxToken::String(_))) => s.cyan().to_string(),
-                    Ok(Token::Syntax(SyntaxToken::Number(_))) => s.bright_magenta().to_string(),
-                    Ok(_) => s,
-                    Err(_) => s.red().to_string(),
-                })
-        }),
-    )
-}
 
 // TODO Make SchemeHelper for all the REPL goodies
 
@@ -37,36 +11,44 @@ fn main() -> anyhow::Result<()> {
 
     while let Ok(input) = readline.readline(">> ") {
         let src = input.as_str();
+
+        // General parse
+        let gast = magus::general_parser::general_parse(&input);
+
+        // Show what the parser sees
+        println!("{:#?}", gast.syntax());
         let idx = LineIndex::new(src);
-        let tokens = Token::lexer(src);
 
-        let mut blocks = vec![];
-        let mut line_labels = vec![];
-        for (token, span) in tokens {
-            match token {
-                Ok(Token::Syntax(SyntaxToken::LineEnding)) => {
-                    blocks.push(make_block(&idx, line_labels.drain(..)))
-                }
-                tok => line_labels.push((span.clone(), tok)),
-            }
-        }
+        let block = (!gast.errors().is_empty())
+            .then_some(gast.errors())
+            .and_then(|errors| {
+                Block::new(
+                    &idx,
+                    errors.iter().map(|err| {
+                        Label::new(err.span())
+                            .with_text(err.to_string())
+                            .with_style(|s| s.red().to_string())
+                    }),
+                )
+            });
 
-        if !line_labels.is_empty() {
-            blocks.push(make_block(&idx, line_labels.drain(..)));
-        }
-
-        for block in blocks
-            .into_iter()
-            .filter_map(|blk| Some(blk?.map_code(|c| CodeWidth::new(c, c.len()))))
-        {
+        if let Some(block) = block.map(|blk| blk.map_code(|c| CodeWidth::new(c, c.len()))) {
             println!("{}[repl.scm]", block.prologue());
             print!("{block}");
             println!("{}", block.epilogue());
         }
 
-        // General parse
-        let gast = magus::general_parser::general_parse(&input);
-        println!("{:#?}", gast.syntax());
+        let tokens = Token::lexer(src);
+
+        for (tok, span) in tokens {
+            match tok {
+                Ok(Token::Syntax(syntax)) => {
+                    println!("[{span:?}] {}", format!("{syntax:?}").cyan())
+                }
+                Ok(Token::NestedComment(nc)) => println!("[{span:?}] {nc:?}"),
+                Err(err) => println!("[{span:?}] {}", err.to_string().red()),
+            }
+        }
 
         readline.add_history_entry(input)?;
     }

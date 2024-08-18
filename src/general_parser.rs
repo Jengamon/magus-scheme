@@ -10,7 +10,7 @@ pub use gast::{
     // trivia
     NestedComment,
     // token
-    Identifier,
+    Symbol,
     // top-level
     Module,
 };
@@ -105,29 +105,44 @@ pub enum CompoundTermKind {
 
 #[derive(Debug, thiserror::Error)]
 pub enum GeneralParserError {
-    #[error("lexer error {at:?}: {error}")]
+    #[error("lexer error: {error}")]
     LexerError { error: LexerError, at: Span },
-    #[error("malformed {kind:?} at {at:?}")]
+    #[error("malformed {kind:?}")]
     Malformed { kind: TokenKind, at: Span },
-    #[error("unterminated {kind:?} starting at {index}")]
+    #[error("unterminated {kind:?}")]
     Unterminated {
         kind: CompoundTermKind,
         index: usize,
+        // len of the unterminated signifier token
+        len: usize,
     },
-    #[error("unexpected {found:?} at {at:?}")]
+    #[error("unexpected {found:?}")]
     UnexpectedToken { found: TokenKind, at: Span },
-    #[error("unexpected {found:?} at {at:?}: expected one of {expected:?}")]
+    #[error("unexpected {found:?}: expected one of {expected:?}")]
     ExpectedToken {
         expected: Box<[TokenKind]>,
         found: TokenKind,
         at: Span,
     },
-    #[error("unexpected {} at {at:?}: expected one of {expected:?}", if let Some(text) = text { format!("text `{text}`") } else { "eof".to_string() })]
+    #[error("unexpected {}: expected one of {expected:?}", if let Some(text) = text { format!("text `{text}`") } else { "eof".to_string() })]
     Expected {
         expected: Box<[TokenKind]>,
         text: Option<Box<str>>,
         at: Span,
     },
+}
+
+impl GeneralParserError {
+    pub fn span(&self) -> Span {
+        match self {
+            GeneralParserError::LexerError { at, .. } => at.clone(),
+            GeneralParserError::Malformed { at, .. } => at.clone(),
+            GeneralParserError::Unterminated { index, len, .. } => *index..(*index + *len),
+            GeneralParserError::UnexpectedToken { at, .. } => at.clone(),
+            GeneralParserError::ExpectedToken { at, .. } => at.clone(),
+            GeneralParserError::Expected { at, .. } => at.clone(),
+        }
+    }
 }
 
 /// Lexes to produce a GAst, which is a parse result that can have 0+ errors
@@ -136,6 +151,7 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
     use rowan::Checkpoint;
 
     // This stores checkpoints and allows us to complete them later
+    #[derive(Debug)]
     enum CheckpointItem {
         // We have started a nested comment
         NestedComment(Checkpoint),
@@ -161,23 +177,69 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
     let mut checkpoints = Vec::<Checkpair>::new();
     let mut builder = GreenNodeBuilder::new();
 
-    const EXPECTED_TOKENS: &[TokenKind] = &[TokenKind::StartNestedComment];
+    const TOPLEVEL_EXPECTED_TOKENS: &[TokenKind] = &[
+        TokenKind::StartNestedComment,
+        TokenKind::Quote,
+        TokenKind::Quasiquote,
+        TokenKind::Unquote,
+        TokenKind::UnquoteSplicing,
+        TokenKind::Identifier,
+        TokenKind::Number,
+        TokenKind::DatumComment,
+        TokenKind::Comment,
+    ];
 
-    let in_nested_comment = |checkpoints: &[Checkpair]| {
+    // helping functions
+    fn in_nested_comment(checkpoints: &[Checkpair]) -> bool {
         matches!(
             checkpoints.last(),
             Some((CheckpointItem::NestedComment(_), _))
         )
-    };
-    let in_abbreviation = |checkpoints: &[Checkpair]| {
+    }
+    fn in_datum_comment(checkpoints: &[Checkpair]) -> bool {
+        matches!(
+            checkpoints.last(),
+            Some((CheckpointItem::DatumComment(_), _))
+        )
+    }
+    fn in_abbreviation(checkpoints: &[Checkpair]) -> bool {
         matches!(
             checkpoints.last(),
             Some((CheckpointItem::Abbreviation(_), _))
         )
-    };
-    let in_labeled = |checkpoints: &[Checkpair]| {
+    }
+    fn in_labeled(checkpoints: &[Checkpair]) -> bool {
         matches!(checkpoints.last(), Some((CheckpointItem::Labeled(_), _)))
-    };
+    }
+    fn finish_datum(
+        checkpoints: &mut Vec<Checkpair>,
+        builder: &mut GreenNodeBuilder<'static>,
+        datum_fn: impl FnOnce(&mut GreenNodeBuilder<'static>),
+    ) {
+        builder.start_node(DATUM.into());
+        datum_fn(builder);
+        builder.finish_node();
+
+        if in_abbreviation(checkpoints) {
+            let Some((CheckpointItem::Abbreviation(checkpoint), _)) = checkpoints.pop() else {
+                unreachable!()
+            };
+            builder.start_node_at(checkpoint, ABBREV.into());
+            builder.finish_node();
+        } else if in_labeled(checkpoints) {
+            let Some((CheckpointItem::Labeled(checkpoint), _)) = checkpoints.pop() else {
+                unreachable!()
+            };
+            builder.start_node_at(checkpoint, LABELED.into());
+            builder.finish_node();
+        } else if in_datum_comment(checkpoints) {
+            let Some((CheckpointItem::DatumComment(checkpoint), _)) = checkpoints.pop() else {
+                unreachable!()
+            };
+            builder.start_node_at(checkpoint, DCOMMENT.into());
+            builder.finish_node();
+        }
+    }
 
     builder.start_node(ROOT.into());
 
@@ -250,40 +312,84 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
                     })
                 }
             }
+            Ok(Token::Syntax(SyntaxToken::DatumComment)) => {
+                let checkpoint = builder.checkpoint();
+                builder.token(DCOMMENT_SYM.into(), "#;");
+                checkpoints.push((CheckpointItem::DatumComment(checkpoint), span.start));
+            }
+            Ok(Token::Syntax(SyntaxToken::Comment)) => {
+                builder.token(OLCOMMENT.into(), &source[span]);
+            }
+            // Since the lexer keeps track of whether we are in a nested comment or not
+            // we can just handled the other nodes as if they *aren't* in a comment
+            Ok(Token::Syntax(
+                SyntaxToken::Quote
+                | SyntaxToken::Quasiquote
+                | SyntaxToken::Unquote
+                | SyntaxToken::UnquoteSplicing,
+            )) => {
+                let checkpoint = builder.checkpoint();
+                // read the symbol token as ABBREV_SYM
+                builder.token(ABBREV_SYM.into(), &source[span.clone()]);
+                checkpoints.push((CheckpointItem::Abbreviation(checkpoint), span.start));
+            }
+            // datum can handle themselves and any checkpoint item that needs them
+            // (and we wrote a helper to help them)
+            Ok(Token::Syntax(SyntaxToken::Identifier(_))) => {
+                finish_datum(&mut checkpoints, &mut builder, |builder| {
+                    builder.token(SYMBOL.into(), &source[span]);
+                })
+            }
+            Ok(Token::Syntax(SyntaxToken::Number(_))) => {
+                finish_datum(&mut checkpoints, &mut builder, |builder| {
+                    builder.token(NUMBER.into(), &source[span]);
+                })
+            }
             Ok(tok) => {
                 builder.token(ERROR.into(), &source[span.clone()]);
                 errors.push(GeneralParserError::ExpectedToken {
-                    expected: Box::from(EXPECTED_TOKENS),
+                    expected: Box::from(TOPLEVEL_EXPECTED_TOKENS),
                     found: tok.into(),
                     at: span,
                 })
             }
             Err(e) => {
                 builder.token(ERROR.into(), &source[span.clone()]);
-                errors.push(match e {
+                match e {
                     // cheat out and mark malformed as what they *might* be
-                    // but if we are here, it's definitely not supposed to be here
-                    LexerError::MalformedNumber => GeneralParserError::ExpectedToken {
-                        expected: Box::from(EXPECTED_TOKENS),
-                        found: TokenKind::Number,
-                        at: span,
-                    },
-                    LexerError::MalformedIdentifier => GeneralParserError::ExpectedToken {
-                        expected: Box::from(EXPECTED_TOKENS),
-                        found: TokenKind::Identifier,
-                        at: span,
-                    },
-                    LexerError::MalformedString => GeneralParserError::ExpectedToken {
-                        expected: Box::from(EXPECTED_TOKENS),
-                        found: TokenKind::String,
-                        at: span,
-                    },
-                    _ => GeneralParserError::Expected {
-                        expected: Box::from(EXPECTED_TOKENS),
+                    LexerError::MalformedNumber => {
+                        finish_datum(&mut checkpoints, &mut builder, |builder| {
+                            builder.token(NUMBER.into(), &source[span.clone()]);
+                        });
+                        errors.push(GeneralParserError::Malformed {
+                            kind: TokenKind::Number,
+                            at: span,
+                        });
+                    }
+                    LexerError::MalformedIdentifier => {
+                        finish_datum(&mut checkpoints, &mut builder, |builder| {
+                            builder.token(SYMBOL.into(), &source[span.clone()]);
+                        });
+                        errors.push(GeneralParserError::Malformed {
+                            kind: TokenKind::Identifier,
+                            at: span,
+                        });
+                    }
+                    LexerError::MalformedString => {
+                        finish_datum(&mut checkpoints, &mut builder, |builder| {
+                            builder.token(STRING.into(), &source[span.clone()]);
+                        });
+                        errors.push(GeneralParserError::Malformed {
+                            kind: TokenKind::String,
+                            at: span,
+                        });
+                    }
+                    _ => errors.push(GeneralParserError::Expected {
+                        expected: Box::from(TOPLEVEL_EXPECTED_TOKENS),
                         text: Some(Box::from(&source[span.clone()])),
                         at: span,
-                    },
-                })
+                    }),
+                }
             }
         }
     }
@@ -294,20 +400,28 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
             CheckpointItem::NestedComment(chkp) => {
                 (chkp, NCOMMENT, CompoundTermKind::NestedComment)
             }
-            CheckpointItem::DatumComment(_) => todo!(),
-            CheckpointItem::Abbreviation(_) => todo!(),
-            CheckpointItem::Labeled(_) => todo!(),
-            CheckpointItem::List(_) => todo!(),
-            CheckpointItem::Bytevector(_) => todo!(),
-            CheckpointItem::Vector(_) => todo!(),
+            CheckpointItem::DatumComment(chkp) => (chkp, DCOMMENT, CompoundTermKind::DatumComment),
+            CheckpointItem::Abbreviation(chkp) => (chkp, ABBREV, CompoundTermKind::Abbreviation),
+            CheckpointItem::Labeled(chkp) => (chkp, LABELED, CompoundTermKind::Labeled),
+            CheckpointItem::List(chkp) => (chkp, LIST, CompoundTermKind::List),
+            CheckpointItem::Bytevector(chkp) => (chkp, BYTEVECTOR, CompoundTermKind::Bytevector),
+            CheckpointItem::Vector(chkp) => (chkp, VECTOR, CompoundTermKind::Vector),
         };
 
         builder.start_node_at(checkpoint, skind.into());
         builder.finish_node();
-        errors.push(GeneralParserError::Unterminated { kind, index: start });
+        errors.push(GeneralParserError::Unterminated {
+            kind,
+            index: start,
+            len: 2,
+        });
     }
 
     builder.finish_node();
+
+    // Sort errors into text order
+    // (for codesnake)
+    errors.sort_unstable_by_key(|err| err.span().start);
 
     GAst {
         green_node: builder.finish(),

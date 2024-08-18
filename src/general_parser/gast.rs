@@ -1,4 +1,4 @@
-use crate::lexer::{Directive, SyntaxToken};
+use crate::lexer::{Directive, LexerError, SyntaxToken};
 use icu_casemap::CaseMapper;
 
 /// GAst Syntax Types
@@ -11,13 +11,15 @@ pub enum SyntaxKind {
     L_PAREN = 0, // '('
     R_PAREN,     // ')'
     // Both the successful and malformed are put under this same syntax kind
-    IDENTIFIER,
+    SYMBOL,
     NUMBER,
     STRING,
     BOOLEAN,
     CHARACTER,
+    ABBREV_SYM,     // one of ' , ,@ `
     START_NCOMMENT, // #|
     END_NCOMMENT,   // |#
+    DCOMMENT_SYM,   // #;
     DLABEL,         // #0= "datum label"
     DTRIGGER,       // #0# "datum trigger"
     OLCOMMENT,      // ; comment
@@ -31,10 +33,11 @@ pub enum SyntaxKind {
     DCOMMENT,   // #;'(datum comment)
     LIST,       // `(+ 2 3)`, `()` or `(() . x)`
     ABBREV,     // (,|'|`|,@) DATUM
+    LABELED,    // DLABEL DATUM
     BYTEVECTOR, // #U8( 3 #b01 )
     VECTOR,     // #(  data is "cool")
-    DATUM, // wraps any valid datum, which is any of the above kinds, (DLABEL DATUM), and DTRIGGER
-    ROOT,  // top-level node: a list of s-expressions
+    DATUM,      // wraps any valid datum
+    ROOT,       // top-level node: a list of s-expressions
 }
 use rowan::SyntaxText;
 use SyntaxKind::*;
@@ -132,22 +135,24 @@ impl GAstNode for NestedComment {
     }
 }
 
-pub struct Identifier(MagusSyntaxToken);
-impl Identifier {
-    pub fn identifier(&self, case_insensitive: bool) -> Box<str> {
+pub struct Symbol(MagusSyntaxToken);
+impl Symbol {
+    /// returns the case-folded identifier or the malformed identifier (not case-folded)
+    /// this token corresponds to
+    pub fn identifier(&self, case_insensitive: bool) -> Result<Box<str>, Box<str>> {
         // Look for the last directive the precedes us (if any)
         // If there is one, that directive determines our case-sensitivity
         // If there is not one, use the passed in case-insensitivity
-        fn read_ident(s: &str, ci: bool) -> Box<str> {
+        fn read_ident(s: &str, ci: bool, stok: &MagusSyntaxToken) -> Result<Box<str>, Box<str>> {
             let tok = SyntaxToken::lexer(s).next();
             match tok {
-                Some(Ok(SyntaxToken::Identifier(id))) => {
-                    if ci {
-                        Box::from(CaseMapper::new().fold_string(&id).as_str())
-                    } else {
-                        id
-                    }
-                }
+                Some(Ok(SyntaxToken::Identifier(id))) => Ok(if ci {
+                    Box::from(CaseMapper::new().fold_string(&id).as_str())
+                } else {
+                    id
+                }),
+                // also handle invalidly lexed variants
+                Some(Err(LexerError::MalformedIdentifier)) => Err(Box::from(stok.text())),
                 _ => unreachable!(),
             }
         }
@@ -164,18 +169,18 @@ impl Identifier {
                 Some(Ok(SyntaxToken::Directive(Directive::NoFoldCase))) => false,
                 _ => unreachable!(),
             };
-            read_ident(self.0.text(), ci)
+            read_ident(self.0.text(), ci, &self.0)
         } else {
-            read_ident(self.0.text(), case_insensitive)
+            read_ident(self.0.text(), case_insensitive, &self.0)
         }
     }
 }
-impl GAstToken for Identifier {
+impl GAstToken for Symbol {
     fn cast(syntax: MagusSyntaxToken) -> Option<Self>
     where
         Self: Sized,
     {
-        (syntax.kind() == IDENTIFIER).then_some(Self(syntax))
+        (syntax.kind() == SYMBOL).then_some(Self(syntax))
     }
 
     fn syntax(&self) -> &MagusSyntaxToken {

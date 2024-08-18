@@ -1,0 +1,6 @@
+---
+[0..3] Syntax(Number(ExactComplex { real: Integer { value: 0, is_neg: false }, imaginary: Integer { value: 1, is_neg: false } }))
+[3..4] Syntax(IntralineWhitespace)
+[4..6] Syntax(Number(ExactComplex { real: Integer { value: 0, is_neg: false }, imaginary: Integer { value: 1, is_neg: false } }))
+---
+0+i +i

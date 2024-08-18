@@ -296,10 +296,7 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
             Ok(Token::NestedComment(NestedCommentToken::CommentText)) => {
                 unreachable!("should not be produced outside of a nested comment")
             }
-            Ok(
-                Token::Syntax(t @ SyntaxToken::IntralineWhitespace)
-                | Token::Syntax(t @ SyntaxToken::LineEnding),
-            ) => {
+            Ok(Token::Syntax(SyntaxToken::IntralineWhitespace)) => {
                 // read in as whitespace, which is only an error for 2 constructs: abbreviations and labeled
                 if !in_abbreviation(&checkpoints) && !in_labeled(&checkpoints) {
                     builder.token(WHITESPACE.into(), &source[span]);
@@ -307,7 +304,20 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
                     // the two constructs expect the start of a datum
                     errors.push(GeneralParserError::ExpectedToken {
                         expected: Box::from([TokenKind::LParen]),
-                        found: t.into(),
+                        found: TokenKind::IntralineWhitespace,
+                        at: span,
+                    })
+                }
+            }
+            Ok(Token::Syntax(SyntaxToken::LineEnding)) => {
+                // read in as whitespace, which is only an error for 2 constructs: abbreviations and labeled
+                if !in_abbreviation(&checkpoints) && !in_labeled(&checkpoints) {
+                    builder.token(LINEEND.into(), &source[span]);
+                } else {
+                    // the two constructs expect the start of a datum
+                    errors.push(GeneralParserError::ExpectedToken {
+                        expected: Box::from([TokenKind::LParen]),
+                        found: TokenKind::LineEnding,
                         at: span,
                     })
                 }

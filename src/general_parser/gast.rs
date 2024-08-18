@@ -26,6 +26,7 @@ pub enum SyntaxKind {
     COMMENT,        // type used for any text *within* a comment
     DIRECTIVE,      // #!(no-)fold-case
     WHITESPACE,     // whitespaces is explicit
+    LINEEND,        // line ending (\r, \r\n, \n)
     ERROR,          // as well as errors
 
     // composite nodes

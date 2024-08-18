@@ -3,11 +3,11 @@
 ; this first part is for spans of errors
 ---
 ; this second part is for spans of tokens
-[0..2] DatumComment
-[2..3] IntralineWhitespace
-[3..18] Identifier("aλΛ")
-[18..19] IntralineWhitespace
-[19..20] Identifier("a")
+[0..2] Syntax(DatumComment)
+[2..3] Syntax(IntralineWhitespace)
+[3..18] Syntax(Identifier("aλΛ"))
+[18..19] Syntax(IntralineWhitespace)
+[19..20] Syntax(Identifier("a"))
 ; just like in gpd files, comments aren't allowed after the second section (it should just be scheme)
 ; well, now that's just an implementation detail
 ---

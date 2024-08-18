@@ -1,5 +1,5 @@
 use datatest_stable::Utf8Path;
-use magus::general_parser::general_parse;
+use magus::{general_parser::general_parse, lexer::Token};
 
 #[derive(thiserror::Error, Debug)]
 #[error("error(s) occured in general parse datatest at {0}")]
@@ -97,7 +97,44 @@ fn general_parser_test(path: &Utf8Path, contents: String) -> datatest_stable::Re
 }
 
 fn lexer_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()> {
-    todo!()
+    let (mut errors, mut tokens, source) = read_datatest(&contents);
+    // Reverse error and tokens lines to make them more processable
+    errors.reverse();
+    tokens.reverse();
+    let mut was_mismatch = false;
+
+    for (token, span) in Token::lexer(&source) {
+        match token {
+            Ok(tok) => {
+                let got = format!("[{span:?}] {tok:?}");
+                let expected = tokens.pop();
+                if !expected.is_some_and(|expect| expect.trim() == got) {
+                    println!(
+                        "error in {path}: token mismatch\n\nGot:\n{got}\n\nExpected:\n{}",
+                        expected.unwrap_or("<not present>")
+                    );
+                    was_mismatch = true;
+                }
+            }
+            Err(err) => {
+                let got = format!("[{span:?}] {err:?}");
+                let expected = errors.pop();
+                if !expected.is_some_and(|expect| expect.trim() == got) {
+                    println!(
+                        "error in {path}: token error mismatch\n\nGot:\n{got}\n\nExpected:\n{}",
+                        expected.unwrap_or("<not present>")
+                    );
+                    was_mismatch = true;
+                }
+            }
+        }
+    }
+
+    if was_mismatch {
+        Err(DatatestError(Box::from(path)))?
+    } else {
+        Ok(())
+    }
 }
 
 datatest_stable::harness! {

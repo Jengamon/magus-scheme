@@ -192,6 +192,17 @@ fn read_number(
     lexer: &mut logos::Lexer<SyntaxToken>,
     radix: u32,
 ) -> Result<SchemeNumber, LexerError> {
+    // Before we convert, run a simple procedure that find if we are just looking at an imaginary number
+    let num_start = lexer
+        .slice()
+        .trim_start_matches(['#', 'e', 'E', 'i', 'I', 'b', 'B', 'o', 'O', 'x', 'X']);
+    let without_sign = num_start.strip_prefix(['+', '-']).unwrap_or(num_start);
+    let just_imaginary = ["-i", "+i"].contains(&lexer.slice())
+        || if let Some(without_inf) = without_sign.strip_prefix("inf.0") {
+            without_inf.contains('i') && !without_inf.contains(['+', '-'])
+        } else {
+            without_sign.contains('i') && !without_sign.contains(['+', '-'])
+        };
     let mut chars = lexer.slice().chars().peekable();
 
     // Exact can look like #!#e, #e#! or #! where ! is the base character [boxd] (or not present in case of decimal)
@@ -570,17 +581,11 @@ fn read_number(
     }
 
     if contains_flag('e') || !contains_flag('i') {
-        // we only read in exact numbers, which are
-        // nnnn
-        // nnnnsnnnni
-        // nnnnsnnnn/nnnni
-        // nnnn/nnnn
-        // nnnn/nnnnsi
-        // nnnn/nnnnsnnnni
-        // nnnn/nnnnsnnnn/nnnni
-        let real_part = read_number_part(&mut chars, radix, false)?;
+        // we only read in exact numbers
+        // but we default to exact numbers
+        let real_part = read_number_part(&mut chars, radix, just_imaginary)?;
         match chars.peek() {
-            Some('+' | '-') => {
+            Some('+' | '-') if !just_imaginary => {
                 let im_part = read_number_part(&mut chars, radix, true)?;
                 Ok(SchemeNumber::ExactComplex {
                     real: real_part,
@@ -588,13 +593,20 @@ fn read_number(
                 })
             }
             Some(_) => Err(LexerError::MalformedNumber)?,
-            None => Ok(SchemeNumber::Exact(real_part)),
+            None if !just_imaginary => Ok(SchemeNumber::Exact(real_part)),
+            None => Ok(SchemeNumber::ExactComplex {
+                real: ExactReal::Integer {
+                    value: 0,
+                    is_neg: false,
+                },
+                imaginary: real_part,
+            }),
         }
     } else {
         // we handle !contains_flag e and contains_flag i
-        let real_part = read_number_part(&mut chars, radix, false)?;
+        let real_part = read_number_part(&mut chars, radix, just_imaginary)?;
         match chars.peek() {
-            Some('+' | '-') => {
+            Some('+' | '-') if !just_imaginary => {
                 let im_part = read_number_part(&mut chars, radix, true)?;
                 Ok(SchemeNumber::InexactComplex {
                     real: real_part.inexact(),
@@ -602,7 +614,11 @@ fn read_number(
                 })
             }
             Some(_) => Err(LexerError::MalformedNumber)?,
-            None => Ok(SchemeNumber::Inexact(real_part.inexact())),
+            None if !just_imaginary => Ok(SchemeNumber::Inexact(real_part.inexact())),
+            None => Ok(SchemeNumber::InexactComplex {
+                real: 0.0,
+                imaginary: real_part.inexact(),
+            }),
         }
     }
 }
@@ -717,53 +733,56 @@ pub enum SyntaxToken {
 
     // The number tower is supported at least by the lexer (and currently is mostly rejected by the general parser)
     // Same as all the others, the lexer here is a bit more permissive to allow for better errors
+    // explicit
+    #[token("-i", priority = 5, callback = |l| read_number(l, 10))]
+    #[token("+i", priority = 5, callback = |l| read_number(l, 10))]
     // binary
-    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?", |l| read_number(l, 2))]
-    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-](inf|nan).0", |l| read_number(l, 2))]
+    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?i?", |l| read_number(l, 2))]
+    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-](inf|nan).0i?", |l| read_number(l, 2))]
     #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-](inf|nan).0[+-](inf|nan).0i?", |l| read_number(l, 2))]
     #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?[+-][01]*(/[01]+)?i?", |l| read_number(l, 2))]
     #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-](inf|nan).0[+-][01]*(/[01]+)?i?", |l| read_number(l, 2))]
     #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?[+-](inf|nan).0i?", |l| read_number(l, 2))]
-    #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?", |l| read_number(l, 2))]
-    #[regex(r"(?i)(#i#b|#b#i)[+-](inf|nan).0", |l| read_number(l, 2))]
+    #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?i?", |l| read_number(l, 2))]
+    #[regex(r"(?i)(#i#b|#b#i)[+-](inf|nan).0i?", |l| read_number(l, 2))]
     #[regex(r"(?i)(#i#b|#b#i)[+-](inf|nan).0[+-](inf|nan).0i?", |l| read_number(l, 2))]
     #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?[+-][01]*(/[01]+)?i?", |l| read_number(l, 2))]
     #[regex(r"(?i)(#i#b|#b#i)[+-](inf|nan).0[+-][01]*(/[01]+)?i?", |l| read_number(l, 2))]
     #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?[+-](inf|nan).0i?", |l| read_number(l, 2))]
     // octal
-    #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-]?[0-7]+(/[0-7]+)?", |l| read_number(l, 8))]
-    #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-](inf|nan).0", |l| read_number(l, 8))]
+    #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-]?[0-7]+(/[0-7]+)?i?", |l| read_number(l, 8))]
+    #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-](inf|nan).0i?", |l| read_number(l, 8))]
     #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-](inf|nan).0[+-](inf|nan).0i?", |l| read_number(l, 8))]
     #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-]?[0-7]+(/[0-7]+)?[+-][0-7]*(/[0-7]+)?i?", |l| read_number(l, 8))]
     #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-](inf|nan).0[+-][0-7]*(/[0-7]+)?i?", |l| read_number(l, 8))]
     #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-]?[0-7]+(/[0-7]+)?[+-](inf|nan).0i?", |l| read_number(l, 8))]
-    #[regex(r"(?i)(#i#o|#o#i)[+-]?[0-7]+(/[0-7]+)?", |l| read_number(l, 8))]
-    #[regex(r"(?i)(#i#o|#o#i)[+-](inf|nan).0", |l| read_number(l, 8))]
+    #[regex(r"(?i)(#i#o|#o#i)[+-]?[0-7]+(/[0-7]+)?i?", |l| read_number(l, 8))]
+    #[regex(r"(?i)(#i#o|#o#i)[+-](inf|nan).0i?", |l| read_number(l, 8))]
     #[regex(r"(?i)(#i#o|#o#i)[+-](inf|nan).0[+-](inf|nan).0i?", |l| read_number(l, 8))]
     #[regex(r"(?i)(#i#o|#o#i)[+-]?[0-7]+(/[0-7]+)?[+-][0-7]*(/[0-7]+)?i?", |l| read_number(l, 8))]
     #[regex(r"(?i)(#i#o|#o#i)[+-](inf|nan).0[+-][0-7]*(/[0-7]+)?i?", |l| read_number(l, 8))]
     #[regex(r"(?i)(#i#o|#o#i)[+-]?[0-7]+(/[0-7]+)?[+-](inf|nan).0i?", |l| read_number(l, 8))]
     // hex
-    #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-]?[0-9a-f]+(/[0-9a-f]+)?", |l| read_number(l, 16))]
-    #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-](inf|nan).0", |l| read_number(l, 16))]
+    #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-]?[0-9a-f]+(/[0-9a-f]+)?i?", |l| read_number(l, 16))]
+    #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-](inf|nan).0i?", |l| read_number(l, 16))]
     #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-](inf|nan).0[+-](inf|nan).0i?", |l| read_number(l, 16))]
     #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-]?[0-9a-f]+(/[0-9a-f]+)?[+-][0-9a-f]*(/[0-9a-f]+)?i?", |l| read_number(l, 16))]
     #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-](inf|nan).0[+-][0-9a-f]*(/[0-9a-f]+)?i?", |l| read_number(l, 16))]
     #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-]?[0-9a-f]+(/[0-9a-f]+)?[+-](inf|nan).0i?", |l| read_number(l, 16))]
-    #[regex(r"(?i)(#i#x|#x#i)[+-]?[0-9a-f]+(/[0-9a-f]+)?", |l| read_number(l, 16))]
-    #[regex(r"(?i)(#i#x|#x#i)[+-](inf|nan).0", |l| read_number(l, 16))]
+    #[regex(r"(?i)(#i#x|#x#i)[+-]?[0-9a-f]+(/[0-9a-f]+)?i?", |l| read_number(l, 16))]
+    #[regex(r"(?i)(#i#x|#x#i)[+-](inf|nan).0i?", |l| read_number(l, 16))]
     #[regex(r"(?i)(#i#x|#x#i)[+-](inf|nan).0[+-](inf|nan).0i?", |l| read_number(l, 16))]
     #[regex(r"(?i)(#i#x|#x#i)[+-]?[0-9a-f]+(/[0-9a-f]+)?[+-][0-9a-f]*(/[0-9a-f]+)?i?", |l| read_number(l, 16))]
     #[regex(r"(?i)(#i#x|#x#i)[+-](inf|nan).0[+-][0-9a-f]*(/[0-9a-f]+)?i?", |l| read_number(l, 16))]
     #[regex(r"(?i)(#i#x|#x#i)[+-]?[0-9a-f]+(/[0-9a-f]+)?[+-](inf|nan).0i?", |l| read_number(l, 16))]
     // decimal
     // - decimal real
-    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+", |l| read_number(l, 10))]
-    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-](inf|nan).0", |l| read_number(l, 10))]
-    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+", |l| read_number(l, 10))]
-    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+e[+-]?[0-9]+", |l| read_number(l, 10))]
-    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
-    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-](inf|nan).0i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+e[+-]?[0-9]+i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     // - decimal complex
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-][0-9]*i?", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-](inf|nan).0i?", |l| read_number(l, 10))]
@@ -792,12 +811,12 @@ pub enum SyntaxToken {
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-]\.[0-9]+(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     // - inexact decimal real
-    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+", |l| read_number(l, 10))]
-    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-](inf|nan).0", |l| read_number(l, 10))]
-    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+/[0-9]+", |l| read_number(l, 10))]
-    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+e[+-]?[0-9]+", |l| read_number(l, 10))]
-    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
-    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-](inf|nan).0i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+/[0-9]+i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+e[+-]?[0-9]+i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     // - inexact decimal complex
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+[+-][0-9]*i?", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+[+-](inf|nan).0i?", |l| read_number(l, 10))]
@@ -894,7 +913,7 @@ impl<'src> Iterator for Lexer<'src> {
                     Some(Ok(t @ NestedCommentToken::CommentText)) => {
                         Some((Ok(Token::NestedComment(t)), nc.span()))
                     }
-                    Some(Err(e)) => Some((Err(LexerError::Invalid), nc.span())),
+                    Some(Err(())) => Some((Err(LexerError::Invalid), nc.span())),
                     None => None,
                 }
             }

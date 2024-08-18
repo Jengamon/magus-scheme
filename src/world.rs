@@ -57,6 +57,10 @@ impl<T: IntoIterator<Item = impl AsRef<str>>> From<T> for LibraryName {
 
 #[derive(Default)]
 pub struct World {
+    // TODO Make World also have the gc-arenas for values and for runtimes
+    // so that runtimes can be interacted with stashed.
+    // a world is the technical definition of our entire Scheme environment, so this
+    // should be ok!
     /// interner
     rodeo: lasso::Rodeo,
     /// scripts that can be requested for execution

@@ -1,5 +1,5 @@
-repl:
-    cargo run -p magus_repl
+repl *FLAGS:
+    cargo run -p magus_repl -- {{FLAGS}}
 
 clear-locale-data:
     rm -Rf locale_data

@@ -1,11 +1,34 @@
+use clap::Parser;
 use codesnake::{Block, CodeWidth, Label, LineIndex};
-use magus::lexer::Token;
+use magus::{
+    general_parser::{GAstToken, MagusSyntaxElement, Symbol, SyntaxKind},
+    lexer::Token,
+};
 use rustyline::{history::MemHistory, Config};
 use yansi::Paint;
 
-// TODO Make SchemeHelper for all the REPL goodies
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    /// Input file to read (use `-` for stdin, and not present to use REPL mode)
+    file: Option<String>,
+}
 
 fn main() -> anyhow::Result<()> {
+    let args = Cli::parse();
+    if let Some(file) = args.file {
+        if file == "-" {
+            todo!("read from standard input")
+        } else {
+            todo!("open and read file")
+        }
+    } else {
+        repl()
+    }
+}
+
+// TODO Make SchemeHelper for all the REPL goodies
+fn repl() -> anyhow::Result<()> {
     let mut readline =
         rustyline::Editor::<(), _>::with_history(Config::default(), MemHistory::new())?;
 
@@ -14,6 +37,30 @@ fn main() -> anyhow::Result<()> {
 
         // General parse
         let gast = magus::general_parser::general_parse(&input);
+
+        if let Some(ft) = gast
+            .syntax()
+            .children_with_tokens()
+            .filter_map(|elem| match elem {
+                // idents are within DATUM nodes, so...
+                MagusSyntaxElement::Token(_) => None,
+                MagusSyntaxElement::Node(n) => {
+                    if n.kind() == SyntaxKind::DATUM {
+                        Some(n)
+                    } else {
+                        None
+                    }
+                }
+            })
+            .find_map(|node| {
+                node.children_with_tokens().find_map(|elem| match elem {
+                    MagusSyntaxElement::Token(t) => Symbol::cast(t),
+                    _ => None,
+                })
+            })
+        {
+            println!("First identifier of module: {:?}", ft.identifier(false));
+        }
 
         // Show what the parser sees
         println!("{:#?}", gast.syntax());

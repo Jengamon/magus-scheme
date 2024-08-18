@@ -3,10 +3,13 @@
 use logos::Span;
 use rowan::{GreenNode, GreenNodeBuilder};
 
-use crate::lexer::{LexerError, NestedCommentToken, SyntaxToken, Token};
+use crate::{
+    lexer::{LexerError, NestedCommentToken, SyntaxToken, Token},
+    ExactReal, SchemeNumber,
+};
 #[rustfmt::skip]
 pub use gast::{
-    GAstNode, GAstToken, MagusSyntaxElement, MagusSyntaxNode, MagusSyntaxToken,
+    SyntaxKind, GAstNode, GAstToken, MagusSyntaxElement, MagusSyntaxNode, MagusSyntaxToken,
     // trivia
     NestedComment,
     // token
@@ -29,6 +32,7 @@ pub enum TokenKind {
     Directive,
     LParen,
     RParen,
+    Dot,
     Quote,
     Quasiquote,
     Unquote,
@@ -56,6 +60,7 @@ impl From<SyntaxToken> for TokenKind {
             SyntaxToken::Directive(_) => TokenKind::Directive,
             SyntaxToken::LParen => TokenKind::LParen,
             SyntaxToken::RParen => TokenKind::RParen,
+            SyntaxToken::Dot => TokenKind::Dot,
             SyntaxToken::Quote => TokenKind::Quote,
             SyntaxToken::Quasiquote => TokenKind::Quasiquote,
             SyntaxToken::Unquote => TokenKind::Unquote,
@@ -105,10 +110,10 @@ pub enum CompoundTermKind {
 
 #[derive(Debug, thiserror::Error)]
 pub enum GeneralParserError {
-    #[error("lexer error: {error}")]
-    LexerError { error: LexerError, at: Span },
     #[error("malformed {kind:?}")]
     Malformed { kind: TokenKind, at: Span },
+    #[error("malformed list")]
+    MalformedList { at: Span },
     #[error("unterminated {kind:?}")]
     Unterminated {
         kind: CompoundTermKind,
@@ -118,7 +123,13 @@ pub enum GeneralParserError {
     },
     #[error("unexpected {found:?}")]
     UnexpectedToken { found: TokenKind, at: Span },
-    #[error("unexpected {found:?}: expected one of {expected:?}")]
+    #[error("unexpected {found:?}: expected {}", 
+        if expected.len() == 1 {
+            format!("{:?}", expected[0])
+        } else {
+            format!("one of {expected:?}") 
+        }
+    )]
     ExpectedToken {
         expected: Box<[TokenKind]>,
         found: TokenKind,
@@ -130,17 +141,20 @@ pub enum GeneralParserError {
         text: Option<Box<str>>,
         at: Span,
     },
+    #[error("number out of byte range")]
+    ByteOutOfRange { at: Span },
 }
 
 impl GeneralParserError {
     pub fn span(&self) -> Span {
         match self {
-            GeneralParserError::LexerError { at, .. } => at.clone(),
             GeneralParserError::Malformed { at, .. } => at.clone(),
+            GeneralParserError::MalformedList { at } => at.clone(),
             GeneralParserError::Unterminated { index, len, .. } => *index..(*index + *len),
             GeneralParserError::UnexpectedToken { at, .. } => at.clone(),
             GeneralParserError::ExpectedToken { at, .. } => at.clone(),
             GeneralParserError::Expected { at, .. } => at.clone(),
+            GeneralParserError::ByteOutOfRange { at } => at.clone(),
         }
     }
 }
@@ -162,7 +176,8 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
         // Start labeled datum
         Labeled(Checkpoint),
         // We have started a list
-        List(Checkpoint),
+        // how many elements after a dot was encountered?
+        List(Checkpoint, usize, Option<usize>),
         // ditto bytevector
         Bytevector(Checkpoint),
         // ...
@@ -173,7 +188,7 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
     let source = source.as_ref();
     let lexer = Token::lexer(source);
     let mut errors = vec![];
-    type Checkpair = (CheckpointItem, usize);
+    type Checkpair = (CheckpointItem, core::ops::Range<usize>);
     let mut checkpoints = Vec::<Checkpair>::new();
     let mut builder = GreenNodeBuilder::new();
 
@@ -185,59 +200,101 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
         TokenKind::UnquoteSplicing,
         TokenKind::Identifier,
         TokenKind::Number,
+        TokenKind::String,
+        TokenKind::Character,
+        TokenKind::Boolean,
         TokenKind::DatumComment,
         TokenKind::Comment,
+        TokenKind::DatumLabel,
+        TokenKind::DatumLabelValue,
+    ];
+
+    const DATUM_EXPECTED_TOKENS: &[TokenKind] = &[
+        TokenKind::Quote,
+        TokenKind::Quasiquote,
+        TokenKind::Unquote,
+        TokenKind::UnquoteSplicing,
+        TokenKind::Identifier,
+        TokenKind::Number,
+        TokenKind::LParen,
+        TokenKind::StartVector,
+        TokenKind::StartBytevector,
     ];
 
     // helping functions
-    fn in_nested_comment(checkpoints: &[Checkpair]) -> bool {
-        matches!(
-            checkpoints.last(),
-            Some((CheckpointItem::NestedComment(_), _))
-        )
+    macro_rules! check_if_in {
+        ($fn_name:ident for $item:ident) => {
+            fn $fn_name(checkpoints: &[Checkpair]) -> bool {
+                matches!(checkpoints.last(), Some((CheckpointItem::$item(_), _)))
+            }
+        };
     }
-    fn in_datum_comment(checkpoints: &[Checkpair]) -> bool {
-        matches!(
-            checkpoints.last(),
-            Some((CheckpointItem::DatumComment(_), _))
-        )
+    check_if_in!(in_nested_comment for NestedComment);
+    check_if_in!(in_datum_comment for DatumComment);
+    check_if_in!(in_abbreviation for Abbreviation);
+    check_if_in!(in_labeled for Labeled);
+    fn in_list(checkpoints: &[Checkpair]) -> bool {
+        matches!(checkpoints.last(), Some((CheckpointItem::List(_, _, _), _)))
     }
-    fn in_abbreviation(checkpoints: &[Checkpair]) -> bool {
-        matches!(
-            checkpoints.last(),
-            Some((CheckpointItem::Abbreviation(_), _))
-        )
-    }
-    fn in_labeled(checkpoints: &[Checkpair]) -> bool {
-        matches!(checkpoints.last(), Some((CheckpointItem::Labeled(_), _)))
-    }
+    check_if_in!(in_vector for Vector);
+    check_if_in!(in_bytevector for Bytevector);
+
     fn finish_datum(
         checkpoints: &mut Vec<Checkpair>,
         builder: &mut GreenNodeBuilder<'static>,
+        datum_checkpoint: Option<Checkpoint>,
         datum_fn: impl FnOnce(&mut GreenNodeBuilder<'static>),
     ) {
-        builder.start_node(DATUM.into());
+        if datum_checkpoint.is_none() {
+            builder.start_node(DATUM.into());
+        }
         datum_fn(builder);
+        if let Some(checkpoint) = datum_checkpoint {
+            builder.start_node_at(checkpoint, DATUM.into());
+        }
         builder.finish_node();
 
-        if in_abbreviation(checkpoints) {
+        while in_abbreviation(checkpoints) {
             let Some((CheckpointItem::Abbreviation(checkpoint), _)) = checkpoints.pop() else {
                 unreachable!()
             };
+            builder.start_node_at(checkpoint, DATUM.into());
             builder.start_node_at(checkpoint, ABBREV.into());
             builder.finish_node();
-        } else if in_labeled(checkpoints) {
+            builder.finish_node();
+        }
+
+        while in_labeled(checkpoints) {
             let Some((CheckpointItem::Labeled(checkpoint), _)) = checkpoints.pop() else {
                 unreachable!()
             };
+            builder.start_node_at(checkpoint, DATUM.into());
             builder.start_node_at(checkpoint, LABELED.into());
             builder.finish_node();
-        } else if in_datum_comment(checkpoints) {
+            builder.finish_node();
+        }
+
+        while in_datum_comment(checkpoints) {
             let Some((CheckpointItem::DatumComment(checkpoint), _)) = checkpoints.pop() else {
                 unreachable!()
             };
             builder.start_node_at(checkpoint, DCOMMENT.into());
             builder.finish_node();
+        }
+
+        // lists with a dot need to know how many datum have been completed
+        if in_list(checkpoints) {
+            let Some((CheckpointItem::List(checkpoint, pre_dot, post_dot), span)) =
+                checkpoints.pop()
+            else {
+                unreachable!()
+            };
+            let (pre_dot, post_dot) = if let Some(prev) = post_dot {
+                (pre_dot, Some(prev + 1))
+            } else {
+                (pre_dot + 1, None)
+            };
+            checkpoints.push((CheckpointItem::List(checkpoint, pre_dot, post_dot), span));
         }
     }
 
@@ -256,7 +313,7 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
                 } else {
                     builder.token(ERROR.into(), "#|");
                     errors.push(GeneralParserError::ExpectedToken {
-                        expected: Box::new([TokenKind::LParen]),
+                        expected: Box::from(DATUM_EXPECTED_TOKENS),
                         found: TokenKind::StartNestedComment,
                         at: span.clone(),
                     });
@@ -265,7 +322,7 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
                 // behave differently...
                 // So an erroneous nested comment vs a normal nested comment is only marked by whether the first token ERROR
                 // or START_NCOMMENT
-                checkpoints.push((CheckpointItem::NestedComment(checkpoint), span.start));
+                checkpoints.push((CheckpointItem::NestedComment(checkpoint), span.clone()));
             }
             Ok(
                 Token::Syntax(SyntaxToken::EndNestedComment)
@@ -298,37 +355,58 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
             }
             Ok(Token::Syntax(SyntaxToken::IntralineWhitespace)) => {
                 // read in as whitespace, which is only an error for 2 constructs: abbreviations and labeled
-                if !in_abbreviation(&checkpoints) && !in_labeled(&checkpoints) {
-                    builder.token(WHITESPACE.into(), &source[span]);
-                } else {
+                if in_abbreviation(&checkpoints) || in_labeled(&checkpoints) {
                     // the two constructs expect the start of a datum
                     errors.push(GeneralParserError::ExpectedToken {
-                        expected: Box::from([TokenKind::LParen]),
+                        expected: Box::from(DATUM_EXPECTED_TOKENS),
                         found: TokenKind::IntralineWhitespace,
-                        at: span,
+                        at: span.clone(),
                     })
                 }
+
+                builder.token(WHITESPACE.into(), &source[span]);
             }
             Ok(Token::Syntax(SyntaxToken::LineEnding)) => {
                 // read in as whitespace, which is only an error for 2 constructs: abbreviations and labeled
-                if !in_abbreviation(&checkpoints) && !in_labeled(&checkpoints) {
-                    builder.token(LINEEND.into(), &source[span]);
-                } else {
+                if in_abbreviation(&checkpoints) || in_labeled(&checkpoints) {
                     // the two constructs expect the start of a datum
                     errors.push(GeneralParserError::ExpectedToken {
-                        expected: Box::from([TokenKind::LParen]),
+                        expected: Box::from(DATUM_EXPECTED_TOKENS),
                         found: TokenKind::LineEnding,
-                        at: span,
+                        at: span.clone(),
                     })
                 }
+
+                builder.token(LINEEND.into(), &source[span]);
             }
             Ok(Token::Syntax(SyntaxToken::DatumComment)) => {
                 let checkpoint = builder.checkpoint();
                 builder.token(DCOMMENT_SYM.into(), "#;");
-                checkpoints.push((CheckpointItem::DatumComment(checkpoint), span.start));
+                checkpoints.push((CheckpointItem::DatumComment(checkpoint), span.clone()));
             }
             Ok(Token::Syntax(SyntaxToken::Comment)) => {
+                if in_abbreviation(&checkpoints) || in_labeled(&checkpoints) {
+                    // the two constructs expect the start of a datum
+                    errors.push(GeneralParserError::ExpectedToken {
+                        expected: Box::from(DATUM_EXPECTED_TOKENS),
+                        found: TokenKind::Comment,
+                        at: span.clone(),
+                    })
+                }
+
                 builder.token(OLCOMMENT.into(), &source[span]);
+            }
+            Ok(Token::Syntax(SyntaxToken::Directive(_))) => {
+                if in_abbreviation(&checkpoints) || in_labeled(&checkpoints) {
+                    // the two constructs expect the start of a datum
+                    errors.push(GeneralParserError::ExpectedToken {
+                        expected: Box::from(DATUM_EXPECTED_TOKENS),
+                        found: TokenKind::Directive,
+                        at: span.clone(),
+                    })
+                }
+
+                builder.token(DIRECTIVE.into(), &source[span]);
             }
             // Since the lexer keeps track of whether we are in a nested comment or not
             // we can just handled the other nodes as if they *aren't* in a comment
@@ -341,34 +419,236 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
                 let checkpoint = builder.checkpoint();
                 // read the symbol token as ABBREV_SYM
                 builder.token(ABBREV_SYM.into(), &source[span.clone()]);
-                checkpoints.push((CheckpointItem::Abbreviation(checkpoint), span.start));
+                checkpoints.push((CheckpointItem::Abbreviation(checkpoint), span.clone()));
+            }
+            Ok(Token::Syntax(SyntaxToken::DatumLabel(_))) => {
+                let checkpoint = builder.checkpoint();
+                builder.token(DLABEL.into(), &source[span.clone()]);
+                checkpoints.push((CheckpointItem::Labeled(checkpoint), span.clone()));
             }
             // datum can handle themselves and any checkpoint item that needs them
             // (and we wrote a helper to help them)
             Ok(Token::Syntax(SyntaxToken::Identifier(_))) => {
-                finish_datum(&mut checkpoints, &mut builder, |builder| {
+                if in_bytevector(&checkpoints) {
+                    errors.push(GeneralParserError::ExpectedToken {
+                        expected: Box::from([TokenKind::Number]),
+                        found: TokenKind::Identifier,
+                        at: span.clone(),
+                    })
+                }
+
+                finish_datum(&mut checkpoints, &mut builder, None, |builder| {
                     builder.token(SYMBOL.into(), &source[span]);
                 })
             }
-            Ok(Token::Syntax(SyntaxToken::Number(_))) => {
-                finish_datum(&mut checkpoints, &mut builder, |builder| {
+            Ok(Token::Syntax(SyntaxToken::Number(n))) => {
+                if in_bytevector(&checkpoints)
+                    && !matches!(
+                        n,
+                        SchemeNumber::Exact(ExactReal::Integer {
+                            value: 0..=255,
+                            is_neg: false
+                        })
+                    )
+                {
+                    errors.push(GeneralParserError::ByteOutOfRange { at: span.clone() })
+                }
+
+                finish_datum(&mut checkpoints, &mut builder, None, |builder| {
                     builder.token(NUMBER.into(), &source[span]);
                 })
             }
-            Ok(tok) => {
-                builder.token(ERROR.into(), &source[span.clone()]);
-                errors.push(GeneralParserError::ExpectedToken {
-                    expected: Box::from(TOPLEVEL_EXPECTED_TOKENS),
-                    found: tok.into(),
-                    at: span,
+            Ok(Token::Syntax(SyntaxToken::Boolean(_))) => {
+                if in_bytevector(&checkpoints) {
+                    errors.push(GeneralParserError::ExpectedToken {
+                        expected: Box::from([TokenKind::Number]),
+                        found: TokenKind::Boolean,
+                        at: span.clone(),
+                    })
+                }
+
+                finish_datum(&mut checkpoints, &mut builder, None, |builder| {
+                    builder.token(BOOLEAN.into(), &source[span]);
                 })
             }
+            Ok(Token::Syntax(SyntaxToken::String(_))) => {
+                if in_bytevector(&checkpoints) {
+                    errors.push(GeneralParserError::ExpectedToken {
+                        expected: Box::from([TokenKind::Number]),
+                        found: TokenKind::String,
+                        at: span.clone(),
+                    })
+                }
+
+                finish_datum(&mut checkpoints, &mut builder, None, |builder| {
+                    builder.token(STRING.into(), &source[span]);
+                })
+            }
+            Ok(Token::Syntax(SyntaxToken::Character(_))) => {
+                if in_bytevector(&checkpoints) {
+                    errors.push(GeneralParserError::ExpectedToken {
+                        expected: Box::from([TokenKind::Number]),
+                        found: TokenKind::Character,
+                        at: span.clone(),
+                    })
+                }
+
+                finish_datum(&mut checkpoints, &mut builder, None, |builder| {
+                    builder.token(CHARACTER.into(), &source[span]);
+                })
+            }
+            Ok(Token::Syntax(SyntaxToken::DatumLabelValue(_))) => {
+                if in_bytevector(&checkpoints) {
+                    errors.push(GeneralParserError::ExpectedToken {
+                        expected: Box::from([TokenKind::Number]),
+                        found: TokenKind::DatumLabelValue,
+                        at: span.clone(),
+                    })
+                }
+
+                finish_datum(&mut checkpoints, &mut builder, None, |builder| {
+                    builder.token(DTRIGGER.into(), &source[span]);
+                })
+            }
+            Ok(Token::Syntax(SyntaxToken::LParen)) => {
+                let checkpoint = builder.checkpoint();
+                builder.token(LPAREN.into(), "(");
+
+                if !in_bytevector(&checkpoints) {
+                    checkpoints.push((CheckpointItem::List(checkpoint, 0, None), span.clone()));
+                } else {
+                    errors.push(GeneralParserError::ExpectedToken {
+                        expected: Box::from([TokenKind::Number]),
+                        found: TokenKind::LParen,
+                        at: span,
+                    })
+                }
+            }
+            Ok(Token::Syntax(SyntaxToken::Dot)) if in_list(&checkpoints) => {
+                let Some((CheckpointItem::List(checkpoint, pre_dot, post_dot), lspan)) =
+                    checkpoints.pop()
+                else {
+                    unreachable!()
+                };
+
+                let post_dot = if post_dot.is_none() {
+                    Some(0)
+                } else {
+                    errors.push(GeneralParserError::UnexpectedToken {
+                        found: TokenKind::Dot,
+                        at: span,
+                    });
+                    post_dot
+                };
+
+                builder.token(DOT.into(), ".");
+                checkpoints.push((CheckpointItem::List(checkpoint, pre_dot, post_dot), lspan));
+            }
+            Ok(Token::Syntax(SyntaxToken::Dot)) => {
+                builder.token(DOT.into(), ".");
+                errors.push(GeneralParserError::UnexpectedToken {
+                    found: TokenKind::Dot,
+                    at: span,
+                });
+            }
+            Ok(Token::Syntax(SyntaxToken::StartBytevector)) => {
+                let checkpoint = builder.checkpoint();
+                builder.token(START_BYTEVECTOR.into(), &source[span.clone()]);
+                checkpoints.push((CheckpointItem::Bytevector(checkpoint), span.clone()));
+            }
+            Ok(Token::Syntax(SyntaxToken::StartVector)) => {
+                let checkpoint = builder.checkpoint();
+                builder.token(START_VECTOR.into(), &source[span.clone()]);
+
+                if !in_bytevector(&checkpoints) {
+                    checkpoints.push((CheckpointItem::Vector(checkpoint), span.clone()));
+                } else {
+                    errors.push(GeneralParserError::ExpectedToken {
+                        expected: Box::from([TokenKind::Number]),
+                        found: TokenKind::StartVector,
+                        at: span,
+                    })
+                }
+            }
+            Ok(Token::Syntax(SyntaxToken::RParen)) => {
+                // shadow the fn using bools
+                if !in_list(&checkpoints)
+                    && !in_bytevector(&checkpoints)
+                    && !in_vector(&checkpoints)
+                {
+                    errors.push(GeneralParserError::UnexpectedToken {
+                        found: TokenKind::RParen,
+                        at: span.clone(),
+                    });
+                }
+
+                enum Paired {
+                    List,
+                    Vector,
+                    Bytevector,
+                }
+                // complete the correct type as a datum
+                let (checkpoint, paired) = if in_list(&checkpoints) {
+                    let Some((CheckpointItem::List(checkpoint, pre_dot, post_dot), lspan)) =
+                        checkpoints.pop()
+                    else {
+                        unreachable!()
+                    };
+                    // if there is a dot, check to make sure it matches
+                    // ( <datum>+ . <datum> )
+                    if let Some(post_dot) = post_dot {
+                        if post_dot != 1 || pre_dot == 0 {
+                            errors.push(GeneralParserError::MalformedList {
+                                at: lspan.start..span.end,
+                            })
+                        }
+                    }
+                    (checkpoint, Paired::List)
+                } else if in_vector(&checkpoints) {
+                    let Some((CheckpointItem::Vector(checkpoint), _)) = checkpoints.pop() else {
+                        unreachable!()
+                    };
+                    (checkpoint, Paired::Vector)
+                } else if in_bytevector(&checkpoints) {
+                    let Some((CheckpointItem::Bytevector(checkpoint), _)) = checkpoints.pop()
+                    else {
+                        unreachable!()
+                    };
+                    (checkpoint, Paired::Bytevector)
+                } else {
+                    unreachable!("can only use rparen to complete a list, bytevector, or vector")
+                };
+
+                finish_datum(
+                    &mut checkpoints,
+                    &mut builder,
+                    Some(checkpoint),
+                    |builder| {
+                        builder.token(RPAREN.into(), ")");
+
+                        match paired {
+                            Paired::List => {
+                                builder.start_node_at(checkpoint, LIST.into());
+                                builder.finish_node();
+                            }
+                            Paired::Vector => {
+                                builder.start_node_at(checkpoint, VECTOR.into());
+                                builder.finish_node();
+                            }
+                            Paired::Bytevector => {
+                                builder.start_node_at(checkpoint, BYTEVECTOR.into());
+                                builder.finish_node();
+                            }
+                        }
+                    },
+                );
+            }
             Err(e) => {
-                builder.token(ERROR.into(), &source[span.clone()]);
+                // mark malformed as what they *might* be
+                // only if we have no idea do we mark something as ERROR
                 match e {
-                    // cheat out and mark malformed as what they *might* be
-                    LexerError::MalformedNumber => {
-                        finish_datum(&mut checkpoints, &mut builder, |builder| {
+                    LexerError::MalformedNumber | LexerError::NumberTooBig => {
+                        finish_datum(&mut checkpoints, &mut builder, None, |builder| {
                             builder.token(NUMBER.into(), &source[span.clone()]);
                         });
                         errors.push(GeneralParserError::Malformed {
@@ -377,7 +657,7 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
                         });
                     }
                     LexerError::MalformedIdentifier => {
-                        finish_datum(&mut checkpoints, &mut builder, |builder| {
+                        finish_datum(&mut checkpoints, &mut builder, None, |builder| {
                             builder.token(SYMBOL.into(), &source[span.clone()]);
                         });
                         errors.push(GeneralParserError::Malformed {
@@ -385,8 +665,20 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
                             at: span,
                         });
                     }
+                    LexerError::CharacterTooBig
+                    | LexerError::MalformedCharacter
+                    | LexerError::InvalidCodepoint(_)
+                    | LexerError::InvalidCharacterName(_) => {
+                        finish_datum(&mut checkpoints, &mut builder, None, |builder| {
+                            builder.token(CHARACTER.into(), &source[span.clone()]);
+                        });
+                        errors.push(GeneralParserError::Malformed {
+                            kind: TokenKind::Character,
+                            at: span,
+                        });
+                    }
                     LexerError::MalformedString => {
-                        finish_datum(&mut checkpoints, &mut builder, |builder| {
+                        finish_datum(&mut checkpoints, &mut builder, None, |builder| {
                             builder.token(STRING.into(), &source[span.clone()]);
                         });
                         errors.push(GeneralParserError::Malformed {
@@ -394,18 +686,44 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
                             at: span,
                         });
                     }
-                    _ => errors.push(GeneralParserError::Expected {
-                        expected: Box::from(TOPLEVEL_EXPECTED_TOKENS),
-                        text: Some(Box::from(&source[span.clone()])),
-                        at: span,
-                    }),
+                    LexerError::InvalidDirective(_) => {
+                        builder.token(DIRECTIVE.into(), &source[span.clone()]);
+                        errors.push(GeneralParserError::Malformed {
+                            kind: TokenKind::Directive,
+                            at: span,
+                        });
+                    }
+                    LexerError::LabelTooBig => {
+                        builder.token(DLABEL.into(), &source[span.clone()]);
+                        errors.push(GeneralParserError::Malformed {
+                            kind: TokenKind::DatumLabel,
+                            at: span,
+                        });
+                    }
+                    LexerError::TriggerTooBig => {
+                        finish_datum(&mut checkpoints, &mut builder, None, |builder| {
+                            builder.token(DTRIGGER.into(), &source[span.clone()]);
+                        });
+                        errors.push(GeneralParserError::Malformed {
+                            kind: TokenKind::DatumLabelValue,
+                            at: span,
+                        });
+                    }
+                    LexerError::Invalid => {
+                        builder.token(ERROR.into(), &source[span.clone()]);
+                        errors.push(GeneralParserError::Expected {
+                            expected: Box::from(TOPLEVEL_EXPECTED_TOKENS),
+                            text: Some(Box::from(&source[span.clone()])),
+                            at: span,
+                        });
+                    }
                 }
             }
         }
     }
 
     // Close any open checkpoints
-    for (ic, start) in checkpoints.into_iter().rev() {
+    for (ic, span) in checkpoints.into_iter().rev() {
         let (checkpoint, skind, kind) = match ic {
             CheckpointItem::NestedComment(chkp) => {
                 (chkp, NCOMMENT, CompoundTermKind::NestedComment)
@@ -413,7 +731,7 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
             CheckpointItem::DatumComment(chkp) => (chkp, DCOMMENT, CompoundTermKind::DatumComment),
             CheckpointItem::Abbreviation(chkp) => (chkp, ABBREV, CompoundTermKind::Abbreviation),
             CheckpointItem::Labeled(chkp) => (chkp, LABELED, CompoundTermKind::Labeled),
-            CheckpointItem::List(chkp) => (chkp, LIST, CompoundTermKind::List),
+            CheckpointItem::List(chkp, _, _) => (chkp, LIST, CompoundTermKind::List),
             CheckpointItem::Bytevector(chkp) => (chkp, BYTEVECTOR, CompoundTermKind::Bytevector),
             CheckpointItem::Vector(chkp) => (chkp, VECTOR, CompoundTermKind::Vector),
         };
@@ -422,8 +740,8 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
         builder.finish_node();
         errors.push(GeneralParserError::Unterminated {
             kind,
-            index: start,
-            len: 2,
+            index: span.start,
+            len: span.end - span.start,
         });
     }
 

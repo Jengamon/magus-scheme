@@ -8,37 +8,70 @@ use icu_casemap::CaseMapper;
 pub enum SyntaxKind {
     // Literals
     // (which correspond to SyntaxTokens)
-    L_PAREN = 0, // '('
-    R_PAREN,     // ')'
-    // Both the successful and malformed are put under this same syntax kind
+    /// (
+    LPAREN = 0,
+    /// )
+    RPAREN,
+    /// .
+    DOT,
+    /// #u8(
+    START_BYTEVECTOR,
+    /// #(
+    START_VECTOR,
+    /// ` | , | ,@ | '
+    ABBREV_SYM,
+    /// #|
+    START_NCOMMENT,
+    /// |#
+    END_NCOMMENT,
+    /// #;
+    DCOMMENT_SYM,
+    /// #\d+=
+    DLABEL,
+    /// #\d+#
+    DTRIGGER,
+    /// ; comment
+    OLCOMMENT,
+    /// any kind of comment text
+    COMMENT,
+    /// #!(no-)?fold-case
+    DIRECTIVE,
+    /// any kind of inline whitespace
+    WHITESPACE, // whitespaces is explicit
+    /// \r | \n | \r\n
+    LINEEND,
+    /// a symbol literal (=identifier) or a malformed one
     SYMBOL,
+    /// a number literal or a malformed one
     NUMBER,
+    /// a string literal or a malformed one
     STRING,
+    /// a boolean literal
     BOOLEAN,
+    /// a character literal or a malformed one
     CHARACTER,
-    ABBREV_SYM,     // one of ' , ,@ `
-    START_NCOMMENT, // #|
-    END_NCOMMENT,   // |#
-    DCOMMENT_SYM,   // #;
-    DLABEL,         // #0= "datum label"
-    DTRIGGER,       // #0# "datum trigger"
-    OLCOMMENT,      // ; comment
-    COMMENT,        // type used for any text *within* a comment
-    DIRECTIVE,      // #!(no-)fold-case
-    WHITESPACE,     // whitespaces is explicit
-    LINEEND,        // line ending (\r, \r\n, \n)
-    ERROR,          // as well as errors
+    /// syntax errors
+    ERROR,
 
     // composite nodes
-    NCOMMENT,   // #| #| nested |# comment |#
-    DCOMMENT,   // #;'(datum comment)
-    LIST,       // `(+ 2 3)`, `()` or `(() . x)`
-    ABBREV,     // (,|'|`|,@) DATUM
-    LABELED,    // DLABEL DATUM
-    BYTEVECTOR, // #U8( 3 #b01 )
-    VECTOR,     // #(  data is "cool")
-    DATUM,      // wraps any valid datum
-    ROOT,       // top-level node: a list of s-expressions
+    /// #| #| nested |# comment |#
+    NCOMMENT,
+    /// #;'(datum comment)
+    DCOMMENT,
+    /// `(+ 2 3)`, `()` or `(() . x)`
+    LIST,
+    /// (,|'|`|,@) DATUM
+    ABBREV,
+    /// DLABEL DATUM
+    LABELED,
+    /// #U8( 3 #b01 )
+    BYTEVECTOR,
+    /// #(  data is "cool")
+    VECTOR,
+    /// wraps any valid datum
+    DATUM,
+    /// top-level node: a list of s-expressions
+    ROOT,
 }
 use rowan::SyntaxText;
 use SyntaxKind::*;
@@ -160,9 +193,12 @@ impl Symbol {
         let preceding_directive = self.0.parent_ancestors().find_map(|anc| {
             anc.children_with_tokens()
                 .filter_map(|se| se.into_token())
-                .find(|p| {
-                    p.kind() == DIRECTIVE && p.text_range().end() < self.0.text_range().start()
+                .filter(|t| {
+                    t.text_range().end() < self.0.text_range().start() && t.kind() == DIRECTIVE
                 })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .next_back()
         });
         if let Some(directive) = preceding_directive {
             let ci = match SyntaxToken::lexer(directive.text()).next() {

@@ -1,14 +1,11 @@
-; Lexer datatest test the lexer
-; we should eventually move all the ;[test]s in the lexer into these files
-; this first part is for spans of errors
 ---
-; this second part is for spans of tokens
 [0..2] Syntax(DatumComment)
 [2..3] Syntax(IntralineWhitespace)
 [3..18] Syntax(Identifier("aλΛ"))
 [18..19] Syntax(IntralineWhitespace)
 [19..20] Syntax(Identifier("a"))
-; just like in gpd files, comments aren't allowed after the second section (it should just be scheme)
-; well, now that's just an implementation detail
+[20..21] Syntax(LineEnding)
+[21..41] Syntax(Number(ExactComplex { real: Integer { value: 3735928559, is_neg: false }, imaginary: Integer { value: 3221344269, is_neg: false } }))
 ---
 #; |a\x3bb;\x39b;| a
+#xdeadbeef+c001d00di

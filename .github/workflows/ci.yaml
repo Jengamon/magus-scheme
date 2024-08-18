@@ -16,23 +16,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: extractions/setup-just@v1
-      - name: Install nextest
+      - name: Install tools
         uses: taiki-e/install-action@nextest
       - name: Run arbtests
         run: cargo nextest r -E "test(arbtest)" --verbose --success-output=final
   build:
+    needs: [test, arbtest]
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
       - uses: extractions/setup-just@v1
-      - name: Install nextest
-        uses: taiki-e/install-action@nextest
-      - name: Install icu_datagen
-        uses: taiki-e/install-action@icu_datagen
+      - name: Install tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: icu_datagen,cargo-nextest
       - name: Add WASM target
         run: rustup target add wasm32-unknown-unknown
       - name: Build for wasm
         run: just build-wasm
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - name: Run tests
         run: cargo nextest r -E "not test(arbtest)" --verbose --success-output=final

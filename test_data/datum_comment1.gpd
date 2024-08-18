@@ -1,0 +1,18 @@
+; comments in these tests are lines that start with ; (ignoring initial whitespace)
+; this first section is the Debug representation of any errors we are supposed to encounter
+; this particular file should parse cleanly, so no error
+; each section is separated by a line containing only --- (ignoring trailing whitespace)
+---
+ROOT@0..20
+  DCOMMENT@0..18
+    DCOMMENT_SYM@0..2 "#;"
+    WHITESPACE@2..3 " "
+    DATUM@3..18
+      SYMBOL@3..18 "|a\\x3bb;\\x39b;|"
+  WHITESPACE@18..19 " "
+  DATUM@19..20
+    SYMBOL@19..20 "a"
+; after the second section, comments are not allowed (well, they just have to be scheme comments...)
+; (well, you can't tell for the most part as these comments look like scheme ones)
+---
+#; |a\x3bb;\x39b;| a

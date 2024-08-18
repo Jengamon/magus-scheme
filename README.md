@@ -2,8 +2,6 @@
 
 ## Architecture
 
-### Frontend
-
 ```mermaid
 graph TD
     lex[Lexer] -->|Tokens| gparse[General Parser]
@@ -11,8 +9,11 @@ graph TD
     gparse -->|GAst| wd
     gparse2 -->|GAst| wd
     ext[External Code] --> |NativeLibrary| wd
-    wd[World] -.-> Backend
+    wd[World] -.-> Treewalk
+    wd -.-> VM
 ```
+
+### Frontend
 
 There are 2 parts of the frontend:
 - Lexer
@@ -26,7 +27,12 @@ This forms the GAST which is just s-expressions, (byte)vectors, and nested items
 
 A World defines *all* modules that can possibly exist. A script is only allowed to import libraries defined by modules from its World.
 
+### Backend
+
 The backend is responsible for reading and executing on a World's GAst.
+
+Treewalk is a treewalk interpreter, which is the slowest execution method, but it's goal is to be auditable, and used as a reference implementation.
+VM is a virtual machine whose goal is to speed up execution, while maintaining 100% accuracy with Treewalk.
 
 ## Numbers and exactness
 

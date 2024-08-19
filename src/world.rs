@@ -2,13 +2,27 @@
 //! or natively
 
 use core::fmt;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        LazyLock,
+    },
+};
 
 use crate::general_parser::Module;
 
-// QUESTION should the *entire* world be multi-thread safe?
-// It *could* probably be, as there is no state to be shared...
-// I think try Arc, and if it becomes a problem, think through it then.
+pub(crate) struct InternalModule {
+    module: Module,
+    filename: lasso::Spur,
+}
+
+impl InternalModule {
+    pub fn filename_spur(&self) -> lasso::Spur {
+        self.filename
+    }
+}
+
 #[derive(Hash, Debug, Clone, PartialEq, Eq)]
 struct InternalLibraryName(Box<[lasso::Spur]>);
 
@@ -55,18 +69,25 @@ impl<T: IntoIterator<Item = impl AsRef<str>>> From<T> for LibraryName {
     }
 }
 
+// Runtimes are stored in the world together
+pub(crate) trait Runtime: std::any::Any {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RuntimeKey(usize);
+
 #[derive(Default)]
 pub struct World {
-    // TODO Make World also have the gc-arenas for values and for runtimes
+    // TODO Make World also have the gc-arenas for values and rc-refcell (hashmap?) for runtimes
     // so that runtimes can be interacted with stashed.
     // a world is the technical definition of our entire Scheme environment, so this
     // should be ok!
+    runtimes: HashMap<RuntimeKey, Box<dyn Runtime>>,
     /// interner
     rodeo: lasso::Rodeo,
     /// scripts that can be requested for execution
     // TODO switch to hashbrown or ahash? might be faster maybe probably?
     // we use Spurs b/c we have the interner
-    modules: HashMap<lasso::Spur, Module>,
+    modules: HashMap<lasso::Spur, InternalModule>,
     /// libraries that can be imported from
     libraries: HashMap<InternalLibraryName, SchemeLibrary>,
 }
@@ -80,6 +101,25 @@ pub enum LoadSourceError {
 }
 
 impl World {
+    /// Store a new runtime in the world
+    pub(crate) fn hold_runtime<T: Runtime>(&mut self, runtime: T) -> RuntimeKey {
+        static RUNTIME_COUNTER: LazyLock<AtomicUsize> = LazyLock::new(|| AtomicUsize::new(0));
+
+        let key = RuntimeKey(RUNTIME_COUNTER.fetch_add(1, Ordering::SeqCst));
+        self.runtimes.insert(key, Box::new(runtime));
+        key
+    }
+
+    /// Drop a runtime
+    pub(crate) fn trash_runtime(&mut self, key: RuntimeKey) {
+        self.runtimes.remove(&key);
+    }
+
+    /// Fetch a reference to a runtime
+    pub(crate) fn fetch_runtime(&mut self, key: RuntimeKey) -> Option<&mut Box<dyn Runtime>> {
+        self.runtimes.get_mut(&key)
+    }
+
     fn library_name(
         &self,
         name: impl IntoIterator<Item = impl AsRef<str>>,

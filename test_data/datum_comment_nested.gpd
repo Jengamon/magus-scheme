@@ -1,0 +1,19 @@
+---
+ROOT@0..10
+  DCOMMENT@0..8
+    DCOMMENT_SYM@0..2 "#;"
+    DCOMMENT@2..7
+      DCOMMENT_SYM@2..4 "#;"
+      DATUM@4..7
+        LIST@4..7
+          LPAREN@4..5 "("
+          DATUM@5..6
+            NUMBER@5..6 "3"
+          RPAREN@6..7 ")"
+    DATUM@7..8
+      NUMBER@7..8 "3"
+  WHITESPACE@8..9 " "
+  DATUM@9..10
+    NUMBER@9..10 "3"
+---
+#;#;(3)3 3

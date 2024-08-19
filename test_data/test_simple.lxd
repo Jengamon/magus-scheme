@@ -1,0 +1,28 @@
+---
+[0..2] Syntax(Boolean(true))
+[2..3] Syntax(IntralineWhitespace)
+[3..8] Syntax(Boolean(true))
+[8..9] Syntax(IntralineWhitespace)
+[9..11] Syntax(Boolean(false))
+[11..12] Syntax(IntralineWhitespace)
+[12..18] Syntax(Boolean(false))
+[18..19] Syntax(LineEnding)
+[19..22] Syntax(Character('a'))
+[22..23] Syntax(IntralineWhitespace)
+[23..30] Syntax(Character('\u{7}'))
+[30..31] Syntax(IntralineWhitespace)
+[31..40] Syntax(Character('\n'))
+[40..41] Syntax(IntralineWhitespace)
+[41..44] Syntax(Character('0'))
+[44..45] Syntax(IntralineWhitespace)
+[45..49] Syntax(Character('\n'))
+[49..50] Syntax(IntralineWhitespace)
+[50..57] Syntax(Character('λ'))
+[57..58] Syntax(LineEnding)
+[58..65] Syntax(String("apple"))
+[65..66] Syntax(IntralineWhitespace)
+[66..77] Syntax(String("ê\n\""))
+---
+#t #true #f #false
+#\a #\alarm #\newline #\0 #\xa #\x03bb
+"apple" "\xea;\n\""

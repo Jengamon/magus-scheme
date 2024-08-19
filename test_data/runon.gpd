@@ -1,0 +1,38 @@
+---
+ROOT@0..22
+  DATUM@0..22
+    ABBREV@0..22
+      ABBREV_SYM@0..1 "`"
+      DATUM@1..22
+        LABELED@1..22
+          DLABEL@1..4 "#1="
+          DATUM@4..22
+            LIST@4..22
+              LPAREN@4..5 "("
+              WHITESPACE@5..6 " "
+              DATUM@6..7
+                NUMBER@6..7 "3"
+              WHITESPACE@7..8 " "
+              DATUM@8..9
+                NUMBER@8..9 "4"
+              DATUM@9..11
+                ABBREV@9..11
+                  ABBREV_SYM@9..10 "'"
+                  DATUM@10..11
+                    SYMBOL@10..11 "x"
+              WHITESPACE@11..12 " "
+              DATUM@12..21
+                ABBREV@12..21
+                  ABBREV_SYM@12..13 "'"
+                  DATUM@13..21
+                    LABELED@13..21
+                      DLABEL@13..16 "#5="
+                      DATUM@16..21
+                        LIST@16..21
+                          LPAREN@16..17 "("
+                          DATUM@17..20
+                            DTRIGGER@17..20 "#1#"
+                          RPAREN@20..21 ")"
+              RPAREN@21..22 ")"
+---
+`#1=( 3 4'x '#5=(#1#))

@@ -6,6 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow = "1.0.86"
+clap = { version = "4.5.16", features = ["derive"] }
 codesnake = "0.2.1"
 magus = { version = "0.1.0", path = ".." }
 rustyline = "14.0.0"

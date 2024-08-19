@@ -1,0 +1,88 @@
+; yay! general parsing was done!
+; we can understand the syntax of Scheme!!!
+; ...now on to understanding its semantics~
+Unterminated { kind: List, index: 46, len: 1 }
+---
+ROOT@0..71
+  DATUM@0..45
+    LIST@0..45
+      LPAREN@0..1 "("
+      LINEEND@1..2 "\n"
+      WHITESPACE@2..3 "\t"
+      DATUM@3..8
+        SYMBOL@3..8 "list?"
+      LINEEND@8..9 "\n"
+      WHITESPACE@9..10 "\t"
+      DATUM@10..27
+        LIST@10..27
+          LPAREN@10..11 "("
+          DATUM@11..17
+            SYMBOL@11..17 "lambda"
+          WHITESPACE@17..18 " "
+          DATUM@18..21
+            LIST@18..21
+              LPAREN@18..19 "("
+              DATUM@19..20
+                SYMBOL@19..20 "x"
+              RPAREN@20..21 ")"
+          WHITESPACE@21..22 " "
+          DATUM@22..26
+            VECTOR@22..26
+              START_VECTOR@22..24 "#("
+              DATUM@24..25
+                SYMBOL@24..25 "x"
+              RPAREN@25..26 ")"
+          RPAREN@26..27 ")"
+      LINEEND@27..28 "\n"
+      WHITESPACE@28..29 "\t"
+      DATUM@29..43
+        ABBREV@29..43
+          ABBREV_SYM@29..30 "'"
+          DATUM@30..43
+            ABBREV@30..43
+              ABBREV_SYM@30..31 "'"
+              DATUM@31..43
+                ABBREV@31..43
+                  ABBREV_SYM@31..32 "`"
+                  DATUM@32..43
+                    LIST@32..43
+                      LPAREN@32..33 "("
+                      DATUM@33..39
+                        SYMBOL@33..39 "exceed"
+                      WHITESPACE@39..40 " "
+                      DATUM@40..42
+                        ABBREV@40..42
+                          ABBREV_SYM@40..41 "'"
+                          DATUM@41..42
+                            NUMBER@41..42 "3"
+                      RPAREN@42..43 ")"
+      LINEEND@43..44 "\n"
+      RPAREN@44..45 ")"
+  LINEEND@45..46 "\n"
+  LIST@46..71
+    LPAREN@46..47 "("
+    DATUM@47..48
+      SYMBOL@47..48 "a"
+    WHITESPACE@48..49 " "
+    DATUM@49..53
+      SYMBOL@49..53 "then"
+    WHITESPACE@53..54 " "
+    DATUM@54..66
+      LIST@54..66
+        LPAREN@54..55 "("
+        DATUM@55..60
+          SYMBOL@55..60 "there"
+        WHITESPACE@60..61 " "
+        DATUM@61..65
+          SYMBOL@61..65 "were"
+        RPAREN@65..66 ")"
+    WHITESPACE@66..67 " "
+    DATUM@67..71
+      SYMBOL@67..71 "n0n3"
+---
+(
+	list?
+	(lambda (x) #(x))
+	''`(exceed '3)
+)
+(a then (there were) n0n3

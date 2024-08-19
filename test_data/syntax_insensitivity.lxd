@@ -1,0 +1,36 @@
+---
+[0..4] Syntax(StartBytevector)
+[4..5] Syntax(IntralineWhitespace)
+[5..9] Syntax(StartBytevector)
+[9..10] Syntax(LineEnding)
+[10..21] Syntax(Directive(FoldCase))
+[21..22] Syntax(IntralineWhitespace)
+[22..33] Syntax(Directive(FoldCase))
+[33..34] Syntax(LineEnding)
+[34..48] Syntax(Directive(NoFoldCase))
+[48..49] Syntax(IntralineWhitespace)
+[49..63] Syntax(Directive(NoFoldCase))
+[63..64] Syntax(LineEnding)
+[64..66] Syntax(Boolean(true))
+[66..67] Syntax(IntralineWhitespace)
+[67..69] Syntax(Boolean(true))
+[69..70] Syntax(LineEnding)
+[70..75] Syntax(Boolean(true))
+[75..76] Syntax(IntralineWhitespace)
+[76..81] Syntax(Boolean(true))
+[81..82] Syntax(LineEnding)
+[82..84] Syntax(Boolean(false))
+[84..85] Syntax(IntralineWhitespace)
+[85..87] Syntax(Boolean(false))
+[87..88] Syntax(LineEnding)
+[88..94] Syntax(Boolean(false))
+[94..95] Syntax(IntralineWhitespace)
+[95..101] Syntax(Boolean(false))
+---
+#u8( #U8(
+#!fold-case #!FOLD-CASE
+#!no-fold-case #!NO-FOLD-CASE
+#t #T
+#true #TrUe
+#f #F
+#false #FaLsE

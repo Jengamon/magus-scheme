@@ -1,12 +1,12 @@
 use std::{collections::HashMap, sync::LazyLock};
 
 use arbitrary::Arbitrary;
+use logos::Logos;
 pub use logos::Span;
-use logos::{Lexer, Logos};
 
 use crate::{ExactReal, SchemeNumber};
 
-fn process_piped_ident(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError> {
+fn process_piped_ident(lexer: &mut logos::Lexer<SyntaxToken>) -> Result<Box<str>, LexerError> {
     let mut built_ident = String::new();
 
     // Skip the | at the beginning
@@ -39,6 +39,10 @@ fn process_piped_ident(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError>
                     built_ident.push('\r');
                     _ = chars.next(); // consume
                 }
+                Some('|') => {
+                    built_ident.push('|');
+                    _ = chars.next(); // consume
+                }
                 Some(_) | None => Err(LexerError::MalformedIdentifier)?,
             },
             // Stop consuming at the ending pipe
@@ -51,7 +55,18 @@ fn process_piped_ident(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError>
     Ok(Box::from(built_ident.as_str()))
 }
 
-fn process_named_character(lexer: &mut Lexer<Token>) -> Result<char, LexerError> {
+fn process_character(lexer: &mut logos::Lexer<SyntaxToken>) -> Result<char, LexerError> {
+    // the lexer allows through #\ and \, so check
+    // if it's the second, and if so, reject as malformed
+    if !lexer.slice().starts_with('#') {
+        return Err(LexerError::MalformedCharacter);
+    }
+
+    // skip the #\
+    Ok(lexer.slice().chars().nth(2).unwrap())
+}
+
+fn process_named_character(lexer: &mut logos::Lexer<SyntaxToken>) -> Result<char, LexerError> {
     static NAMED_MAP: LazyLock<HashMap<&str, char>> = LazyLock::new(|| {
         let mut named_map = HashMap::new();
         named_map.insert("alarm", '\x07');
@@ -68,6 +83,12 @@ fn process_named_character(lexer: &mut Lexer<Token>) -> Result<char, LexerError>
         named_map
     });
 
+    // the lexer allows through #\ and \, so check
+    // if it's the second, and if so, reject as malformed
+    if !lexer.slice().starts_with('#') {
+        return Err(LexerError::MalformedCharacter);
+    }
+
     // skip the #\ at the front
     let name = &lexer.slice()[2..];
     NAMED_MAP
@@ -76,8 +97,14 @@ fn process_named_character(lexer: &mut Lexer<Token>) -> Result<char, LexerError>
         .ok_or_else(|| LexerError::InvalidCharacterName(Box::from(name)))
 }
 
-fn process_hex_character(lexer: &mut Lexer<Token>) -> Result<char, LexerError> {
+fn process_hex_character(lexer: &mut logos::Lexer<SyntaxToken>) -> Result<char, LexerError> {
     let mut value = 0u32;
+
+    // the lexer allows through #\x and \x, so check
+    // if it's the second, and if so, reject as malformed
+    if !lexer.slice().starts_with('#') {
+        return Err(LexerError::MalformedCharacter);
+    }
 
     // Skip the #\x
     for chr in lexer.slice().chars().skip(3) {
@@ -97,13 +124,10 @@ fn process_hex_character(lexer: &mut Lexer<Token>) -> Result<char, LexerError> {
 }
 
 // reads hex escapes in the form `x[0-9a-fA-F]+` and outputs the corresponding character
-fn read_hex_escape<F>(
+fn read_hex_escape(
     iter: &mut std::iter::Peekable<impl Iterator<Item = char>>,
-    on_malformed: F,
-) -> Result<char, LexerError>
-where
-    F: Fn() -> LexerError,
-{
+    on_malformed: impl Fn() -> LexerError,
+) -> Result<char, LexerError> {
     // consume the x
     let _ = iter.next();
 
@@ -114,9 +138,9 @@ where
             c @ ('0'..='9' | 'a'..='f' | 'A'..='F') => {
                 char_code = char_code
                     .checked_mul(16)
-                    .ok_or(LexerError::CharacterTooBig)?
+                    .ok_or(on_malformed())?
                     .checked_add(c.to_digit(16).unwrap())
-                    .ok_or(LexerError::CharacterTooBig)?;
+                    .ok_or(on_malformed())?;
                 _ = iter.next();
             }
             _ => Err(on_malformed())?,
@@ -125,10 +149,10 @@ where
     if iter.next() != Some(';') {
         return Err(on_malformed());
     }
-    char::from_u32(char_code).ok_or(LexerError::InvalidCodepoint(char_code))
+    char::from_u32(char_code).ok_or(on_malformed())
 }
 
-fn process_string(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError> {
+fn process_string(lexer: &mut logos::Lexer<SyntaxToken>) -> Result<Box<str>, LexerError> {
     // Our string syntax is described by /"([^\\"]|\\[abtnr"\\]|\\[ \t]*(\r|\n|\r\n)[ \t]*|\\x[0-9a-fA-f]+;)*"/
     // We use a more permissive version of this on the Logos side, so that errors are neater.
 
@@ -187,7 +211,21 @@ fn process_string(lexer: &mut Lexer<Token>) -> Result<Box<str>, LexerError> {
     Ok(Box::from(string.as_str()))
 }
 
-fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, LexerError> {
+fn read_number(
+    lexer: &mut logos::Lexer<SyntaxToken>,
+    radix: u32,
+) -> Result<SchemeNumber, LexerError> {
+    // Before we convert, run a simple procedure that find if we are just looking at an imaginary number
+    let num_start = lexer.slice().trim_start_matches([
+        '#', 'e', 'E', 'i', 'I', 'b', 'B', 'o', 'O', 'x', 'X', 'd', 'D',
+    ]);
+    let without_sign = num_start.strip_prefix(['+', '-']).unwrap_or(num_start);
+    let just_imaginary = ["-i", "+i"].contains(&lexer.slice())
+        || if let Some(without_inf) = without_sign.strip_prefix("inf.0") {
+            without_inf.contains('i') && !without_inf.contains(['+', '-'])
+        } else {
+            without_sign.contains('i') && !without_sign.contains(['+', '-'])
+        };
     let mut chars = lexer.slice().chars().peekable();
 
     // Exact can look like #!#e, #e#! or #! where ! is the base character [boxd] (or not present in case of decimal)
@@ -219,20 +257,6 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
         // Radix mismatch
         Err(LexerError::MalformedNumber)?
     }
-
-    // fn read_sign(chars: &mut std::iter::Peekable<impl Iterator<Item = char>>) -> bool {
-    //     match chars.peek() {
-    //         Some('+') => {
-    //             _ = chars.next();
-    //             false
-    //         }
-    //         Some('-') => {
-    //             _ = chars.next();
-    //             true
-    //         }
-    //         _ => false,
-    //     }
-    // }
 
     fn read_number_part(
         iter: &mut std::iter::Peekable<impl Iterator<Item = char>>,
@@ -271,7 +295,7 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
         let mut exponent_sign_state = None::<bool>;
         let mut is_neg_state = None::<bool>;
         loop {
-            eprintln!("State ({s:?}) (im? {is_imaginary}) ({number_state:?} {second_number_state:?} {third_number_state:?} {exponent_sign_state:?} {is_neg_state:?})");
+            // eprintln!("State ({s:?}) (im? {is_imaginary}) ({number_state:?} {second_number_state:?} {third_number_state:?} {exponent_sign_state:?} {is_neg_state:?})");
             let ns = match s {
                 // Start
                 State::Start => match iter.next() {
@@ -292,8 +316,8 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
                 },
                 // read sign, inf nan or num
                 State::ReadSign => match iter.next() {
-                    Some('i') => State::OnI,
-                    Some('n') => State::OnN,
+                    Some('i' | 'I') => State::OnI,
+                    Some('n' | 'N') => State::OnN,
                     Some('.') if radix == 10 => State::ReadDecipoint,
                     Some(c) if c.is_digit(radix) => {
                         number_state = Some(c.to_digit(radix).unwrap() as u64);
@@ -305,7 +329,7 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
                 State::OnI => {
                     assert!(is_neg_state.is_some());
                     match iter.next() {
-                        Some('n') => State::OnIn,
+                        Some('n' | 'N') => State::OnIn,
                         _ if is_imaginary => {
                             return Ok(ExactReal::Integer {
                                 value: 1,
@@ -316,7 +340,7 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
                     }
                 }
                 State::OnIn => match iter.next() {
-                    Some('f') => State::OnInf,
+                    Some('f' | 'F') => State::OnInf,
                     _ => return Err(LexerError::MalformedNumber),
                 },
                 State::OnInf => match iter.next() {
@@ -345,12 +369,12 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
                 State::OnN => {
                     assert!(is_neg_state.is_some());
                     match iter.next() {
-                        Some('a') => State::OnNa,
+                        Some('a' | 'A') => State::OnNa,
                         _ => return Err(LexerError::MalformedNumber),
                     }
                 }
                 State::OnNa => match iter.next() {
-                    Some('n') => State::OnNan,
+                    Some('n' | 'N') => State::OnNan,
                     _ => return Err(LexerError::MalformedNumber),
                 },
                 State::OnNan => match iter.next() {
@@ -402,7 +426,7 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
                                 Err(LexerError::MalformedNumber)
                             };
                         }
-                        Some('i') if is_imaginary => {
+                        Some('i' | 'I') if is_imaginary => {
                             // b/c of how we parse/detect imaginary numbers, is_neg_state will always be set
                             // when encountering an imaginary number
                             assert!(is_neg_state.is_some());
@@ -449,11 +473,11 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
                             is_neg: is_neg_state.unwrap_or(false),
                         })
                     }
-                    Some('i') if is_imaginary => State::FinishImaginaryRational,
+                    Some('i' | 'I') if is_imaginary => State::FinishImaginaryRational,
                     _ => return Err(LexerError::MalformedNumber),
                 },
                 State::FinishImaginaryRational => match iter.next() {
-                    Some('i') => {
+                    Some('i' | 'I') => {
                         return Ok(ExactReal::Rational {
                             numer: number_state.unwrap_or(0),
                             denom: second_number_state.unwrap_or(0),
@@ -526,7 +550,7 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
                                 is_neg: is_neg_state.unwrap_or(false),
                             });
                         }
-                        Some('i') => State::FinishImaginaryDecimal,
+                        Some('i' | 'I') if is_imaginary => State::FinishImaginaryDecimal,
                         _ => return Err(LexerError::MalformedNumber),
                     }
                 }
@@ -557,14 +581,14 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
                                 is_neg: is_neg_state.unwrap_or(false),
                             })
                         }
-                        Some('i') if is_imaginary => State::FinishImaginaryDecimal,
+                        Some('i' | 'I') if is_imaginary => State::FinishImaginaryDecimal,
                         _ => return Err(LexerError::MalformedNumber),
                     }
                 }
                 State::FinishImaginaryDecimal => {
                     assert!(is_imaginary && radix == 10);
                     return match iter.next() {
-                        Some('i') => Ok(ExactReal::Decimal {
+                        Some('i' | 'I') => Ok(ExactReal::Decimal {
                             base: number_state.unwrap_or(0),
                             post_dot: second_number_state.unwrap_or(0),
                             exponent: third_number_state.unwrap_or(0),
@@ -580,17 +604,11 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
     }
 
     if contains_flag('e') || !contains_flag('i') {
-        // we only read in exact numbers, which are
-        // nnnn
-        // nnnnsnnnni
-        // nnnnsnnnn/nnnni
-        // nnnn/nnnn
-        // nnnn/nnnnsi
-        // nnnn/nnnnsnnnni
-        // nnnn/nnnnsnnnn/nnnni
-        let real_part = read_number_part(&mut chars, radix, false)?;
+        // we only read in exact numbers
+        // but we default to exact numbers
+        let real_part = read_number_part(&mut chars, radix, just_imaginary)?;
         match chars.peek() {
-            Some('+' | '-') => {
+            Some('+' | '-') if !just_imaginary => {
                 let im_part = read_number_part(&mut chars, radix, true)?;
                 Ok(SchemeNumber::ExactComplex {
                     real: real_part,
@@ -598,13 +616,20 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
                 })
             }
             Some(_) => Err(LexerError::MalformedNumber)?,
-            None => Ok(SchemeNumber::Exact(real_part)),
+            None if !just_imaginary => Ok(SchemeNumber::Exact(real_part)),
+            None => Ok(SchemeNumber::ExactComplex {
+                real: ExactReal::Integer {
+                    value: 0,
+                    is_neg: false,
+                },
+                imaginary: real_part,
+            }),
         }
     } else {
         // we handle !contains_flag e and contains_flag i
-        let real_part = read_number_part(&mut chars, radix, false)?;
+        let real_part = read_number_part(&mut chars, radix, just_imaginary)?;
         match chars.peek() {
-            Some('+' | '-') => {
+            Some('+' | '-') if !just_imaginary => {
                 let im_part = read_number_part(&mut chars, radix, true)?;
                 Ok(SchemeNumber::InexactComplex {
                     real: real_part.inexact(),
@@ -612,7 +637,11 @@ fn read_number(lexer: &mut Lexer<Token>, radix: u32) -> Result<SchemeNumber, Lex
                 })
             }
             Some(_) => Err(LexerError::MalformedNumber)?,
-            None => Ok(SchemeNumber::Inexact(real_part.inexact())),
+            None if !just_imaginary => Ok(SchemeNumber::Inexact(real_part.inexact())),
+            None => Ok(SchemeNumber::InexactComplex {
+                real: 0.0,
+                imaginary: real_part.inexact(),
+            }),
         }
     }
 }
@@ -632,12 +661,18 @@ pub enum LexerError {
     InvalidDirective(Box<str>),
     #[error("invalid character name: {0}")]
     InvalidCharacterName(Box<str>),
+    #[error("malformed character")]
+    MalformedCharacter,
     #[error("malformed string")]
     MalformedString,
     #[error("malformed number")]
     MalformedNumber,
     #[error("number literal too big")]
     NumberTooBig,
+    #[error("label too big")]
+    LabelTooBig,
+    #[error("trigger too big")]
+    TriggerTooBig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Arbitrary)]
@@ -646,10 +681,28 @@ pub enum Directive {
     NoFoldCase,
 }
 
+#[derive(Debug, Clone, PartialEq, Logos, Arbitrary)]
+pub enum NestedCommentToken {
+    #[token("|#")]
+    EndNestedComment,
+    #[token("#|")]
+    StartNestedComment,
+    #[regex(r"[^|#]+")]
+    #[token("#")]
+    #[token("|")]
+    CommentText,
+}
+
+impl NestedCommentToken {
+    pub fn lexer(source: &str) -> logos::Lexer<NestedCommentToken> {
+        <Self as Logos>::lexer(source)
+    }
+}
+
 /// Tokens are lexed from some source, and can arbitrarily borrow from it.
 #[derive(Debug, Clone, PartialEq, Logos, Arbitrary)]
 #[logos(error = LexerError)]
-pub enum Token {
+pub enum SyntaxToken {
     #[regex("[ \t]+")]
     IntralineWhitespace,
     #[token("\n")]
@@ -675,6 +728,8 @@ pub enum Token {
     LParen,
     #[token(")")]
     RParen,
+    #[token(".")]
+    Dot,
     #[token("'")]
     Quote,
     #[token("`")]
@@ -688,7 +743,7 @@ pub enum Token {
     #[regex(r"(?i)#u8\(")]
     StartBytevector,
     #[regex(r#"[a-zA-Z!$%&*/:<=>?^_~][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*"#, |l| Box::from(l.slice()))]
-    #[regex(r#"\|[^|]*\|"#, process_piped_ident)]
+    #[regex(r#"\|([^|\\]|\\[xXabntr|])*\|"#, process_piped_ident)]
     #[token("+", |l| Box::from(l.slice()))]
     #[token("-", |l| Box::from(l.slice()))]
     #[regex(r"[-+][a-zA-Z!$%&*/:<=>?^_~+\-@][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*", |l| Box::from(l.slice()))]
@@ -698,62 +753,67 @@ pub enum Token {
     #[regex("(?i)#t(rue)?", |_| true)]
     #[regex("(?i)#f(alse)?", |_| false)]
     Boolean(bool),
-    #[regex(r"#\\.", callback = |l| l.slice().chars().nth(2).unwrap())] // Regex FTW
-    #[regex(r"#\\[a-zA-Z]+", priority = 2, callback =  process_named_character)]
-    #[regex(r"(?i)#\\x[0-9a-f]+", callback = process_hex_character)]
+    #[regex(r"#?\\.", callback = process_character)]
+    #[regex(r"#?\\[a-zA-Z]+", priority = 2, callback = process_named_character)]
+    #[regex(r"(?i)#?\\x[0-9a-f]+", callback = process_hex_character)]
     Character(char),
     #[regex(r#""([^\\"]|\\[abntr"\\xX])*""#, process_string)]
     String(Box<str>),
 
     // The number tower is supported at least by the lexer (and currently is mostly rejected by the general parser)
     // Same as all the others, the lexer here is a bit more permissive to allow for better errors
+    // explicit
+    #[regex("(?i)((#[ie])?#b|#b(#[ie])?)[+-]i", priority = 5, callback = |l| read_number(l, 2))]
+    #[regex("(?i)((#[ie])?#o|#o(#[ie])?)[+-]i", priority = 5, callback = |l| read_number(l, 8))]
+    #[regex("(?i)((#[ie])?#x|#x(#[ie])?)[+-]i", priority = 5, callback = |l| read_number(l, 16))]
+    #[regex("(?i)((#[ie])?(#d)?|(#d)?(#[ie])?)[+-]i", priority = 5, callback = |l| read_number(l, 10))]
     // binary
-    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?", |l| read_number(l, 2))]
-    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-](inf|nan).0", |l| read_number(l, 2))]
+    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?([01]*i|[01]+(/[01]+)?)", |l| read_number(l, 2))]
+    #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-](inf|nan).0i?", |l| read_number(l, 2))]
     #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-](inf|nan).0[+-](inf|nan).0i?", |l| read_number(l, 2))]
     #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?[+-][01]*(/[01]+)?i?", |l| read_number(l, 2))]
     #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-](inf|nan).0[+-][01]*(/[01]+)?i?", |l| read_number(l, 2))]
     #[regex(r"(?i)((#e)?#b|#b(#e)?)[+-]?[01]+(/[01]+)?[+-](inf|nan).0i?", |l| read_number(l, 2))]
-    #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?", |l| read_number(l, 2))]
-    #[regex(r"(?i)(#i#b|#b#i)[+-](inf|nan).0", |l| read_number(l, 2))]
+    #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?i?", |l| read_number(l, 2))]
+    #[regex(r"(?i)(#i#b|#b#i)[+-](inf|nan).0i?", |l| read_number(l, 2))]
     #[regex(r"(?i)(#i#b|#b#i)[+-](inf|nan).0[+-](inf|nan).0i?", |l| read_number(l, 2))]
     #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?[+-][01]*(/[01]+)?i?", |l| read_number(l, 2))]
     #[regex(r"(?i)(#i#b|#b#i)[+-](inf|nan).0[+-][01]*(/[01]+)?i?", |l| read_number(l, 2))]
     #[regex(r"(?i)(#i#b|#b#i)[+-]?[01]+(/[01]+)?[+-](inf|nan).0i?", |l| read_number(l, 2))]
     // octal
-    #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-]?[0-7]+(/[0-7]+)?", |l| read_number(l, 8))]
-    #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-](inf|nan).0", |l| read_number(l, 8))]
+    #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-]?([0-7]+(/[0-7]+)?|[0-7]+i)", |l| read_number(l, 8))]
+    #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-](inf|nan).0i?", |l| read_number(l, 8))]
     #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-](inf|nan).0[+-](inf|nan).0i?", |l| read_number(l, 8))]
     #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-]?[0-7]+(/[0-7]+)?[+-][0-7]*(/[0-7]+)?i?", |l| read_number(l, 8))]
     #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-](inf|nan).0[+-][0-7]*(/[0-7]+)?i?", |l| read_number(l, 8))]
     #[regex(r"(?i)((#e)?#o|#o(#e)?)[+-]?[0-7]+(/[0-7]+)?[+-](inf|nan).0i?", |l| read_number(l, 8))]
-    #[regex(r"(?i)(#i#o|#o#i)[+-]?[0-7]+(/[0-7]+)?", |l| read_number(l, 8))]
-    #[regex(r"(?i)(#i#o|#o#i)[+-](inf|nan).0", |l| read_number(l, 8))]
+    #[regex(r"(?i)(#i#o|#o#i)[+-]?[0-7]+(/[0-7]+)?i?", |l| read_number(l, 8))]
+    #[regex(r"(?i)(#i#o|#o#i)[+-](inf|nan).0i?", |l| read_number(l, 8))]
     #[regex(r"(?i)(#i#o|#o#i)[+-](inf|nan).0[+-](inf|nan).0i?", |l| read_number(l, 8))]
     #[regex(r"(?i)(#i#o|#o#i)[+-]?[0-7]+(/[0-7]+)?[+-][0-7]*(/[0-7]+)?i?", |l| read_number(l, 8))]
     #[regex(r"(?i)(#i#o|#o#i)[+-](inf|nan).0[+-][0-7]*(/[0-7]+)?i?", |l| read_number(l, 8))]
     #[regex(r"(?i)(#i#o|#o#i)[+-]?[0-7]+(/[0-7]+)?[+-](inf|nan).0i?", |l| read_number(l, 8))]
     // hex
-    #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-]?[0-9a-f]+(/[0-9a-f]+)?", |l| read_number(l, 16))]
-    #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-](inf|nan).0", |l| read_number(l, 16))]
+    #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-]?([0-9a-f]+(/[0-9a-f]+)?|[0-9a-f]*i)", |l| read_number(l, 16))]
+    #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-](inf|nan).0i?", |l| read_number(l, 16))]
     #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-](inf|nan).0[+-](inf|nan).0i?", |l| read_number(l, 16))]
     #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-]?[0-9a-f]+(/[0-9a-f]+)?[+-][0-9a-f]*(/[0-9a-f]+)?i?", |l| read_number(l, 16))]
     #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-](inf|nan).0[+-][0-9a-f]*(/[0-9a-f]+)?i?", |l| read_number(l, 16))]
     #[regex(r"(?i)((#e)?#x|#x(#e)?)[+-]?[0-9a-f]+(/[0-9a-f]+)?[+-](inf|nan).0i?", |l| read_number(l, 16))]
-    #[regex(r"(?i)(#i#x|#x#i)[+-]?[0-9a-f]+(/[0-9a-f]+)?", |l| read_number(l, 16))]
-    #[regex(r"(?i)(#i#x|#x#i)[+-](inf|nan).0", |l| read_number(l, 16))]
+    #[regex(r"(?i)(#i#x|#x#i)[+-]?[0-9a-f]+(/[0-9a-f]+)?i?", |l| read_number(l, 16))]
+    #[regex(r"(?i)(#i#x|#x#i)[+-](inf|nan).0i?", |l| read_number(l, 16))]
     #[regex(r"(?i)(#i#x|#x#i)[+-](inf|nan).0[+-](inf|nan).0i?", |l| read_number(l, 16))]
     #[regex(r"(?i)(#i#x|#x#i)[+-]?[0-9a-f]+(/[0-9a-f]+)?[+-][0-9a-f]*(/[0-9a-f]+)?i?", |l| read_number(l, 16))]
     #[regex(r"(?i)(#i#x|#x#i)[+-](inf|nan).0[+-][0-9a-f]*(/[0-9a-f]+)?i?", |l| read_number(l, 16))]
     #[regex(r"(?i)(#i#x|#x#i)[+-]?[0-9a-f]+(/[0-9a-f]+)?[+-](inf|nan).0i?", |l| read_number(l, 16))]
     // decimal
     // - decimal real
-    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+", |l| read_number(l, 10))]
-    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-](inf|nan).0", |l| read_number(l, 10))]
-    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+", |l| read_number(l, 10))]
-    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+e[+-]?[0-9]+", |l| read_number(l, 10))]
-    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
-    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-](inf|nan).0i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+/[0-9]+i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+e[+-]?[0-9]+i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     // - decimal complex
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-][0-9]*i?", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+[+-](inf|nan).0i?", |l| read_number(l, 10))]
@@ -782,12 +842,12 @@ pub enum Token {
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-]\.[0-9]+(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     // - inexact decimal real
-    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+", |l| read_number(l, 10))]
-    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-](inf|nan).0", |l| read_number(l, 10))]
-    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+/[0-9]+", |l| read_number(l, 10))]
-    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+e[+-]?[0-9]+", |l| read_number(l, 10))]
-    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
-    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-](inf|nan).0i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+/[0-9]+i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+e[+-]?[0-9]+i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+\.[0-9]*(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     // - inexact decimal complex
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+[+-][0-9]*i?", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+[+-](inf|nan).0i?", |l| read_number(l, 10))]
@@ -815,11 +875,95 @@ pub enum Token {
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-]\.[0-9]+(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     Number(SchemeNumber),
+    #[regex(r"#[0-9]+=", |l| l.slice().chars().skip(1).take(l.slice().len()-2).collect::<Box<str>>().parse::<usize>().map_err(|_| LexerError::LabelTooBig))]
+    DatumLabel(usize),
+    #[regex(r"#[0-9]+#", |l| l.slice().chars().skip(1).take(l.slice().len()-2).collect::<Box<str>>().parse::<usize>().map_err(|_| LexerError::TriggerTooBig))]
+    DatumLabelValue(usize),
+}
+
+impl SyntaxToken {
+    pub fn lexer(source: &str) -> logos::Lexer<SyntaxToken> {
+        <Self as Logos>::lexer(source)
+    }
+}
+
+#[derive(Clone)]
+enum Modes<'src> {
+    Syntax(logos::Lexer<'src, SyntaxToken>),
+    NestedComment(logos::Lexer<'src, NestedCommentToken>),
+}
+
+pub struct Lexer<'src> {
+    mode: Modes<'src>,
+    nested_comment_level: usize,
+}
+
+impl<'src> Iterator for Lexer<'src> {
+    type Item = (Result<Token, LexerError>, Span);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // Check what kind of lexer we should be, and morph to be the right one
+        if self.nested_comment_level > 0 {
+            // we should be a nested comment lexer
+            self.mode = match self.mode.clone() {
+                Modes::NestedComment(nc) => Modes::NestedComment(nc),
+                Modes::Syntax(syntax) => Modes::NestedComment(syntax.morph()),
+            };
+        } else {
+            // we should be in syntax mode
+            self.mode = match self.mode.clone() {
+                Modes::NestedComment(nc) => Modes::Syntax(nc.morph()),
+                Modes::Syntax(syntax) => Modes::Syntax(syntax),
+            };
+        }
+
+        match &mut self.mode {
+            Modes::Syntax(ref mut syntax) => {
+                assert!(self.nested_comment_level == 0);
+                match syntax.next() {
+                    Some(Ok(s @ SyntaxToken::StartNestedComment)) => {
+                        self.nested_comment_level += 1;
+                        Some((Ok(Token::Syntax(s)), syntax.span()))
+                    }
+                    Some(Ok(tok)) => Some((Ok(Token::Syntax(tok)), syntax.span())),
+                    Some(Err(err)) => Some((Err(err), syntax.span())),
+                    None => None,
+                }
+            }
+            Modes::NestedComment(ref mut nc) => {
+                assert!(self.nested_comment_level > 0);
+                match nc.next() {
+                    Some(Ok(s @ NestedCommentToken::StartNestedComment)) => {
+                        self.nested_comment_level += 1;
+                        Some((Ok(Token::NestedComment(s)), nc.span()))
+                    }
+                    Some(Ok(e @ NestedCommentToken::EndNestedComment)) => {
+                        self.nested_comment_level -= 1;
+                        Some((Ok(Token::NestedComment(e)), nc.span()))
+                    }
+                    Some(Ok(t @ NestedCommentToken::CommentText)) => {
+                        Some((Ok(Token::NestedComment(t)), nc.span()))
+                    }
+                    Some(Err(())) => Some((Err(LexerError::Invalid), nc.span())),
+                    None => None,
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Arbitrary)]
+pub enum Token {
+    Syntax(SyntaxToken),
+    NestedComment(NestedCommentToken),
 }
 
 impl Token {
-    pub fn lexer(source: &str) -> Lexer<Self> {
-        <Self as Logos>::lexer(source)
+    pub fn lexer(source: &str) -> Lexer {
+        Lexer {
+            mode: Modes::Syntax(SyntaxToken::lexer(source)),
+            nested_comment_level: 0,
+        }
     }
 }
 
@@ -827,221 +971,9 @@ impl Token {
 mod tests {
     use crate::{lexer::SchemeNumber, ExactReal};
 
-    use super::Token;
+    use super::SyntaxToken;
     use arbtest::{arbtest, ArbTest};
     use assert2::{assert, check, let_assert};
-
-    #[test]
-    fn test_identifier_and_piped_identifier() {
-        let id1 = r"Hello";
-        let id2 = r"|H\x65;llo|";
-
-        assert!(Token::lexer(id1).next() == Token::lexer(id2).next())
-    }
-
-    #[test]
-    fn identifier_checklist() {
-        macro_rules! test_valid {
-            ($source:literal) => {{
-                let mut lexer = Token::lexer($source);
-                let token = lexer.next();
-                // This contains a boxed slice, so not directly useful in patterns (currently)
-                let_assert!(Some(Ok(Token::Identifier(_))) = token);
-                assert!(lexer.slice() == $source);
-            }};
-
-            ($source:literal as $target:literal) => {{
-                let mut lexer = Token::lexer($source);
-                let token = lexer.next();
-                let_assert!(Some(Ok(Token::Identifier(s))) = token);
-                // handles indentifiers whose meaning is not directly related to how it is written
-                assert!(s.as_ref() == $target);
-            }};
-        }
-
-        // Taken from the reference as examples of valid identifiers
-        test_valid!("...");
-        test_valid!("<=?");
-        test_valid!("+");
-        test_valid!("+soup+");
-        test_valid!("->string");
-        test_valid!("a34kTMNs");
-        test_valid!("lambda");
-        test_valid!("q");
-        test_valid!("V17a");
-        test_valid!("|two words|" as "two words");
-        test_valid!(r"|two\x20;words|" as "two words");
-        test_valid!("the-word-recursion-has-many-meanings");
-        // My own
-        test_valid!(r"|λ\x3bb;|" as "λλ");
-    }
-
-    #[test]
-    fn syntax_insensitivity() {
-        // For the most part, scheme is syntax insensitive (except for the rules <letter>, <character name>, and <mnemonic escape> and thus
-        // anything that uses those).
-
-        check!(Token::lexer("#u8(").next() == Token::lexer("#U8(").next());
-        check!(Token::lexer("#!fold-case").next() == Token::lexer("#!FOLD-CASE").next());
-        check!(Token::lexer("#!no-fold-case").next() == Token::lexer("#!NO-FOLD-CASE").next());
-        check!(Token::lexer("#t").next() == Token::lexer("#T").next());
-        check!(Token::lexer("#true").next() == Token::lexer("#TrUe").next());
-        check!(Token::lexer("#f").next() == Token::lexer("#F").next());
-        check!(Token::lexer("#false").next() == Token::lexer("#FaLsE").next());
-    }
-
-    #[test]
-    fn test_boolean() {
-        check!(Token::lexer("#t").next() == Some(Ok(Token::Boolean(true))));
-        check!(Token::lexer("#true").next() == Some(Ok(Token::Boolean(true))));
-        check!(Token::lexer("#f").next() == Some(Ok(Token::Boolean(false))));
-        check!(Token::lexer("#false").next() == Some(Ok(Token::Boolean(false))));
-    }
-
-    #[test]
-    fn test_character() {
-        check!(Token::lexer(r"#\a").next() == Some(Ok(Token::Character('a'))));
-        check!(Token::lexer(r"#\alarm").next() == Some(Ok(Token::Character('\u{7}'))));
-        check!(Token::lexer(r"#\newline").next() == Some(Ok(Token::Character('\n'))));
-        check!(Token::lexer(r"#\0").next() == Some(Ok(Token::Character('0'))));
-        check!(Token::lexer(r"#\xa").next() == Some(Ok(Token::Character('\n'))));
-        check!(Token::lexer(r"#\x03bb").next() == Some(Ok(Token::Character('\u{03bb}'))));
-    }
-
-    #[test]
-    fn test_string() {
-        macro_rules! verify_string {
-            ($source:literal as $target:literal) => {
-                let mut source = String::new();
-                source.push('"');
-                source.push_str($source);
-                source.push('"');
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::String(bs))) = token);
-                check!(bs.as_ref() == $target);
-            };
-        }
-
-        verify_string!(r#"apple"# as "apple");
-        verify_string!(r#"\xea;\n\"\a"# as "\u{ea}\n\"\u{7}");
-    }
-
-    #[test]
-    fn test_number() {
-        macro_rules! verify_number {
-            (exact binary $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#e#b");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (binary exact $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#b#e");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (binary $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#b");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (exact octal $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#e#o");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (octal exact $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#o#e");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (octal $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#o");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (exact hex $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#e#x");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (hex exact $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#x#e");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (hex $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#x");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (exact decimal $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#e#d");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (decimal exact $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#d#e");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            (decimal $source:literal as $num:expr) => {
-                let mut source = String::new();
-                source.push_str("#d");
-                source.push_str($source);
-                let token = Token::lexer(&source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-            ($source:literal as $num:expr) => {
-                let token = Token::lexer($source).next();
-                let_assert!(Some(Ok(Token::Number(bnum))) = token);
-                check!(bnum == $num);
-            };
-        }
-
-        // binary
-        // verify_number!(exact binary "+inf.0" as SchemeNumber::Inf { is_neg: false, is_exact: true });
-        // verify_number!(binary exact "-inf.0" as SchemeNumber::Inf { is_neg: true, is_exact: true });
-        verify_number!(binary exact "0" as SchemeNumber::integer(false, 0));
-        verify_number!(exact binary "-0" as SchemeNumber::integer(true, 0));
-        verify_number!(binary "110" as SchemeNumber::integer(false, 6));
-        verify_number!("42.4e-4" as SchemeNumber::real_decimal(false, 42, 4, true, 4));
-        verify_number!(hex exact "-a0" as SchemeNumber::integer(true, 160));
-        // todo more thorough tests
-    }
 
     #[test]
     fn test_number_arbtest_decimal() {
@@ -1049,22 +981,24 @@ mod tests {
             let number: ExactReal = u.arbitrary()?;
             let decimal = number.display(10).unwrap();
             check!(
-                Token::lexer(&decimal).next()
-                    == Some(Ok(Token::Number(SchemeNumber::Exact(number)))),
+                SyntaxToken::lexer(&decimal).next()
+                    == Some(Ok(SyntaxToken::Number(SchemeNumber::Exact(number)))),
                 "{number:?} `{decimal}` does not roundtrip"
             );
             let inexact_decimal = format!("#i#d{}", number.display(10).unwrap());
             // might be NaN
             if matches!(number, ExactReal::Nan { .. }) {
                 let_assert!(
-                    Some(Ok(Token::Number(SchemeNumber::Inexact(inum)))) =
-                        Token::lexer(&inexact_decimal).next()
+                    Some(Ok(SyntaxToken::Number(SchemeNumber::Inexact(inum)))) =
+                        SyntaxToken::lexer(&inexact_decimal).next()
                 );
                 check!(inum.is_nan());
             } else {
                 check!(
-                    Token::lexer(&inexact_decimal).next()
-                        == Some(Ok(Token::Number(SchemeNumber::Inexact(number.inexact())))),
+                    SyntaxToken::lexer(&inexact_decimal).next()
+                        == Some(Ok(SyntaxToken::Number(SchemeNumber::Inexact(
+                            number.inexact()
+                        )))),
                     "inexact {number:?} `{inexact_decimal}` does not roundtrip"
                 );
             }
@@ -1080,8 +1014,8 @@ mod tests {
                 im.display(10).unwrap(),
             );
             check!(
-                Token::lexer(&im_decimal).next()
-                    == Some(Ok(Token::Number(SchemeNumber::ExactComplex {
+                SyntaxToken::lexer(&im_decimal).next()
+                    == Some(Ok(SyntaxToken::Number(SchemeNumber::ExactComplex {
                         real: number,
                         imaginary: im,
                     }))),
@@ -1100,35 +1034,35 @@ mod tests {
             match (number, im) {
                 (ExactReal::Nan { .. }, ExactReal::Nan { .. }) => {
                     let_assert!(
-                        Some(Ok(Token::Number(SchemeNumber::InexactComplex {
+                        Some(Ok(SyntaxToken::Number(SchemeNumber::InexactComplex {
                             real,
                             imaginary
-                        }))) = Token::lexer(&inexact_im_decimal).next()
+                        }))) = SyntaxToken::lexer(&inexact_im_decimal).next()
                     );
                     check!(real.is_nan() && imaginary.is_nan());
                 }
                 (ExactReal::Nan { .. }, _) => {
                     let_assert!(
-                        Some(Ok(Token::Number(SchemeNumber::InexactComplex {
+                        Some(Ok(SyntaxToken::Number(SchemeNumber::InexactComplex {
                             real,
                             imaginary
-                        }))) = Token::lexer(&inexact_im_decimal).next()
+                        }))) = SyntaxToken::lexer(&inexact_im_decimal).next()
                     );
                     check!(real.is_nan() && imaginary == im.inexact());
                 }
                 (_, ExactReal::Nan { .. }) => {
                     let_assert!(
-                        Some(Ok(Token::Number(SchemeNumber::InexactComplex {
+                        Some(Ok(SyntaxToken::Number(SchemeNumber::InexactComplex {
                             real,
                             imaginary
-                        }))) = Token::lexer(&inexact_im_decimal).next()
+                        }))) = SyntaxToken::lexer(&inexact_im_decimal).next()
                     );
                     check!(real == number.inexact() && imaginary.is_nan());
                 }
                 _ => {
                     check!(
-                        Token::lexer(&inexact_im_decimal).next()
-                            == Some(Ok(Token::Number(SchemeNumber::InexactComplex {
+                        SyntaxToken::lexer(&inexact_im_decimal).next()
+                            == Some(Ok(SyntaxToken::Number(SchemeNumber::InexactComplex {
                                 real: number.inexact(),
                                 imaginary: im.inexact(),
                             }))),
@@ -1137,7 +1071,7 @@ mod tests {
                 }
             }
             Ok(())
-        }).seed( 0x410c76a20000003e);
+        });
     }
 
     #[test]
@@ -1155,6 +1089,7 @@ mod tests {
         test_number_arbtest_nondecimal(8);
     }
 
+    #[track_caller]
     fn test_number_arbtest_nondecimal(
         radix: u32,
     ) -> ArbTest<impl FnMut(&mut arbitrary::Unstructured<'_>) -> arbitrary::Result<()>> {
@@ -1176,8 +1111,8 @@ mod tests {
                 }
             );
             check!(
-                Token::lexer(&decimal).next()
-                    == Some(Ok(Token::Number(SchemeNumber::Exact(number)))),
+                SyntaxToken::lexer(&decimal).next()
+                    == Some(Ok(SyntaxToken::Number(SchemeNumber::Exact(number)))),
                 "{number:?} `{decimal}` does not roundtrip"
             );
             let inexact_decimal = format!(
@@ -1190,14 +1125,16 @@ mod tests {
             // might be NaN
             if matches!(number, ExactReal::Nan { .. }) {
                 let_assert!(
-                    Some(Ok(Token::Number(SchemeNumber::Inexact(inum)))) =
-                        Token::lexer(&inexact_decimal).next()
+                    Some(Ok(SyntaxToken::Number(SchemeNumber::Inexact(inum)))) =
+                        SyntaxToken::lexer(&inexact_decimal).next()
                 );
                 check!(inum.is_nan());
             } else {
                 check!(
-                    Token::lexer(&inexact_decimal).next()
-                        == Some(Ok(Token::Number(SchemeNumber::Inexact(number.inexact())))),
+                    SyntaxToken::lexer(&inexact_decimal).next()
+                        == Some(Ok(SyntaxToken::Number(SchemeNumber::Inexact(
+                            number.inexact()
+                        )))),
                     "inexact {number:?} `{inexact_decimal}` does not roundtrip"
                 );
             }
@@ -1219,8 +1156,8 @@ mod tests {
                 },
             );
             check!(
-                Token::lexer(&im_decimal).next()
-                    == Some(Ok(Token::Number(SchemeNumber::ExactComplex {
+                SyntaxToken::lexer(&im_decimal).next()
+                    == Some(Ok(SyntaxToken::Number(SchemeNumber::ExactComplex {
                         real: number,
                         imaginary: im,
                     }))),
@@ -1245,37 +1182,37 @@ mod tests {
             match (number, im) {
                 (ExactReal::Nan { .. }, ExactReal::Nan { .. }) => {
                     let_assert!(
-                        Some(Ok(Token::Number(SchemeNumber::InexactComplex {
+                        Some(Ok(SyntaxToken::Number(SchemeNumber::InexactComplex {
                             real,
                             imaginary
-                        }))) = Token::lexer(&inexact_im_decimal).next()
+                        }))) = SyntaxToken::lexer(&inexact_im_decimal).next()
                     );
                     check!(real.is_nan() && imaginary.is_nan(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
                 }
                 (ExactReal::Nan { .. }, _) => {
                     let_assert!(
-                        Some(Ok(Token::Number(SchemeNumber::InexactComplex {
+                        Some(Ok(SyntaxToken::Number(SchemeNumber::InexactComplex {
                             real,
                             imaginary
-                        }))) = Token::lexer(&inexact_im_decimal).next()
+                        }))) = SyntaxToken::lexer(&inexact_im_decimal).next()
                     );
                     check!(real.is_nan(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
                     check!(imaginary == im.inexact(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
                 }
                 (_, ExactReal::Nan { .. }) => {
                     let_assert!(
-                        Some(Ok(Token::Number(SchemeNumber::InexactComplex {
+                        Some(Ok(SyntaxToken::Number(SchemeNumber::InexactComplex {
                             real,
                             imaginary
-                        }))) = Token::lexer(&inexact_im_decimal).next()
+                        }))) = SyntaxToken::lexer(&inexact_im_decimal).next()
                     );
                     check!(imaginary.is_nan(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
                     check!(real == number.inexact(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
                 }
                 _ => {
                     check!(
-                        Token::lexer(&inexact_im_decimal).next()
-                            == Some(Ok(Token::Number(SchemeNumber::InexactComplex {
+                        SyntaxToken::lexer(&inexact_im_decimal).next()
+                            == Some(Ok(SyntaxToken::Number(SchemeNumber::InexactComplex {
                                 real: number.inexact(),
                                 imaginary: im.inexact(),
                             }))),

@@ -1,0 +1,12 @@
+---
+[0..3] Syntax(Number(ExactComplex { real: Integer { value: 0, is_neg: false }, imaginary: Integer { value: 1, is_neg: false } }))
+[3..4] Syntax(IntralineWhitespace)
+[4..6] Syntax(Number(ExactComplex { real: Integer { value: 0, is_neg: false }, imaginary: Integer { value: 1, is_neg: false } }))
+[6..7] Syntax(IntralineWhitespace)
+[7..11] Syntax(Number(ExactComplex { real: Integer { value: 0, is_neg: false }, imaginary: Integer { value: 1, is_neg: true } }))
+[11..12] Syntax(IntralineWhitespace)
+[12..16] Syntax(Number(ExactComplex { real: Integer { value: 0, is_neg: false }, imaginary: Integer { value: 1, is_neg: false } }))
+[16..17] Syntax(IntralineWhitespace)
+[17..23] Syntax(Number(ExactComplex { real: Integer { value: 0, is_neg: false }, imaginary: Integer { value: 1, is_neg: false } }))
+---
+0+i +i #b-i #o+i #o0+1i

@@ -2,13 +2,7 @@
 //! or natively
 
 use core::fmt;
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        LazyLock,
-    },
-};
+use std::collections::HashMap;
 
 use crate::general_parser::Module;
 
@@ -69,9 +63,8 @@ impl<T: IntoIterator<Item = impl AsRef<str>>> From<T> for LibraryName {
     }
 }
 
-// Runtimes are stored in the world together
-pub(crate) trait Runtime: std::any::Any {}
-
+// TODO rework runtime system using piccolo's stashing b/c
+// runtimes have to go *inside* the arena, as they can hold GC data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RuntimeKey(usize);
 
@@ -81,7 +74,8 @@ pub struct World {
     // so that runtimes can be interacted with stashed.
     // a world is the technical definition of our entire Scheme environment, so this
     // should be ok!
-    runtimes: HashMap<RuntimeKey, Box<dyn Runtime>>,
+    // FIXME look at how piccolo does stashing
+    runtimes: HashMap<RuntimeKey, ()>,
     /// interner
     rodeo: lasso::Rodeo,
     /// scripts that can be requested for execution
@@ -101,25 +95,6 @@ pub enum LoadSourceError {
 }
 
 impl World {
-    /// Store a new runtime in the world
-    pub(crate) fn hold_runtime<T: Runtime>(&mut self, runtime: T) -> RuntimeKey {
-        static RUNTIME_COUNTER: LazyLock<AtomicUsize> = LazyLock::new(|| AtomicUsize::new(0));
-
-        let key = RuntimeKey(RUNTIME_COUNTER.fetch_add(1, Ordering::SeqCst));
-        self.runtimes.insert(key, Box::new(runtime));
-        key
-    }
-
-    /// Drop a runtime
-    pub(crate) fn trash_runtime(&mut self, key: RuntimeKey) {
-        self.runtimes.remove(&key);
-    }
-
-    /// Fetch a reference to a runtime
-    pub(crate) fn fetch_runtime(&mut self, key: RuntimeKey) -> Option<&mut Box<dyn Runtime>> {
-        self.runtimes.get_mut(&key)
-    }
-
     fn library_name(
         &self,
         name: impl IntoIterator<Item = impl AsRef<str>>,

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::lexer::{Directive, LexerError, SyntaxToken};
 use icu_casemap::CaseMapper;
 
@@ -177,6 +179,7 @@ pub trait ContainsComments {
     fn comments(&self) -> impl Iterator<Item = Comment>;
 }
 
+/// Any node that can contain datum
 pub trait ContainsDatum {
     fn datum(&self) -> impl Iterator<Item = Datum>;
 }
@@ -199,6 +202,55 @@ macro_rules! contains {
             }
         }
     };
+}
+
+/// An interface for recursively operating on datum
+pub trait DatumVisitor {
+    fn visit_datum(&mut self, datum: &Datum) {
+        if let Some(kind) = datum.kind() {
+            match kind {
+                DatumKind::List => self.visit_list(&datum.as_list().unwrap()),
+                DatumKind::Vector => self.visit_vector(&datum.as_vector().unwrap()),
+                DatumKind::Labeled => self.visit_labeled(&datum.as_labeled().unwrap()),
+                DatumKind::Symbol => self.visit_symbol(&datum.as_symbol().unwrap()),
+                DatumKind::LabelRef => self.visit_label_ref(&datum.as_label_ref().unwrap()),
+                DatumKind::Abbreviation => {
+                    self.visit_abbreviation(&datum.as_abbreviation().unwrap())
+                }
+            }
+        }
+    }
+
+    // meta-programming FTW!
+    fn visit_composite<C: ContainsDatum>(&mut self, composite: &C) {
+        for datum in composite.datum() {
+            self.visit_datum(&datum);
+        }
+    }
+
+    fn visit_list(&mut self, list: &List) {
+        _ = list;
+    }
+
+    fn visit_vector(&mut self, vector: &Vector) {
+        _ = vector;
+    }
+
+    fn visit_labeled(&mut self, labeled: &LabeledDatum) {
+        _ = labeled;
+    }
+
+    fn visit_abbreviation(&mut self, abbreviation: &Abbreviation) {
+        _ = abbreviation;
+    }
+
+    fn visit_symbol(&mut self, symbol: &Symbol) {
+        _ = symbol;
+    }
+
+    fn visit_label_ref(&mut self, label_ref: &LabelRef) {
+        _ = label_ref;
+    }
 }
 
 /// Root GAst type for a file
@@ -265,22 +317,129 @@ impl TryFrom<MagusSyntaxElement> for Comment {
     }
 }
 
+#[derive(Default)]
+struct ContainedTriggerVisitor {
+    triggers: HashSet<usize>,
+}
+
+impl DatumVisitor for ContainedTriggerVisitor {
+    fn visit_list(&mut self, list: &List) {
+        self.visit_composite(list);
+    }
+
+    fn visit_vector(&mut self, vector: &Vector) {
+        self.visit_composite(vector);
+    }
+
+    fn visit_labeled(&mut self, labeled: &LabeledDatum) {
+        self.visit_composite(labeled);
+    }
+
+    fn visit_abbreviation(&mut self, abbreviation: &Abbreviation) {
+        self.visit_composite(abbreviation);
+    }
+
+    fn visit_label_ref(&mut self, label_ref: &LabelRef) {
+        if let Some(trigger) = label_ref.trigger() {
+            self.triggers.insert(trigger);
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct Datum(MagusSyntaxNode);
-impl Datum {
-    pub fn as_list(&self) -> Option<List> {
-        // we know there's exactly one child, so we only have to
-        // check nodes if we are looking for a list!
-        match self.0.children().next() {
-            Some(node) if node.kind() == LIST => List::cast(node),
-            _ => None,
+pub struct LabeledDatum(MagusSyntaxNode);
+impl LabeledDatum {
+    pub fn label(&self) -> Option<usize> {
+        if let Some(Ok(SyntaxToken::DatumLabel(label))) = self
+            .0
+            .children_with_tokens()
+            .filter_map(MagusSyntaxElement::into_token)
+            .find(|tok| tok.kind() == DLABEL)
+            .and_then(|tok| SyntaxToken::lexer(tok.text()).next())
+        {
+            Some(label)
+        } else {
+            None
         }
     }
 
-    pub fn as_symbol(&self) -> Option<Symbol> {
+    // Is there a subexpression that contains a reference to us?
+    pub fn is_circular(&self) -> bool {
+        let Some(label) = self.label() else {
+            return false;
+        };
+
+        let mut contained_triggers = ContainedTriggerVisitor::default();
+        contained_triggers.visit_labeled(self);
+
+        contained_triggers.triggers.contains(&label)
+    }
+}
+simple_gast!(node LabeledDatum from LABELED);
+// we should contain only 1 datum...
+contains!(datum LabeledDatum);
+// we do not contain any comments (if proper, it's an error if we do)!
+
+#[derive(Debug, Clone)]
+pub struct Abbreviation(MagusSyntaxNode);
+impl Abbreviation {}
+simple_gast!(node Abbreviation from ABBREV);
+contains!(datum Abbreviation);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SpecialForm {
+    Quote,
+    Quasiquote,
+    Unquote,
+    UnquoteSplicing,
+
+    Include,
+    IncludeCi,
+    SetBang,
+    If,
+    Lambda,
+    DefineLibrary,
+    DefineSyntax,
+    SyntaxRules,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DatumKind {
+    List,
+    Vector,
+    Labeled,
+    Symbol,
+    LabelRef,
+    Abbreviation,
+}
+
+#[derive(Debug, Clone)]
+pub struct Datum(MagusSyntaxNode);
+impl Datum {
+    /// Is something a special form?
+    //
+    // Yes - `Ok(Some(...))` | `Err(...)`
+    // No - `Ok(None)`
+    pub fn special_form(&self) -> Result<Option<SpecialForm>, SpecialForm> {
+        todo!("special forms")
+    }
+
+    // If this says `Some`, calling the correct as_* and unwrapping must never panic
+    pub fn kind(&self) -> Option<DatumKind> {
         match self.0.children_with_tokens().next() {
-            Some(MagusSyntaxElement::Token(token)) if token.kind() == SYMBOL => Symbol::cast(token),
-            _ => None,
+            None => None,
+            Some(MagusSyntaxElement::Node(node)) => match node.kind() {
+                LIST => Some(DatumKind::List),
+                VECTOR => Some(DatumKind::Vector),
+                LABELED => Some(DatumKind::Labeled),
+                ABBREV => Some(DatumKind::Abbreviation),
+                _ => None,
+            },
+            Some(MagusSyntaxElement::Token(tok)) => match tok.kind() {
+                SYMBOL => Some(DatumKind::Symbol),
+                DTRIGGER => Some(DatumKind::LabelRef),
+                _ => None,
+            },
         }
     }
 }
@@ -288,23 +447,38 @@ impl Datum {
 simple_gast!(node Datum from DATUM |syntax: &MagusSyntaxNode| {
     syntax.children_with_tokens().count() == 1
 });
-/*
-impl TryFrom<MagusSyntaxNode> for Datum {
-    type Error = ();
-    fn try_from(value: MagusSyntaxNode) -> Result<Self, Self::Error> {
-        match value.children_with_tokens().first() {
-            Some(MagusSyntaxElement::Node(n)) => match n.kind() {
-                LIST => List::cast(n).map(Datum::List).ok_or(()),
-                _ => Err(())
-            }
-            Some(MagusSyntaxElement::Token(tok)) => match tok.kind() {
-                SYMBOL => Symbol::cast(s).map(Datum::Symbol).ok_or(()),
-                _ => Err(())
+
+macro_rules! datum_as_type {
+    (node $name:ident for $type:ident from $stype:ident) => {
+        impl Datum {
+            pub fn $name(&self) -> Option<$type> {
+                match self.0.children().next() {
+                    Some(node) if node.kind() == $stype => $type::cast(node),
+                    _ => None,
+                }
             }
         }
-    }
+    };
+
+    (token $name:ident for $type:ident from $stype:ident) => {
+        impl Datum {
+            pub fn $name(&self) -> Option<$type> {
+                match self.0.children_with_tokens().next() {
+                    Some(MagusSyntaxElement::Token(token)) if token.kind() == $stype => {
+                        $type::cast(token)
+                    }
+                    _ => None,
+                }
+            }
+        }
+    };
 }
-*/
+datum_as_type!(node as_list for List from LIST);
+datum_as_type!(node as_vector for Vector from VECTOR);
+datum_as_type!(node as_labeled for LabeledDatum from LABELED);
+datum_as_type!(node as_abbreviation for Abbreviation from ABBREV);
+datum_as_type!(token as_symbol for Symbol from SYMBOL);
+datum_as_type!(token as_label_ref for LabelRef from DTRIGGER);
 
 #[derive(Debug, Clone)]
 pub struct List(MagusSyntaxNode);
@@ -312,6 +486,13 @@ impl List {}
 simple_gast!(node List from LIST);
 contains!(comments List);
 contains!(datum List);
+
+#[derive(Debug, Clone)]
+pub struct Vector(MagusSyntaxNode);
+impl Vector {}
+simple_gast!(node Vector from VECTOR);
+contains!(comments Vector);
+contains!(datum Vector);
 
 #[derive(Debug, Clone)]
 pub struct Symbol(MagusSyntaxToken);
@@ -358,3 +539,18 @@ impl Symbol {
     }
 }
 simple_gast!(token Symbol from SYMBOL);
+
+#[derive(Debug, Clone)]
+pub struct LabelRef(MagusSyntaxToken);
+impl LabelRef {
+    pub fn trigger(&self) -> Option<usize> {
+        if let Some(Ok(SyntaxToken::DatumLabelValue(trigger))) =
+            SyntaxToken::lexer(self.0.text()).next()
+        {
+            Some(trigger)
+        } else {
+            None
+        }
+    }
+}
+simple_gast!(token LabelRef from DTRIGGER);

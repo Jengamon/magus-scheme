@@ -2,8 +2,8 @@ use clap::Parser;
 use codesnake::{Block, CodeWidth, Label, LineIndex};
 use magus::{
     general_parser::{
-        ContainsComments, ContainsDatum, GAstNode, GAstToken, MagusSyntaxElement,
-        MagusSyntaxElementRef, Module, Symbol, SyntaxKind,
+        Abbreviation, ContainsComments, DatumVisitor, GAstNode, GAstToken, LabeledDatum,
+        MagusSyntaxElement, MagusSyntaxElementRef, Module, Symbol, SyntaxKind,
     },
     lexer::Token,
 };
@@ -30,29 +30,45 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-fn print_comments_rec<C: ContainsComments + ContainsDatum>(node: &C) -> usize {
-    let mut count = 0;
-    for comment in node.comments() {
-        count += 1;
-        match comment.syntax() {
-            MagusSyntaxElementRef::Token(tok) => {
-                println!("[{:?}] {}", tok.text_range(), tok.text());
-            }
-            MagusSyntaxElementRef::Node(node) => {
-                println!("[{:?}] {}", node.text_range(), node.text());
+#[derive(Default)]
+struct CommentPrinter {
+    count: usize,
+}
+
+impl CommentPrinter {
+    fn print_comments<C: ContainsComments>(&mut self, node: &C) {
+        for comment in node.comments() {
+            self.count += 1;
+            match comment.syntax() {
+                MagusSyntaxElementRef::Token(tok) => {
+                    println!("[{:?}] {}", tok.text_range(), tok.text());
+                }
+                MagusSyntaxElementRef::Node(node) => {
+                    println!("[{:?}] {}", node.text_range(), node.text());
+                }
             }
         }
     }
+}
 
-    // For each datum, display comments and then add the totals
-    for datum in node.datum() {
-        // go through nodes that can contain comments
-        if let Some(list) = datum.as_list() {
-            count += print_comments_rec(&list);
-        }
+impl DatumVisitor for CommentPrinter {
+    fn visit_list(&mut self, list: &magus::general_parser::List) {
+        self.print_comments(list);
+        self.visit_composite(list);
     }
 
-    count
+    fn visit_vector(&mut self, vector: &magus::general_parser::Vector) {
+        self.visit_composite(vector);
+    }
+
+    fn visit_abbreviation(&mut self, abbreviation: &Abbreviation) {
+        self.visit_composite(abbreviation)
+    }
+
+    fn visit_labeled(&mut self, labeled: &LabeledDatum) {
+        println!("Is label circular? -> {}", labeled.is_circular());
+        self.visit_composite(labeled)
+    }
 }
 
 // TODO Make SchemeHelper for all the REPL goodies
@@ -95,8 +111,9 @@ fn repl() -> anyhow::Result<()> {
 
         // list all comments
         println!("Comment listing:");
-        let printed_count = print_comments_rec(&module);
-        if printed_count == 0 {
+        let mut comment_printer = CommentPrinter::default();
+        comment_printer.visit_composite(&module);
+        if comment_printer.count == 0 {
             println!("... no comments");
         }
 

@@ -15,7 +15,7 @@ jobs:
     needs: check
     steps:
       - uses: actions/checkout@v4
-      - uses: extractions/setup-just@v1
+      - uses: extractions/setup-just@v2
       - name: Install tools
         uses: taiki-e/install-action@nextest
       - name: Run arbtests
@@ -25,7 +25,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: extractions/setup-just@v1
+      - uses: extractions/setup-just@v2
       - name: Run format check
         run: cargo fmt --check
   build:
@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: extractions/setup-just@v1
+      - uses: extractions/setup-just@v2
       - name: Install tools
         uses: taiki-e/install-action@v2
         with:

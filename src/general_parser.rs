@@ -11,11 +11,11 @@ use crate::{
 pub use gast::{
     SyntaxKind,  MagusSyntaxElement, MagusSyntaxNode, MagusSyntaxToken, MagusSyntaxElementRef,
     // traits
-    GAstNode, GAstToken, ContainsComments, ContainsDatum,
+    GAstNode, GAstToken, ContainsComments, ContainsDatum, DatumVisitor,
     // trivia
     NestedComment, DatumComment, OneLineComment, Comment,
-    // token
-    Symbol,
+    // data
+    Symbol, Datum, DatumKind, LabeledDatum, Abbreviation, LabelRef, List, Vector,
     // top-level
     Module,
 };
@@ -256,27 +256,19 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
         }
         builder.finish_node();
 
-        while in_abbreviation(checkpoints) {
-            let Some((CheckpointItem::Abbreviation(checkpoint), _)) = checkpoints.pop() else {
-                unreachable!()
+        while in_abbreviation(checkpoints) || in_labeled(checkpoints) {
+            let (checkpoint, is_labeled) = match checkpoints.pop() {
+                Some((CheckpointItem::Abbreviation(checkpoint), _)) => (checkpoint, false),
+                Some((CheckpointItem::Labeled(checkpoint), _)) => (checkpoint, true),
+                _ => unreachable!(),
             };
             builder.start_node_at(checkpoint, DATUM.into());
-            builder.start_node_at(checkpoint, ABBREV.into());
+            builder.start_node_at(checkpoint, if is_labeled { LABELED } else { ABBREV }.into());
             builder.finish_node();
             builder.finish_node();
         }
 
-        while in_labeled(checkpoints) {
-            let Some((CheckpointItem::Labeled(checkpoint), _)) = checkpoints.pop() else {
-                unreachable!()
-            };
-            builder.start_node_at(checkpoint, DATUM.into());
-            builder.start_node_at(checkpoint, LABELED.into());
-            builder.finish_node();
-            builder.finish_node();
-        }
-
-        while in_datum_comment(checkpoints) {
+        if in_datum_comment(checkpoints) {
             let Some((CheckpointItem::DatumComment(checkpoint), _)) = checkpoints.pop() else {
                 unreachable!()
             };

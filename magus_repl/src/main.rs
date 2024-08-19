@@ -1,7 +1,10 @@
 use clap::Parser;
 use codesnake::{Block, CodeWidth, Label, LineIndex};
 use magus::{
-    general_parser::{GAstToken, MagusSyntaxElement, Symbol, SyntaxKind},
+    general_parser::{
+        ContainsComments, ContainsDatum, GAstNode, GAstToken, MagusSyntaxElement,
+        MagusSyntaxElementRef, Module, Symbol, SyntaxKind,
+    },
     lexer::Token,
 };
 use rustyline::{history::MemHistory, Config};
@@ -25,6 +28,31 @@ fn main() -> anyhow::Result<()> {
     } else {
         repl()
     }
+}
+
+fn print_comments_rec<C: ContainsComments + ContainsDatum>(node: &C) -> usize {
+    let mut count = 0;
+    for comment in node.comments() {
+        count += 1;
+        match comment.syntax() {
+            MagusSyntaxElementRef::Token(tok) => {
+                println!("[{:?}] {}", tok.text_range(), tok.text());
+            }
+            MagusSyntaxElementRef::Node(node) => {
+                println!("[{:?}] {}", node.text_range(), node.text());
+            }
+        }
+    }
+
+    // For each datum, display comments and then add the totals
+    for datum in node.datum() {
+        // go through nodes that can contain comments
+        if let Some(list) = datum.as_list() {
+            count += print_comments_rec(&list);
+        }
+    }
+
+    count
 }
 
 // TODO Make SchemeHelper for all the REPL goodies
@@ -60,6 +88,16 @@ fn repl() -> anyhow::Result<()> {
             })
         {
             println!("First identifier of module: {:?}", ft.identifier(false));
+        }
+
+        // Tell me your secrets
+        let module = Module::cast(gast.syntax()).unwrap();
+
+        // list all comments
+        println!("Comment listing:");
+        let printed_count = print_comments_rec(&module);
+        if printed_count == 0 {
+            println!("... no comments");
         }
 
         // Show what the parser sees

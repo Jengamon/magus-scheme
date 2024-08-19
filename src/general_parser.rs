@@ -9,9 +9,11 @@ use crate::{
 };
 #[rustfmt::skip]
 pub use gast::{
-    SyntaxKind, GAstNode, GAstToken, MagusSyntaxElement, MagusSyntaxNode, MagusSyntaxToken,
+    SyntaxKind,  MagusSyntaxElement, MagusSyntaxNode, MagusSyntaxToken, MagusSyntaxElementRef,
+    // traits
+    GAstNode, GAstToken, ContainsComments, ContainsDatum,
     // trivia
-    NestedComment,
+    NestedComment, DatumComment, OneLineComment, Comment,
     // token
     Symbol,
     // top-level

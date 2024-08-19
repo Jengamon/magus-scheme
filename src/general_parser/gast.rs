@@ -73,7 +73,6 @@ pub enum SyntaxKind {
     /// top-level node: a list of s-expressions
     ROOT,
 }
-use rowan::SyntaxText;
 use SyntaxKind::*;
 
 /// Some boilerplate is needed, as rowan settled on using its own
@@ -106,7 +105,9 @@ impl rowan::Language for MagusSchemeLang {
 pub type MagusSyntaxNode = rowan::SyntaxNode<MagusSchemeLang>;
 pub type MagusSyntaxToken = rowan::SyntaxToken<MagusSchemeLang>;
 pub type MagusSyntaxElement = rowan::NodeOrToken<MagusSyntaxNode, MagusSyntaxToken>;
-/// Interface for anything that is a node from the GAst
+pub type MagusSyntaxElementRef<'a> = rowan::NodeOrToken<&'a MagusSyntaxNode, &'a MagusSyntaxToken>;
+
+/// Anything that is a non-terminal
 pub trait GAstNode {
     fn cast(syntax: MagusSyntaxNode) -> Option<Self>
     where
@@ -115,7 +116,7 @@ pub trait GAstNode {
     fn syntax(&self) -> &MagusSyntaxNode;
 }
 
-/// Anything that is a non-trivia individual node from the syntax
+/// Anything that is a terminal
 pub trait GAstToken {
     fn cast(syntax: MagusSyntaxToken) -> Option<Self>
     where
@@ -124,22 +125,91 @@ pub trait GAstToken {
     fn syntax(&self) -> &MagusSyntaxToken;
 }
 
-/// Root GAst type for a file
-pub struct Module(MagusSyntaxNode);
-impl Module {}
-impl GAstNode for Module {
-    fn cast(syntax: MagusSyntaxNode) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        (syntax.kind() == ROOT).then_some(Self(syntax))
-    }
+macro_rules! simple_gast {
+    (node $name:ident from $kind:ident) => {
+        impl GAstNode for $name {
+            fn cast(syntax: MagusSyntaxNode) -> Option<Self>
+            where
+                Self: Sized,
+            {
+                (syntax.kind() == $kind).then_some(Self(syntax))
+            }
 
-    fn syntax(&self) -> &MagusSyntaxNode {
-        &self.0
-    }
+            fn syntax(&self) -> &MagusSyntaxNode {
+                &self.0
+            }
+        }
+    };
+
+    (node $name:ident from $kind:ident $with:expr) => {
+        impl GAstNode for $name {
+            fn cast(syntax: MagusSyntaxNode) -> Option<Self>
+            where
+                Self: Sized,
+            {
+                (syntax.kind() == $kind && $with(&syntax)).then_some(Self(syntax))
+            }
+
+            fn syntax(&self) -> &MagusSyntaxNode {
+                &self.0
+            }
+        }
+    };
+    (token $name:ident from $kind:ident) => {
+        impl GAstToken for $name {
+            fn cast(syntax: MagusSyntaxToken) -> Option<Self>
+            where
+                Self: Sized,
+            {
+                (syntax.kind() == $kind).then_some(Self(syntax))
+            }
+
+            fn syntax(&self) -> &MagusSyntaxToken {
+                &self.0
+            }
+        }
+    };
 }
 
+// Cross-cutting properties are put into traits so that you can metaprogram
+/// Any node that can contain comments
+pub trait ContainsComments {
+    fn comments(&self) -> impl Iterator<Item = Comment>;
+}
+
+pub trait ContainsDatum {
+    fn datum(&self) -> impl Iterator<Item = Datum>;
+}
+
+macro_rules! contains {
+    (comments $tyn:ident) => {
+        impl ContainsComments for $tyn {
+            fn comments(&self) -> impl Iterator<Item = Comment> {
+                self.0
+                    .children_with_tokens()
+                    .filter_map(|elem| Comment::try_from(elem).ok())
+            }
+        }
+    };
+
+    (datum $tyn:ident) => {
+        impl ContainsDatum for $tyn {
+            fn datum(&self) -> impl Iterator<Item = Datum> {
+                self.0.children().filter_map(Datum::cast)
+            }
+        }
+    };
+}
+
+/// Root GAst type for a file
+#[derive(Debug, Clone)]
+pub struct Module(MagusSyntaxNode);
+impl Module {}
+simple_gast!(node Module from ROOT);
+contains!(comments Module);
+contains!(datum Module);
+
+#[derive(Debug, Clone)]
 pub struct NestedComment(MagusSyntaxNode);
 impl NestedComment {
     // does this represent a valid nested comment
@@ -151,24 +221,99 @@ impl NestedComment {
             _ => unreachable!(),
         }
     }
-
-    pub fn content(&self) -> SyntaxText {
-        self.0.text()
-    }
-}
-impl GAstNode for NestedComment {
-    fn cast(syntax: MagusSyntaxNode) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        (syntax.kind() == NCOMMENT).then_some(Self(syntax))
-    }
-
-    fn syntax(&self) -> &MagusSyntaxNode {
-        &self.0
-    }
 }
 
+simple_gast!(node NestedComment from NCOMMENT);
+#[derive(Debug, Clone)]
+pub struct OneLineComment(MagusSyntaxToken);
+impl OneLineComment {}
+simple_gast!(token OneLineComment from OLCOMMENT);
+#[derive(Debug, Clone)]
+pub struct DatumComment(MagusSyntaxNode);
+impl DatumComment {}
+simple_gast!(node DatumComment from DCOMMENT);
+
+#[derive(Debug, Clone)]
+pub enum Comment {
+    OneLine(OneLineComment),
+    Datum(DatumComment),
+    Nested(NestedComment),
+}
+impl Comment {
+    pub fn syntax(&self) -> MagusSyntaxElementRef {
+        match self {
+            Self::OneLine(ol) => MagusSyntaxElementRef::Token(ol.syntax()),
+            Self::Datum(datum) => MagusSyntaxElementRef::Node(datum.syntax()),
+            Self::Nested(nest) => MagusSyntaxElementRef::Node(nest.syntax()),
+        }
+    }
+}
+impl TryFrom<MagusSyntaxElement> for Comment {
+    type Error = ();
+    fn try_from(value: MagusSyntaxElement) -> Result<Self, Self::Error> {
+        match value {
+            MagusSyntaxElement::Node(n) => match n.kind() {
+                NCOMMENT => NestedComment::cast(n).map(Comment::Nested).ok_or(()),
+                DCOMMENT => DatumComment::cast(n).map(Comment::Datum).ok_or(()),
+                _ => Err(()),
+            },
+            MagusSyntaxElement::Token(t) => match t.kind() {
+                OLCOMMENT => OneLineComment::cast(t).map(Comment::OneLine).ok_or(()),
+                _ => Err(()),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Datum(MagusSyntaxNode);
+impl Datum {
+    pub fn as_list(&self) -> Option<List> {
+        // we know there's exactly one child, so we only have to
+        // check nodes if we are looking for a list!
+        match self.0.children().next() {
+            Some(node) if node.kind() == LIST => List::cast(node),
+            _ => None,
+        }
+    }
+
+    pub fn as_symbol(&self) -> Option<Symbol> {
+        match self.0.children_with_tokens().next() {
+            Some(MagusSyntaxElement::Token(token)) if token.kind() == SYMBOL => Symbol::cast(token),
+            _ => None,
+        }
+    }
+}
+// *all* validly parsed datum only contain 1 child
+simple_gast!(node Datum from DATUM |syntax: &MagusSyntaxNode| {
+    syntax.children_with_tokens().count() == 1
+});
+/*
+impl TryFrom<MagusSyntaxNode> for Datum {
+    type Error = ();
+    fn try_from(value: MagusSyntaxNode) -> Result<Self, Self::Error> {
+        match value.children_with_tokens().first() {
+            Some(MagusSyntaxElement::Node(n)) => match n.kind() {
+                LIST => List::cast(n).map(Datum::List).ok_or(()),
+                _ => Err(())
+            }
+            Some(MagusSyntaxElement::Token(tok)) => match tok.kind() {
+                SYMBOL => Symbol::cast(s).map(Datum::Symbol).ok_or(()),
+                _ => Err(())
+            }
+        }
+    }
+}
+*/
+
+#[derive(Debug, Clone)]
+pub struct List(MagusSyntaxNode);
+impl List {}
+simple_gast!(node List from LIST);
+contains!(comments List);
+contains!(datum List);
+
+#[derive(Debug, Clone)]
 pub struct Symbol(MagusSyntaxToken);
 impl Symbol {
     /// returns the case-folded identifier or the malformed identifier (not case-folded)
@@ -212,15 +357,4 @@ impl Symbol {
         }
     }
 }
-impl GAstToken for Symbol {
-    fn cast(syntax: MagusSyntaxToken) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        (syntax.kind() == SYMBOL).then_some(Self(syntax))
-    }
-
-    fn syntax(&self) -> &MagusSyntaxToken {
-        &self.0
-    }
-}
+simple_gast!(token Symbol from SYMBOL);

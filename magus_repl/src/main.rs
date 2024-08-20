@@ -2,8 +2,8 @@ use clap::Parser;
 use codesnake::{Block, CodeWidth, Label, LineIndex};
 use magus::{
     general_parser::{
-        Abbreviation, ContainsComments, DatumVisitor, GAstNode, GAstToken, LabeledDatum,
-        MagusSyntaxElement, MagusSyntaxElementRef, Module, Symbol, SyntaxKind,
+        ContainsComments, DatumVisitor, GAstNode, GAstToken, MagusSyntaxElement,
+        MagusSyntaxElementRef, Module, Symbol, SyntaxKind,
     },
     lexer::Token,
 };
@@ -61,11 +61,11 @@ impl DatumVisitor for CommentPrinter {
         self.visit_composite(vector);
     }
 
-    fn visit_abbreviation(&mut self, abbreviation: &Abbreviation) {
+    fn visit_abbreviation(&mut self, abbreviation: &magus::general_parser::Abbreviation) {
         self.visit_composite(abbreviation)
     }
 
-    fn visit_labeled(&mut self, labeled: &LabeledDatum) {
+    fn visit_labeled(&mut self, labeled: &magus::general_parser::LabeledDatum) {
         println!("Is label circular? -> {}", labeled.is_circular());
         self.visit_composite(labeled)
     }

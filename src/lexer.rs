@@ -757,7 +757,7 @@ pub enum SyntaxToken {
     #[regex(r"#?\\[a-zA-Z]+", priority = 2, callback = process_named_character)]
     #[regex(r"(?i)#?\\x[0-9a-f]+", callback = process_hex_character)]
     Character(char),
-    #[regex(r#""([^\\"]|\\[abntr"\\xX])*""#, process_string)]
+    #[regex(r#""([^\\"]|\\[abntr"\\xX]|\\[ \n\t\r]+)*""#, process_string)]
     String(Box<str>),
 
     // The number tower is supported at least by the lexer (and currently is mostly rejected by the general parser)

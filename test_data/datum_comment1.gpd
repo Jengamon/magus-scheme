@@ -12,7 +12,7 @@ ROOT@0..20
   WHITESPACE@18..19 " "
   DATUM@19..20
     SYMBOL@19..20 "a"
-; after the second section, comments are not allowed (well, they just have to be scheme comments...)
 ; (well, you can't tell for the most part as these comments look like scheme ones)
+; after the second section, comments are not allowed (well, they just have to be scheme comments...)
 ---
 #; |a\x3bb;\x39b;| a

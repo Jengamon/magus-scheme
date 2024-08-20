@@ -7,7 +7,10 @@ use magus::{
     },
     lexer::Token,
 };
-use rustyline::{history::MemHistory, Config};
+use rustyline::{
+    history::{History, MemHistory},
+    Config, Editor, Helper,
+};
 use yansi::Paint;
 
 #[derive(Parser, Debug)]
@@ -91,12 +94,24 @@ impl DatumVisitor for CommentPrinter {
     }
 }
 
+fn read_prompt(readline: &mut Editor<impl Helper, impl History>) -> rustyline::Result<String> {
+    let mut input = readline.readline(">> ")?;
+
+    while input.ends_with('\\') {
+        _ = input.pop();
+        input.push('\n');
+        input.push_str(&readline.readline(".. ")?);
+    }
+
+    Ok(input)
+}
+
 // TODO Make SchemeHelper for all the REPL goodies
 fn repl() -> anyhow::Result<()> {
     let mut readline =
         rustyline::Editor::<(), _>::with_history(Config::default(), MemHistory::new())?;
 
-    while let Ok(input) = readline.readline(">> ") {
+    while let Ok(input) = read_prompt(&mut readline) {
         let src = input.as_str();
 
         // General parse

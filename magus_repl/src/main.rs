@@ -2,8 +2,8 @@ use clap::Parser;
 use codesnake::{Block, CodeWidth, Label, LineIndex};
 use magus::{
     general_parser::{
-        ContainsDatum, ContainsTrivia, DatumVisitor, GAstNode, GAstToken, MagusSyntaxElement,
-        MagusSyntaxElementRef, Module, Symbol, SyntaxKind,
+        Comment, ContainsDatum, ContainsTrivia, DatumVisitor, GAstNode, MagusSyntaxElementRef,
+        Module, Symbol,
     },
     lexer::Token,
 };
@@ -39,6 +39,9 @@ impl CommentPrinter {
     fn print_comments<C: ContainsTrivia>(&mut self, node: &C) {
         for comment in node.comments() {
             self.count += 1;
+            if let Comment::Nested(nest) = &comment {
+                println!("Is nested valid? {}", nest.is_valid());
+            }
             match comment.syntax() {
                 MagusSyntaxElementRef::Token(tok) => {
                     println!("[{:?}] {}", tok.text_range(), tok.text());
@@ -53,11 +56,24 @@ impl CommentPrinter {
 
 impl DatumVisitor for CommentPrinter {
     fn visit_list(&mut self, list: &magus::general_parser::List) {
+        println!("is list valid? {}", list.is_valid());
+        println!("is list special form? {:?}", list.special_form(false));
         self.print_comments(list);
         self.visit_composite(list);
     }
 
+    fn visit_bytevector(&mut self, bytevector: &magus::general_parser::Bytevector) {
+        println!(
+            "is bytevector valid? {} {:?}",
+            bytevector.is_valid(),
+            bytevector.bytes().collect::<Vec<_>>()
+        );
+        self.print_comments(bytevector);
+        self.visit_composite(bytevector);
+    }
+
     fn visit_vector(&mut self, vector: &magus::general_parser::Vector) {
+        self.print_comments(vector);
         self.visit_composite(vector);
     }
 
@@ -137,6 +153,7 @@ fn repl() -> anyhow::Result<()> {
         // list all comments
         println!("Comment listing:");
         let mut comment_printer = CommentPrinter::default();
+        comment_printer.print_comments(&module);
         comment_printer.visit_composite(&module);
         if comment_printer.count == 0 {
             println!("... no comments");

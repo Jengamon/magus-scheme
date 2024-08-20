@@ -14,10 +14,10 @@ pub use gast::{
     GAstNode, GAstToken, ContainsTrivia, ContainsDatum, DatumVisitor,
     // trivia
     NestedComment, DatumComment, OneLineComment, Comment, Whitespace, InlineWhitespace,
-    LineEnding,
+    LineEnding, DirectiveToken,
     // data
-    Symbol, Datum, DatumKind, LabeledDatum, Abbreviation, LabelRef, List, Vector,
-    Number,
+    Symbol, Datum, DatumKind, LabeledDatum, Abbreviation, AbbreviationKind, LabelRef, List, SpecialForm,
+    Vector, Number, Bytevector, StringToken, Character, Boolean,
     // top-level
     Module,
 };

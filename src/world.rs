@@ -4,7 +4,15 @@
 use core::fmt;
 use std::collections::HashMap;
 
-use crate::general_parser::Module;
+use gc_arena::{Arena, Collect, Gc, RefLock, Rootable};
+
+use crate::{
+    general_parser::{ContainsDatum, Module, SpecialForm},
+    runtime::interpreter::Interpreter,
+};
+
+pub mod fuel;
+pub mod value;
 
 pub(crate) struct InternalModule {
     module: Module,
@@ -63,27 +71,47 @@ impl<T: IntoIterator<Item = impl AsRef<str>>> From<T> for LibraryName {
     }
 }
 
-// TODO rework runtime system using piccolo's stashing b/c
-// runtimes have to go *inside* the arena, as they can hold GC data.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Collect)]
+#[collect(require_static)]
 pub struct RuntimeKey(usize);
 
-#[derive(Default)]
+#[derive(Collect)]
+#[collect(no_drop)]
+pub(crate) struct WorldArena<'gc> {
+    pub interpreters: HashMap<RuntimeKey, Gc<'gc, RefLock<Interpreter<'gc>>>>,
+    // TODO Stash for stuff
+    // we don't actually have to stash runtimes, b/c they are just in the root
+}
+pub(crate) type WorldRoot = Arena<Rootable![WorldArena<'_>]>;
+
 pub struct World {
     // TODO Make World also have the gc-arenas for values and rc-refcell (hashmap?) for runtimes
     // so that runtimes can be interacted with stashed.
     // a world is the technical definition of our entire Scheme environment, so this
     // should be ok!
     // FIXME look at how piccolo does stashing
-    runtimes: HashMap<RuntimeKey, ()>,
+    pub(crate) root: WorldRoot,
     /// interner
-    rodeo: lasso::Rodeo,
+    pub(crate) rodeo: lasso::Rodeo,
     /// scripts that can be requested for execution
     // TODO switch to hashbrown or ahash? might be faster maybe probably?
     // we use Spurs b/c we have the interner
-    modules: HashMap<lasso::Spur, InternalModule>,
+    pub(crate) modules: HashMap<lasso::Spur, InternalModule>,
     /// libraries that can be imported from
     libraries: HashMap<InternalLibraryName, SchemeLibrary>,
+}
+
+impl Default for World {
+    fn default() -> Self {
+        Self {
+            root: WorldRoot::new(|_mc| WorldArena {
+                interpreters: HashMap::new(),
+            }),
+            rodeo: lasso::Rodeo::default(),
+            modules: HashMap::default(),
+            libraries: HashMap::default(),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -124,6 +152,7 @@ impl World {
     pub fn load_source(
         &mut self,
         filename: impl AsRef<str>,
+        case_insensitive: bool,
         module: Module,
     ) -> Result<(), LoadSourceError> {
         // TODO Detect if a given GAst is a library or a program by checking:
@@ -137,6 +166,17 @@ impl World {
         //
         // NOTE Actually we will allow multiple libraries within a module, but
         // all libraries *must* precede any part of the program
+        let filename = self.rodeo.get_or_intern(filename.as_ref());
+        let mut module_datum = module.datum().peekable();
+        // the peeked datum has to be a list to be in library mode anyways...
+        while let Some(list) = module_datum.peek().and_then(|dat| dat.as_list()) {
+            if let Some(Ok(SpecialForm::DefineLibrary)) = list.special_form(case_insensitive) {
+                _ = filename;
+                todo!()
+            } else {
+                break;
+            }
+        }
         todo!()
     }
 }

@@ -1,11 +1,8 @@
 use clap::Parser;
 use codesnake::{Block, CodeWidth, Label, LineIndex};
 use magus::{
-    general_parser::{
-        Comment, ContainsDatum, ContainsTrivia, DatumVisitor, GAstNode, MagusSyntaxElementRef,
-        Module, Symbol,
-    },
-    lexer::Token,
+    lexer::Token, Comment, ContainsDatum, ContainsTrivia, DatumVisitor, ExternalRepresentation,
+    GAstNode, MagusSyntaxElementRef, Module, Symbol,
 };
 use rustyline::{
     history::{History, MemHistory},
@@ -24,6 +21,19 @@ fn main() -> anyhow::Result<()> {
     let args = Cli::parse();
     if let Some(file) = args.file {
         if file == "-" {
+            use magus::{Label, Labeled, ListOrVector, StringOrSymbol, ToExternal as _};
+            println!(
+                "{}",
+                Labeled(
+                    0,
+                    ListOrVector::List(&[
+                        StringOrSymbol::Symbol("quote").to_external(),
+                        Label(0).to_external(),
+                        ().to_external()
+                    ])
+                )
+                .to_external()
+            );
             todo!("read from standard input")
         } else {
             todo!("open and read file")
@@ -58,14 +68,14 @@ impl CommentPrinter {
 }
 
 impl DatumVisitor for CommentPrinter {
-    fn visit_list(&mut self, list: &magus::general_parser::List) {
+    fn visit_list(&mut self, list: &magus::List) {
         println!("is list valid? {}", list.is_valid());
         println!("is list special form? {:?}", list.special_form(false));
         self.print_comments(list);
         self.visit_composite(list);
     }
 
-    fn visit_bytevector(&mut self, bytevector: &magus::general_parser::Bytevector) {
+    fn visit_bytevector(&mut self, bytevector: &magus::Bytevector) {
         println!(
             "is bytevector valid? {} {:?}",
             bytevector.is_valid(),
@@ -75,20 +85,20 @@ impl DatumVisitor for CommentPrinter {
         self.visit_composite(bytevector);
     }
 
-    fn visit_vector(&mut self, vector: &magus::general_parser::Vector) {
+    fn visit_vector(&mut self, vector: &magus::Vector) {
         self.print_comments(vector);
         self.visit_composite(vector);
     }
 
-    fn visit_number(&mut self, number: &magus::general_parser::Number) {
+    fn visit_number(&mut self, number: &magus::Number) {
         println!("got number? {:?}", number.number());
     }
 
-    fn visit_abbreviation(&mut self, abbreviation: &magus::general_parser::Abbreviation) {
+    fn visit_abbreviation(&mut self, abbreviation: &magus::Abbreviation) {
         self.visit_composite(abbreviation)
     }
 
-    fn visit_labeled(&mut self, labeled: &magus::general_parser::LabeledDatum) {
+    fn visit_labeled(&mut self, labeled: &magus::LabeledDatum) {
         println!("Is label circular? -> {}", labeled.is_circular());
         self.visit_composite(labeled)
     }
@@ -97,7 +107,7 @@ impl DatumVisitor for CommentPrinter {
 fn read_prompt(readline: &mut Editor<impl Helper, impl History>) -> rustyline::Result<String> {
     let mut input = readline.readline(">> ")?;
 
-    while input.ends_with('\\') {
+    while input.ends_with(',') {
         _ = input.pop();
         input.push('\n');
         input.push_str(&readline.readline(".. ")?);
@@ -115,7 +125,7 @@ fn repl() -> anyhow::Result<()> {
         let src = input.as_str();
 
         // General parse
-        let gast = magus::general_parser::general_parse(&input);
+        let gast = magus::general_parse(&input);
 
         // Tell me your secrets
         let module = Module::cast(gast.syntax()).unwrap();
@@ -134,19 +144,19 @@ fn repl() -> anyhow::Result<()> {
         }
 
         impl DatumVisitor for FirstIdent {
-            fn visit_list(&mut self, list: &magus::general_parser::List) {
+            fn visit_list(&mut self, list: &magus::List) {
                 self.visit_if_unfound(list)
             }
 
-            fn visit_vector(&mut self, vector: &magus::general_parser::Vector) {
+            fn visit_vector(&mut self, vector: &magus::Vector) {
                 self.visit_if_unfound(vector)
             }
 
-            fn visit_abbreviation(&mut self, abbreviation: &magus::general_parser::Abbreviation) {
+            fn visit_abbreviation(&mut self, abbreviation: &magus::Abbreviation) {
                 self.visit_if_unfound(abbreviation)
             }
 
-            fn visit_labeled(&mut self, labeled: &magus::general_parser::LabeledDatum) {
+            fn visit_labeled(&mut self, labeled: &magus::LabeledDatum) {
                 self.visit_if_unfound(labeled)
             }
 
@@ -176,6 +186,14 @@ fn repl() -> anyhow::Result<()> {
 
         // Show what the parser sees
         println!("{:#?}", gast.syntax());
+
+        // Print the programs parsable external representation
+        for datum in module.datum() {
+            let repr: Result<ExternalRepresentation, ()> = datum.try_into();
+            if let Ok(repr) = repr {
+                println!("{repr}");
+            }
+        }
         let idx = LineIndex::new(src);
 
         let blocks = (!gast.errors().is_empty())

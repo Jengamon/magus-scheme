@@ -1,15 +1,18 @@
 //! runtimes are responsible for reading worlds and executing on its contents (relative to a specific program)
 
 use core::fmt;
-use std::rc::Rc;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use gc_arena::{unsize, Collect, Gc, Mutation};
+use gc_arena::{Collect, Gc, Mutation, RefLock};
 use lasso::Rodeo;
 
-use crate::world::{fuel::Fuel, value::ValuePtr};
+use crate::{world::value::ValuePtr, ExternalRepresentation};
 
-// first runtime will be the slowest: treewalk!
+pub mod external;
 pub mod interpreter;
+
+// First implement a treewalk interpreter that gets the sematics of Scheme correct, then
+// start using this as we start a VM to make it faster (?).
 
 /// Errors as held in the program
 #[derive(Collect, Clone, Copy, Debug)]
@@ -23,12 +26,34 @@ pub enum Error<'gc> {
 #[collect(require_static)]
 pub struct BoxError(pub Rc<dyn std::error::Error>);
 
+impl<E> From<E> for BoxError
+where
+    E: std::error::Error + 'static,
+{
+    fn from(value: E) -> Self {
+        Self(Rc::new(value))
+    }
+}
+
 // It is up to runtimes to implement procedures
-#[derive(Collect, Clone, Copy, Debug)]
-#[collect(no_drop)]
-pub enum Procedure<'gc> {
-    Treewalk(Treewalk<'gc>),
-    NativeProcedure(NativeProcedure<'gc>),
+#[derive(Collect, Debug, Clone)]
+#[collect(require_static)]
+pub enum Procedure {
+    Code(Code),
+    Native(NativeProcedure),
+}
+
+impl Procedure {
+    // report the arity of a procedure
+    pub fn arity(&self) -> Arity {
+        match self {
+            Self::Code(code) => {
+                _ = code;
+                todo!("report arity for code blocks")
+            }
+            Self::Native(nat) => nat.0.borrow().arity(),
+        }
+    }
 }
 
 /*
@@ -38,34 +63,58 @@ pub enum Procedure<'gc> {
 
     evaluate 1 -> a
     evaluate 2 -> b
-    evaluate + given a b -> c
+    evaluate + -> c
+    call top 3
     evaluate 3 -> d
-    evaluate + given c d -> e
-    result is e
-
+    evaluate + -> e
+    call top 3
+    result last value on stack
 */
 
-/// A frame meant to be interpreted by tree-walking
-#[derive(Debug, Clone, Copy, Collect)]
-#[collect(no_drop)]
-pub struct Treewalk<'gc> {
-    // a structure that holds a mapping of symbol to ValuePtr
-    env: Gc<'gc, ()>,
+/// A list to be executed
+#[derive(Debug, Clone, Collect)]
+#[collect(require_static)]
+pub struct Code {
+    pub(crate) repr: Vec<ExternalRepresentation>,
+    // TODO Frame design to be able to point to any valid representation within repr
+    pub(crate) pc: usize,
+    /*
+        we use a frames and jumps addressing system:
+        elements in each list are enumerated, and then
+        the length of each list is calculated, so
+        ( + (+ x y) z w)
+        as these numbers
+        ( 0 (1 2 3) 4 5)
+        and jumps are recorded where lists end with a count to consume, so
+        the jumps for this are (3, 3) (4, 4) meaning after pushing the value of
+        y to the stack, evaluate the top 3 items (bottom is always a procedure if correct)
+        then after evaluating w evaluate the top 4 items
+    */
 }
 
-#[derive(Collect, Clone, Copy)]
-#[collect(no_drop)]
-pub struct NativeProcedure<'gc>(Gc<'gc, dyn Callback>);
-impl<'gc> NativeProcedure<'gc> {
-    pub fn new<T: Callback + 'gc>(mc: &Mutation<'gc>, cb: T) -> Self {
-        let cb = Gc::new(mc, cb);
-        Self(unsize!(cb => dyn Callback))
+// TODO Display impl
+
+impl<T: IntoIterator<Item = ExternalRepresentation>> From<T> for Code {
+    fn from(value: T) -> Self {
+        Self {
+            repr: value.into_iter().collect(),
+            pc: 0,
+        }
     }
 }
 
-impl<'gc> fmt::Debug for NativeProcedure<'gc> {
+#[derive(Collect, Clone)]
+#[collect(require_static)]
+pub struct NativeProcedure(Rc<RefCell<dyn Callback>>);
+impl<T: Callback + 'static> From<T> for NativeProcedure {
+    fn from(value: T) -> Self {
+        Self(Rc::new(RefCell::new(value)))
+    }
+}
+
+impl fmt::Debug for NativeProcedure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(name) = self.0.name() {
+        if let Some(name) = self.0.borrow().name() {
             write!(f, "#<procedure {name} {:p}>", self.0)
         } else {
             write!(f, "#<procedure {:p}>", self.0)
@@ -73,18 +122,132 @@ impl<'gc> fmt::Debug for NativeProcedure<'gc> {
     }
 }
 
+// TODO Rework this as we have to make this interruptable b/c
+// fuel can run out at any time. but we *only* make it interruptable
+// NOTE Error mechanism? Not natively, entirely handled by the Interpreter.
+// Native code can *raise* an error tho.
+
+#[derive(Collect, Debug, Clone, Copy)]
+#[collect(no_drop)]
+pub struct Environment<'gc> {
+    parent: Option<Gc<'gc, RefLock<Environment<'gc>>>>,
+    inner: Gc<'gc, RefLock<EnvironmentInner<'gc>>>,
+}
+
+impl<'gc> Environment<'gc> {}
+
+/// Environemnts define the context for execution, with variable mappings
+/// macro definitions, and up to 1 reference to a parent environment
+#[derive(Collect, Debug)]
+#[collect(no_drop)]
+pub struct EnvironmentInner<'gc> {
+    pub values: HashMap<Box<str>, ValuePtr<'gc>>,
+}
+
+/// Nice argument handler
+pub struct Arguments<'gc>(pub Vec<ValuePtr<'gc>>);
+impl<'gc> Arguments<'gc> {
+    /// Creates an error if the arity does not match
+    pub fn force_arity<const N: usize>(self) -> Result<[ValuePtr<'gc>; N], BoxError> {
+        #[derive(thiserror::Error, Debug)]
+        #[error("arity mismatch: found {0} arguments, expected {N}")]
+        struct ArityMismatch<const N: usize>(usize);
+
+        let arg_len = self.0.len();
+        TryInto::<[ValuePtr<'gc>; N]>::try_into(self.0)
+            .map_err(|_| BoxError::from(ArityMismatch::<N>(arg_len)))
+    }
+}
+
+/// Procedure arity
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Arity {
+    Exact(usize),
+    Min(usize),
+}
+
+impl Arity {
+    pub fn is_satisfied(&self, len: usize) -> bool {
+        match self {
+            Self::Exact(e) => *e == len,
+            Self::Min(m) => *m <= len,
+        }
+    }
+}
+
+// macros interact with code before it is evaluated,
+// and have a fresh environment for executing the code it generates
+// (they *have* to be hygenic, how do we do?)
+// (maybe macros can "insert" an environment and evaluate code in different contexts?)
+// (we maybe can think of macros as functions that operate on lists)
+// callback are done after and thus can interact with its surrounding environment
+
 /// A native callback is quite simple: it must map from
-/// a Vec<Value<'gc>> -> Result<Value<'gc>, Error<'gc>>
-pub trait Callback: Collect {
+/// a Vec<Value<'gc>> -> Result<Value<'gc>, Error<'gc>> in essence
+// lovely thing about scheme: Native code cannot make calls, they can only return a callable
+// the other code might call, or not.
+// Callbacks are essentially CPS procedures
+pub struct CallbackSuccess<'gc> {
+    pub returning: ValuePtr<'gc>,
+    pub continuation: Option<Procedure>,
+    pub fuel_used: u32,
+    pub fuel_interrupt: bool,
+}
+
+type CallbackResult<'gc> = Result<CallbackSuccess<'gc>, Error<'gc>>;
+
+pub trait Callback {
     fn name(&self) -> Option<&str> {
         None
     }
 
+    fn arity(&self) -> Arity;
+
     fn call<'gc>(
         &mut self,
         mc: &Mutation<'gc>,
-        fuel: &mut Fuel,
         interner: &mut Rodeo,
-        args: Vec<ValuePtr<'gc>>,
-    ) -> Result<ValuePtr<'gc>, Error<'gc>>;
+        continuation: Gc<'gc, Procedure>,
+        // args is guranteed to respect arity
+        args: Arguments<'gc>,
+        // None for second return means to not chenge the current continuation!
+    ) -> CallbackResult<'gc>;
 }
+
+/*
+so that:
+pub struct CallWithCurrentContinuation;
+impl Callback for CallWithCurrentContinuation {
+    fn name(&self) -> Option<&str> { Some("call-with-current-continuation") }
+    fn arity(&self) -> Arity { Arity::Exact(1) }
+    fn call<'gc>(
+        &mut self,
+        environment: Environment<'gc>,
+        interner: &mut Rodeo,
+        continuation: Gc<'gc, Continuation>,
+        fuel: &mut Fuel,
+        args: Arguments<'gc>,
+    ) -> Result<(CallbackResult<'gc>, Option<Continuation>), Error<'gc>> {
+        #[derive(thiserror::Error, Debug)]
+        enum CallCcError {
+            #[error("cannot call a non-procedure")]
+            NoProc,
+            #[error("procedure must have exactly 1 argument")]
+            ProcArgs,
+        }
+
+        let [Value::Procedure(proc)] = args.force_arity::<1>()? else {
+            return Err(CallCcError::NoProc)?;
+        };
+
+        // the proc must have exactly 1 argument: the continuation
+        if proc.arity() == Arity::Exact(1) {
+            Ok((CallbackReturn::Value(Value::Procedure(
+continuation.procedure()
+
+            )), proc.into()))
+        } else {
+            Err(CallCcError::ProcArgs)?
+        }
+    }
+}*/

@@ -1,5 +1,6 @@
 //! General parsing starts where the lexer dropped of, and handles nested syntax, while
 //! also forming a GAST which is a relatively simple layer on top of a [`rowan`] CST.
+use gast::MagusSyntaxNode;
 use logos::Span;
 use rowan::{GreenNode, GreenNodeBuilder};
 
@@ -7,22 +8,8 @@ use crate::{
     lexer::{LexerError, NestedCommentToken, SyntaxToken, Token},
     ExactReal, SchemeNumber,
 };
-#[rustfmt::skip]
-pub use gast::{
-    SyntaxKind,  MagusSyntaxElement, MagusSyntaxNode, MagusSyntaxToken, MagusSyntaxElementRef,
-    // traits
-    GAstNode, GAstToken, ContainsTrivia, ContainsDatum, DatumVisitor,
-    // trivia
-    NestedComment, DatumComment, OneLineComment, Comment, Whitespace, InlineWhitespace,
-    LineEnding, DirectiveToken,
-    // data
-    Symbol, Datum, DatumKind, LabeledDatum, Abbreviation, AbbreviationKind, LabelRef, List, SpecialForm,
-    Vector, Number, Bytevector, StringToken, Character, Boolean,
-    // top-level
-    Module,
-};
-
-mod gast;
+pub mod gast;
+pub mod special_forms;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum TokenKind {
@@ -567,24 +554,13 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
                 }
             }
             Ok(Token::Syntax(SyntaxToken::RParen)) => {
-                // shadow the fn using bools
-                if !in_list(&checkpoints)
-                    && !in_bytevector(&checkpoints)
-                    && !in_vector(&checkpoints)
-                {
-                    errors.push(GeneralParserError::UnexpectedToken {
-                        found: TokenKind::RParen,
-                        at: span.clone(),
-                    });
-                }
-
                 enum Paired {
                     List,
                     Vector,
                     Bytevector,
                 }
                 // complete the correct type as a datum
-                let (checkpoint, paired) = if in_list(&checkpoints) {
+                let pair_data = if in_list(&checkpoints) {
                     let Some((CheckpointItem::List(checkpoint, pre_dot, post_dot), lspan)) =
                         checkpoints.pop()
                     else {
@@ -599,41 +575,47 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
                             })
                         }
                     }
-                    (checkpoint, Paired::List)
+                    Some((checkpoint, Paired::List))
                 } else if in_vector(&checkpoints) {
                     let Some((CheckpointItem::Vector(checkpoint), _)) = checkpoints.pop() else {
                         unreachable!()
                     };
-                    (checkpoint, Paired::Vector)
+                    Some((checkpoint, Paired::Vector))
                 } else if in_bytevector(&checkpoints) {
                     let Some((CheckpointItem::Bytevector(checkpoint), _)) = checkpoints.pop()
                     else {
                         unreachable!()
                     };
-                    (checkpoint, Paired::Bytevector)
+                    Some((checkpoint, Paired::Bytevector))
                 } else {
-                    unreachable!("can only use rparen to complete a list, bytevector, or vector")
+                    errors.push(GeneralParserError::UnexpectedToken {
+                        found: TokenKind::RParen,
+                        at: span.clone(),
+                    });
+                    None
                 };
 
                 finish_datum(
                     &mut checkpoints,
                     &mut builder,
-                    Some(checkpoint),
+                    pair_data.as_ref().map(|(ckp, _)| ckp).cloned(),
                     |builder| {
                         builder.token(RPAREN.into(), ")");
 
-                        match paired {
-                            Paired::List => {
-                                builder.start_node_at(checkpoint, LIST.into());
-                                builder.finish_node();
-                            }
-                            Paired::Vector => {
-                                builder.start_node_at(checkpoint, VECTOR.into());
-                                builder.finish_node();
-                            }
-                            Paired::Bytevector => {
-                                builder.start_node_at(checkpoint, BYTEVECTOR.into());
-                                builder.finish_node();
+                        if let Some((checkpoint, paired)) = pair_data {
+                            match paired {
+                                Paired::List => {
+                                    builder.start_node_at(checkpoint, LIST.into());
+                                    builder.finish_node();
+                                }
+                                Paired::Vector => {
+                                    builder.start_node_at(checkpoint, VECTOR.into());
+                                    builder.finish_node();
+                                }
+                                Paired::Bytevector => {
+                                    builder.start_node_at(checkpoint, BYTEVECTOR.into());
+                                    builder.finish_node();
+                                }
                             }
                         }
                     },

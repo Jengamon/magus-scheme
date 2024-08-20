@@ -6,10 +6,7 @@ use std::collections::HashMap;
 
 use gc_arena::{Arena, Collect, Gc, RefLock, Rootable};
 
-use crate::{
-    general_parser::{ContainsDatum, Module, SpecialForm},
-    runtime::interpreter::Interpreter,
-};
+use crate::{runtime::interpreter::Interpreter, ContainsDatum, Module, SpecialForm};
 
 pub mod fuel;
 pub mod value;
@@ -177,6 +174,7 @@ impl World {
                 break;
             }
         }
+        // collect the remaining datum into a program
         todo!()
     }
 }

@@ -616,7 +616,15 @@ fn read_number(
                 })
             }
             Some(_) => Err(LexerError::MalformedNumber)?,
-            None if !just_imaginary => Ok(SchemeNumber::Exact(real_part)),
+            None if !just_imaginary => match real_part {
+                // If the written representation of a number has no exactness prefix,
+                // the constant is inexact if it contains a decimal point or an exponent.
+                // Otherwise, it is exact.
+                deci @ ExactReal::Decimal { .. } if !contains_flag('e') => {
+                    Ok(SchemeNumber::Inexact(deci.inexact()))
+                }
+                _ => Ok(SchemeNumber::Exact(real_part)),
+            },
             None => Ok(SchemeNumber::ExactComplex {
                 real: ExactReal::Integer {
                     value: 0,

@@ -1,5 +1,7 @@
 //! Because exact number handling is quite important to Scheme
 
+use core::fmt;
+
 use arbitrary::Arbitrary;
 
 // Does *not* implement Display b/c these structures are parse/lex structures,
@@ -20,6 +22,55 @@ pub enum SchemeNumber {
         real: f64,
         imaginary: f64,
     },
+}
+
+impl fmt::Display for SchemeNumber {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SchemeNumber::Exact(e) => match e {
+                deci @ ExactReal::Decimal { .. } => write!(f, "#e{deci}"),
+                e => write!(f, "{e}"),
+            },
+            SchemeNumber::ExactComplex { real, imaginary } => {
+                write!(f, "{real}{imaginary:#}i")
+            }
+            SchemeNumber::ExactPolar { modulus, argument } => {
+                write!(f, "{modulus}@{argument}")
+            }
+            SchemeNumber::Inexact(inex) => write!(f, "#i{inex}"),
+            SchemeNumber::InexactComplex { real, imaginary } => {
+                write!(f, "#i{real}{imaginary:#}i")
+            }
+        }
+    }
+}
+
+macro_rules! impl_into_sn {
+    (into $($ty:ty),+) => {
+        $(
+            impl From<$ty> for SchemeNumber {
+                fn from(value: $ty) -> Self {
+                    Self::Exact(value.into())
+                }
+            }
+        )+
+    };
+}
+impl_into_sn!(into u8, u16, u32, u64, i8, i16, i32, i64);
+impl From<ExactReal> for SchemeNumber {
+    fn from(value: ExactReal) -> Self {
+        Self::Exact(value)
+    }
+}
+impl From<f32> for SchemeNumber {
+    fn from(value: f32) -> Self {
+        Self::Inexact(value.into())
+    }
+}
+impl From<f64> for SchemeNumber {
+    fn from(value: f64) -> Self {
+        Self::Inexact(value)
+    }
 }
 
 impl SchemeNumber {
@@ -73,6 +124,94 @@ pub enum ExactReal {
         exponent_neg: bool,
         is_neg: bool,
     },
+}
+
+// display is useful and is used for external representation
+impl fmt::Display for ExactReal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let calc_sign = |is_neg: bool| {
+            if is_neg {
+                "-"
+            } else if f.alternate() {
+                "+"
+            } else {
+                ""
+            }
+        };
+
+        match self {
+            ExactReal::Integer { value, is_neg } => write!(f, "{}{value}", calc_sign(*is_neg)),
+            ExactReal::Rational {
+                numer,
+                denom,
+                is_neg,
+            } => write!(f, "{}{numer}/{denom}", calc_sign(*is_neg)),
+            ExactReal::Inf { is_neg } => write!(f, "{}inf.0", if *is_neg { "-" } else { "+" }),
+            ExactReal::Nan { is_neg } => write!(f, "{}nan.0", if *is_neg { "-" } else { "+" }),
+            ExactReal::Decimal {
+                base,
+                post_dot,
+                exponent,
+                exponent_neg,
+                is_neg,
+            } => write!(
+                f,
+                "{}{base}.{post_dot}e{}{exponent}",
+                calc_sign(*is_neg),
+                calc_sign(*exponent_neg)
+            ),
+        }
+    }
+}
+
+macro_rules! exact_integer_impl {
+    ($ty:ty) => {
+        impl From<$ty> for ExactReal {
+            fn from(value: $ty) -> Self {
+                Self::Integer {
+                    value: value.into(),
+                    is_neg: false,
+                }
+            }
+        }
+    };
+    (signed $ty:ty) => {
+        impl From<$ty> for ExactReal {
+            fn from(value: $ty) -> Self {
+                Self::Integer {
+                    value: value.unsigned_abs().into(),
+                    is_neg: value < 0,
+                }
+            }
+        }
+    };
+}
+
+exact_integer_impl!(u8);
+exact_integer_impl!(u16);
+exact_integer_impl!(u32);
+exact_integer_impl!(u64);
+impl TryFrom<usize> for ExactReal {
+    type Error = std::num::TryFromIntError;
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        Ok(Self::Integer {
+            value: TryInto::<u64>::try_into(value)?,
+            is_neg: false,
+        })
+    }
+}
+exact_integer_impl!(signed i8);
+exact_integer_impl!(signed i16);
+exact_integer_impl!(signed i32);
+exact_integer_impl!(signed i64);
+impl TryFrom<isize> for ExactReal {
+    type Error = std::num::TryFromIntError;
+    fn try_from(value: isize) -> Result<Self, Self::Error> {
+        Ok(Self::Integer {
+            value: TryInto::<i64>::try_into(value)?.unsigned_abs(),
+            is_neg: value < 0,
+        })
+    }
 }
 
 impl ExactReal {

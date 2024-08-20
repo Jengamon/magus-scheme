@@ -1,11 +1,11 @@
 //! The types of this module make the results of the general parser more
 //! accessible by providing a strongly-typed layer on top of the CST produced
 //! by the parser.
+use core::fmt;
 use std::collections::HashSet;
 
 use crate::{
-    lexer::{Directive, SyntaxToken},
-    ExactReal, SchemeNumber,
+    general_parser::special_forms::{SpecialForm, DefineSyntax, ImportDeclaration, LibraryDefinition}, lexer::{Directive, SyntaxToken}, ExactReal, SchemeNumber
 };
 use icu_casemap::CaseMapper;
 
@@ -472,6 +472,16 @@ pub enum AbbreviationKind {
     Unquote,
     UnquoteSplicing,
 }
+impl fmt::Display for AbbreviationKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AbbreviationKind::Quote => write!(f, "quote"),
+            AbbreviationKind::Quasiquote => write!(f, "quasiquote"),
+            AbbreviationKind::Unquote => write!(f, "unquote"),
+            AbbreviationKind::UnquoteSplicing => write!(f, "unquote-splicing"),
+        }
+    }
+}
 #[derive(Debug, Clone)]
 pub struct Abbreviation(MagusSyntaxNode);
 impl Abbreviation {
@@ -589,23 +599,6 @@ datum_as_type!(token as_string for StringToken from STRING);
 datum_as_type!(token as_char for Character from CHARACTER);
 datum_as_type!(token as_bool for Boolean from BOOLEAN);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SpecialForm {
-    Quote,
-    Quasiquote,
-    Unquote,
-    UnquoteSplicing,
-
-    Include,
-    IncludeCi,
-    SetBang,
-    If,
-    Lambda,
-    DefineLibrary,
-    DefineSyntax,
-    SyntaxRules,
-}
-
 #[derive(Debug, Clone)]
 pub struct List(MagusSyntaxNode);
 impl List {
@@ -613,6 +606,10 @@ impl List {
     pub fn head(&self) -> Option<Datum> {
         self.datum().next()
     }
+
+    // TODO add conversion operations to special forms structs that if
+    // Self::special_form returns Some(Ok(SpecialForm)), it is panic-free to
+    // run list.as_special_form().unwrap()
 
     /// Is this list a special form, and if so, is it valid?
     pub fn special_form(&self, case_insensitive: bool) -> Option<Result<SpecialForm, SpecialForm>> {
@@ -635,18 +632,15 @@ impl List {
                                         if let Some(kind) = kind {
                                             [DatumKind::List, DatumKind::Symbol].contains(&kind)
                                                 && self.datum()
+                                                // skip all "defines" and check if there is at least 1 expression
                                                 .filter(|dat| match dat.kind() {
                                                     Some(DatumKind::List) => {
-                                                        dat.as_list().unwrap().head()
-                                                            .and_then(|dat| dat.as_symbol())
-                                                            .is_some_and(|sym|
-                                                                sym.identifier(case_insensitive)
-                                                                // "define" only has meaning in
-                                                                // context of a program, so it is not
-                                                                // a special form.
-                                                                .map(|id| id.as_ref() != "define")
-                                                                .unwrap_or(true)
-                                                            )
+                                                        !dat.as_list().unwrap().special_form(case_insensitive).is_some_and(|sf|
+                                                            match sf {
+                                                                Ok(sf) => sf == SpecialForm::Define,
+                                                                Err(sf) => sf == SpecialForm::Define,
+                                                            }
+                                                        )
                                                     }
                                                     _ => true,
                                                 })
@@ -656,6 +650,18 @@ impl List {
                                         }
                                     } => SpecialForm::Lambda
                                 )
+                            }
+                            "define" => {
+                                special_form_check!(
+                                    (self.datum().nth(1).and_then(|dat| dat.kind()) == Some(DatumKind::Symbol))
+                                        // chibi-scheme doesn't error when this happens, so
+                                        // this should be a user warning that define ignores the extra parameters
+                                        && self.datum().count() == 3
+                                        || self.datum().nth(1).and_then(|dat| dat.as_list()).is_some_and(|lst| 
+                                            lst.datum().count() > 0
+                                                && lst.datum().all(|arg| arg.kind() == Some(DatumKind::Symbol))
+                                        )
+                                 => SpecialForm::Define)
                             }
                             "set!" => {
                                 special_form_check!(
@@ -673,8 +679,14 @@ impl List {
                             "include-ci" => special_form_check!(
                                 self.datum().skip(1).all(|dat| dat.kind() == Some(DatumKind::StringToken)) => SpecialForm::IncludeCi
                             ),
-                            "define-library" => todo!("check define-library syntax"),
-                            "define-syntax" => todo!("check define-syntax syntax"),
+                            "define-library" => special_form_check!(LibraryDefinition::check(self, case_insensitive) => SpecialForm::DefineLibrary),
+                            "import" => special_form_check!(ImportDeclaration::check(self, case_insensitive) => SpecialForm::Import),
+                            "define-syntax" => {
+                                special_form_check!(
+                                    DefineSyntax::check(self, case_insensitive) => SpecialForm::DefineSyntax    
+                                )
+                            },
+                            "syntax-rules" => todo!("check syntax-rules syntax"),
                             "quote" => {
                                 special_form_check!(self.datum().count() == 2 => SpecialForm::Quote)
                             }
@@ -692,36 +704,17 @@ impl List {
                     } else {
                         None
                     }
-                    /*
-                    if head_text.eq_ignore_ascii_case("lambda") {
-                        todo!("check lambda syntax")
-                    } else if head_text.eq_ignore_ascii_case("include") {
-                        todo!("check include syntax")
-                    } else if head_text.eq_ignore_ascii_case("include-ci") {
-                        todo!("check include-ci syntax")
-                    } else if head_text.eq_ignore_ascii_case("define-library") {
-                        todo!("check library syntax")
-                    } else if head_text.eq_ignore_ascii_case("define-syntax") {
-                        todo!("check define-syntax syntax")
-                    } else if head_text.eq_ignore_ascii_case("syntax-rules") {
-                        todo!("check syntax-rules syntax")
-                    } else if head_text.eq_ignore_ascii_case("set!") {
-                        todo!("check set! syntax (sym val)")
-                    } else if head_text.eq_ignore_ascii_case("if") {
-                        todo!("check if syntax")
-                    } else if head_text.eq_ignore_ascii_case("quote") {
-                    } else if head_text.eq_ignore_ascii_case("quasiquote") {
-                    } else if head_text.eq_ignore_ascii_case("unquote") {
-                    } else if head_text.eq_ignore_ascii_case("unquote-splicing") {
-                    } else {
-                        None
-                    }*/
                 }
                 _ => None,
             }
         } else {
             None
         }
+    }
+
+    /// Looks for a dot token within (without checking for valid structure)
+    pub fn has_dot(&self) -> bool {
+        self.0.children_with_tokens().any(|elem| matches!(elem, MagusSyntaxElement::Token(tok) if tok.kind() == DOT))
     }
 
     /// This only asks if a list is syntactically valid, it does not check if the list should be in

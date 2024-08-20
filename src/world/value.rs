@@ -1,7 +1,12 @@
 //! Representation of Scheme values
-use gc_arena::{Collect, Gc, RefLock};
+use std::collections::HashMap;
 
-use crate::runtime::Procedure;
+use gc_arena::{Collect, Gc, GcRefLock, Mutation, RefLock};
+
+use crate::{
+    runtime::external::ExternalRepresentationVisitor, DatumVisitor, ExactReal, Procedure,
+    SchemeNumber,
+};
 
 pub use port::{InputPort, OutputPort, PortType};
 
@@ -14,8 +19,13 @@ pub enum Value<'gc> {
     // This is the value written as ()
     #[default]
     Null,
-    // "Returning" (more formally, evaluating to) this value is an error
+    // Attempting to access this value is an error
+    // (but the binding exists for the purposes of set!)
+    // TODO allow syntax-rules special form to define an auxillary macro `undefined`
+    // that provides this value to macros
     Undefined,
+    // the return value of set! and definitions (define, define-record-type, define-syntax)
+    Void,
     // For now, we only support exact integers, so
     Number(Integer),
     // The Rc is so that we don't have to pay to clone the string
@@ -30,9 +40,59 @@ pub enum Value<'gc> {
 
     Cons(ConsCell<'gc>),
     // Represents something runnable
-    Procedure(Procedure<'gc>),
+    Procedure(Gc<'gc, Procedure>),
+    // TODO records
+    // I want to handle userdata the same way as we handle records
 }
-pub type ValuePtr<'gc> = Gc<'gc, Value<'gc>>;
+
+#[derive(thiserror::Error, Debug)]
+pub enum ValueConvertError {
+    // currently only support exact integers
+    #[error("unsupported number {0}")]
+    UnsupportedNumber(SchemeNumber),
+}
+
+pub struct ValueConvert<'gc> {
+    mutation: &'gc Mutation<'gc>,
+    interner: &'gc mut lasso::Rodeo,
+    value_stack: Vec<Result<ValuePtr<'gc>, ValueConvertError>>,
+}
+
+impl<'gc> ValueConvert<'gc> {
+    pub fn new(mutation: &'gc Mutation<'gc>, interner: &'gc mut lasso::Rodeo) -> Self {
+        Self {
+            mutation,
+            interner,
+            value_stack: vec![],
+        }
+    }
+}
+
+impl<'gc> DatumVisitor for ValueConvert<'gc> {
+    // TODO allow source to directly be converted into value
+}
+
+impl<'gc> ExternalRepresentationVisitor for ValueConvert<'gc> {
+    // TODO allow external representations to be turned into values
+    fn visit_number(&mut self, value: crate::SchemeNumber, _labels: &[usize]) {
+        match value {
+            SchemeNumber::Exact(ExactReal::Integer { value, is_neg }) => {
+                // saturate at limits
+                self.value_stack.push(Ok(Gc::new(
+                    self.mutation,
+                    RefLock::new(Value::Number(
+                        i64::try_from(value)
+                            .unwrap_or(i64::MAX)
+                            .saturating_mul(if is_neg { -1 } else { 1 }),
+                    )),
+                )));
+            }
+            num => self
+                .value_stack
+                .push(Err(ValueConvertError::UnsupportedNumber(num))),
+        }
+    }
+}
 
 #[derive(Collect, Clone, Copy, Debug)]
 #[collect(require_static)]
@@ -58,9 +118,9 @@ impl<'gc> GcString<'gc> {
 #[derive(Collect, Clone, Copy, Debug)]
 #[collect(no_drop)]
 pub struct ConsCell<'gc> {
-    car: Option<ValueRefPtr<'gc>>,
-    cdr: Option<ValueRefPtr<'gc>>,
+    car: Option<ValuePtr<'gc>>,
+    cdr: Option<ValuePtr<'gc>>,
 }
-pub type ValueRefPtr<'gc> = Gc<'gc, RefLock<Value<'gc>>>;
+pub type ValuePtr<'gc> = Gc<'gc, RefLock<Value<'gc>>>;
 
 pub type Integer = i64;

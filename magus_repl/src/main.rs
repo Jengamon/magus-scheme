@@ -121,23 +121,25 @@ fn repl() -> anyhow::Result<()> {
         println!("{:#?}", gast.syntax());
         let idx = LineIndex::new(src);
 
-        let block = (!gast.errors().is_empty())
+        let blocks = (!gast.errors().is_empty())
             .then_some(gast.errors())
-            .and_then(|errors| {
-                Block::new(
-                    &idx,
-                    errors.iter().map(|err| {
-                        Label::new(err.span())
+            .map(|errors| {
+                errors.iter().flat_map(|err| {
+                    Block::new(
+                        &idx,
+                        [Label::new(err.span())
                             .with_text(err.to_string())
-                            .with_style(|s| s.red().to_string())
-                    }),
-                )
+                            .with_style(|s| s.red().to_string())],
+                    )
+                })
             });
 
-        if let Some(block) = block.map(|blk| blk.map_code(|c| CodeWidth::new(c, c.len()))) {
-            println!("{}[repl.scm]", block.prologue());
-            print!("{block}");
-            println!("{}", block.epilogue());
+        if let Some(blocks) = blocks {
+            for block in blocks.map(|blk| blk.map_code(|c| CodeWidth::new(c, c.len()))) {
+                println!("{}[repl.scm]", block.prologue());
+                print!("{block}");
+                println!("{}", block.epilogue());
+            }
         }
 
         let tokens = Token::lexer(src);

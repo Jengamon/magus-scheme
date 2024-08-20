@@ -2,7 +2,7 @@ use clap::Parser;
 use codesnake::{Block, CodeWidth, Label, LineIndex};
 use magus::{
     general_parser::{
-        ContainsComments, DatumVisitor, GAstNode, GAstToken, MagusSyntaxElement,
+        ContainsDatum, ContainsTrivia, DatumVisitor, GAstNode, GAstToken, MagusSyntaxElement,
         MagusSyntaxElementRef, Module, Symbol, SyntaxKind,
     },
     lexer::Token,
@@ -36,7 +36,7 @@ struct CommentPrinter {
 }
 
 impl CommentPrinter {
-    fn print_comments<C: ContainsComments>(&mut self, node: &C) {
+    fn print_comments<C: ContainsTrivia>(&mut self, node: &C) {
         for comment in node.comments() {
             self.count += 1;
             match comment.syntax() {
@@ -61,6 +61,10 @@ impl DatumVisitor for CommentPrinter {
         self.visit_composite(vector);
     }
 
+    fn visit_number(&mut self, number: &magus::general_parser::Number) {
+        println!("got number? {:?}", number.number());
+    }
+
     fn visit_abbreviation(&mut self, abbreviation: &magus::general_parser::Abbreviation) {
         self.visit_composite(abbreviation)
     }
@@ -82,32 +86,53 @@ fn repl() -> anyhow::Result<()> {
         // General parse
         let gast = magus::general_parser::general_parse(&input);
 
-        if let Some(ft) = gast
-            .syntax()
-            .children_with_tokens()
-            .filter_map(|elem| match elem {
-                // idents are within DATUM nodes, so...
-                MagusSyntaxElement::Token(_) => None,
-                MagusSyntaxElement::Node(n) => {
-                    if n.kind() == SyntaxKind::DATUM {
-                        Some(n)
-                    } else {
-                        None
-                    }
-                }
-            })
-            .find_map(|node| {
-                node.children_with_tokens().find_map(|elem| match elem {
-                    MagusSyntaxElement::Token(t) => Symbol::cast(t),
-                    _ => None,
-                })
-            })
-        {
-            println!("First identifier of module: {:?}", ft.identifier(false));
-        }
-
         // Tell me your secrets
         let module = Module::cast(gast.syntax()).unwrap();
+
+        #[derive(Default)]
+        struct FirstIdent {
+            ident: Option<Symbol>,
+        }
+
+        impl FirstIdent {
+            fn visit_if_unfound<C: ContainsDatum>(&mut self, composite: &C) {
+                if self.ident.is_none() {
+                    self.visit_composite(composite)
+                }
+            }
+        }
+
+        impl DatumVisitor for FirstIdent {
+            fn visit_list(&mut self, list: &magus::general_parser::List) {
+                self.visit_if_unfound(list)
+            }
+
+            fn visit_vector(&mut self, vector: &magus::general_parser::Vector) {
+                self.visit_if_unfound(vector)
+            }
+
+            fn visit_abbreviation(&mut self, abbreviation: &magus::general_parser::Abbreviation) {
+                self.visit_if_unfound(abbreviation)
+            }
+
+            fn visit_labeled(&mut self, labeled: &magus::general_parser::LabeledDatum) {
+                self.visit_if_unfound(labeled)
+            }
+
+            fn visit_symbol(&mut self, symbol: &Symbol) {
+                if self.ident.is_none() {
+                    self.ident = Some(symbol.clone())
+                }
+            }
+        }
+
+        let mut first_ident = FirstIdent::default();
+        first_ident.visit_composite(&module);
+
+        // Print the first identifier of the module
+        if let Some(ft) = first_ident.ident {
+            println!("First identifier of module: {:?}", ft.identifier(false));
+        }
 
         // list all comments
         println!("Comment listing:");

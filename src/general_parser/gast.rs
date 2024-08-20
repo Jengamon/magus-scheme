@@ -1,6 +1,9 @@
 use std::collections::HashSet;
 
-use crate::lexer::{Directive, LexerError, SyntaxToken};
+use crate::{
+    lexer::{Directive, LexerError, SyntaxToken},
+    SchemeNumber,
+};
 use icu_casemap::CaseMapper;
 
 /// GAst Syntax Types
@@ -175,8 +178,9 @@ macro_rules! simple_gast {
 
 // Cross-cutting properties are put into traits so that you can metaprogram
 /// Any node that can contain comments
-pub trait ContainsComments {
+pub trait ContainsTrivia {
     fn comments(&self) -> impl Iterator<Item = Comment>;
+    fn whitespace(&self) -> impl Iterator<Item = Whitespace>;
 }
 
 /// Any node that can contain datum
@@ -185,12 +189,19 @@ pub trait ContainsDatum {
 }
 
 macro_rules! contains {
-    (comments $tyn:ident) => {
-        impl ContainsComments for $tyn {
+    (trivia $tyn:ident) => {
+        impl ContainsTrivia for $tyn {
             fn comments(&self) -> impl Iterator<Item = Comment> {
                 self.0
                     .children_with_tokens()
                     .filter_map(|elem| Comment::try_from(elem).ok())
+            }
+
+            fn whitespace(&self) -> impl Iterator<Item = Whitespace> {
+                self.0.children_with_tokens().filter_map(|elem| match elem {
+                    MagusSyntaxElement::Token(tok) => Whitespace::try_from(tok).ok(),
+                    _ => None,
+                })
             }
         }
     };
@@ -207,6 +218,9 @@ macro_rules! contains {
 /// An interface for recursively operating on datum
 pub trait DatumVisitor {
     fn visit_datum(&mut self, datum: &Datum) {
+        // always using the right kind guarantees that we can convert the node
+        // (individual node types can represent invalid data, but the *node type* is
+        // still correct)
         if let Some(kind) = datum.kind() {
             match kind {
                 DatumKind::List => self.visit_list(&datum.as_list().unwrap()),
@@ -217,6 +231,7 @@ pub trait DatumVisitor {
                 DatumKind::Abbreviation => {
                     self.visit_abbreviation(&datum.as_abbreviation().unwrap())
                 }
+                DatumKind::Number => self.visit_number(&datum.as_number().unwrap()),
             }
         }
     }
@@ -248,6 +263,10 @@ pub trait DatumVisitor {
         _ = symbol;
     }
 
+    fn visit_number(&mut self, number: &Number) {
+        _ = number;
+    }
+
     fn visit_label_ref(&mut self, label_ref: &LabelRef) {
         _ = label_ref;
     }
@@ -258,7 +277,7 @@ pub trait DatumVisitor {
 pub struct Module(MagusSyntaxNode);
 impl Module {}
 simple_gast!(node Module from ROOT);
-contains!(comments Module);
+contains!(trivia Module);
 contains!(datum Module);
 
 #[derive(Debug, Clone)]
@@ -274,7 +293,6 @@ impl NestedComment {
         }
     }
 }
-
 simple_gast!(node NestedComment from NCOMMENT);
 #[derive(Debug, Clone)]
 pub struct OneLineComment(MagusSyntaxToken);
@@ -284,7 +302,41 @@ simple_gast!(token OneLineComment from OLCOMMENT);
 pub struct DatumComment(MagusSyntaxNode);
 impl DatumComment {}
 simple_gast!(node DatumComment from DCOMMENT);
+#[derive(Debug, Clone)]
+pub struct InlineWhitespace(MagusSyntaxToken);
+simple_gast!(token InlineWhitespace from WHITESPACE);
+#[derive(Debug, Clone)]
+pub struct LineEnding(MagusSyntaxToken);
+simple_gast!(token LineEnding from LINEEND);
+pub enum Whitespace {
+    Inline(InlineWhitespace),
+    LineEnding(LineEnding),
+}
+impl GAstToken for Whitespace {
+    fn cast(syntax: MagusSyntaxToken) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        Self::try_from(syntax).ok()
+    }
 
+    fn syntax(&self) -> &MagusSyntaxToken {
+        match self {
+            Self::Inline(inline) => inline.syntax(),
+            Self::LineEnding(line_end) => line_end.syntax(),
+        }
+    }
+}
+impl TryFrom<MagusSyntaxToken> for Whitespace {
+    type Error = ();
+    fn try_from(value: MagusSyntaxToken) -> Result<Self, Self::Error> {
+        match value.kind() {
+            WHITESPACE => Ok(Whitespace::Inline(InlineWhitespace::cast(value).ok_or(())?)),
+            LINEEND => Ok(Whitespace::LineEnding(LineEnding::cast(value).ok_or(())?)),
+            _ => Err(()),
+        }
+    }
+}
 #[derive(Debug, Clone)]
 pub enum Comment {
     OneLine(OneLineComment),
@@ -378,7 +430,7 @@ impl LabeledDatum {
 simple_gast!(node LabeledDatum from LABELED);
 // we should contain only 1 datum...
 contains!(datum LabeledDatum);
-// we do not contain any comments (if proper, it's an error if we do)!
+// we do not contain any trivia (if proper, it's an error if we do)!
 
 #[derive(Debug, Clone)]
 pub struct Abbreviation(MagusSyntaxNode);
@@ -408,9 +460,10 @@ pub enum DatumKind {
     List,
     Vector,
     Labeled,
-    Symbol,
-    LabelRef,
     Abbreviation,
+    Symbol,
+    Number,
+    LabelRef,
 }
 
 #[derive(Debug, Clone)]
@@ -438,6 +491,7 @@ impl Datum {
             Some(MagusSyntaxElement::Token(tok)) => match tok.kind() {
                 SYMBOL => Some(DatumKind::Symbol),
                 DTRIGGER => Some(DatumKind::LabelRef),
+                NUMBER => Some(DatumKind::Number),
                 _ => None,
             },
         }
@@ -479,19 +533,20 @@ datum_as_type!(node as_labeled for LabeledDatum from LABELED);
 datum_as_type!(node as_abbreviation for Abbreviation from ABBREV);
 datum_as_type!(token as_symbol for Symbol from SYMBOL);
 datum_as_type!(token as_label_ref for LabelRef from DTRIGGER);
+datum_as_type!(token as_number for Number from NUMBER);
 
 #[derive(Debug, Clone)]
 pub struct List(MagusSyntaxNode);
 impl List {}
 simple_gast!(node List from LIST);
-contains!(comments List);
+contains!(trivia List);
 contains!(datum List);
 
 #[derive(Debug, Clone)]
 pub struct Vector(MagusSyntaxNode);
 impl Vector {}
 simple_gast!(node Vector from VECTOR);
-contains!(comments Vector);
+contains!(trivia Vector);
 contains!(datum Vector);
 
 #[derive(Debug, Clone)]
@@ -539,6 +594,19 @@ impl Symbol {
     }
 }
 simple_gast!(token Symbol from SYMBOL);
+
+#[derive(Debug, Clone)]
+pub struct Number(MagusSyntaxToken);
+impl Number {
+    pub fn number(&self) -> Option<SchemeNumber> {
+        if let Some(Ok(SyntaxToken::Number(num))) = SyntaxToken::lexer(self.0.text()).next() {
+            Some(num)
+        } else {
+            None
+        }
+    }
+}
+simple_gast!(token Number from NUMBER);
 
 #[derive(Debug, Clone)]
 pub struct LabelRef(MagusSyntaxToken);

@@ -11,11 +11,13 @@ use crate::{
 pub use gast::{
     SyntaxKind,  MagusSyntaxElement, MagusSyntaxNode, MagusSyntaxToken, MagusSyntaxElementRef,
     // traits
-    GAstNode, GAstToken, ContainsComments, ContainsDatum, DatumVisitor,
+    GAstNode, GAstToken, ContainsTrivia, ContainsDatum, DatumVisitor,
     // trivia
-    NestedComment, DatumComment, OneLineComment, Comment,
+    NestedComment, DatumComment, OneLineComment, Comment, Whitespace, InlineWhitespace,
+    LineEnding,
     // data
     Symbol, Datum, DatumKind, LabeledDatum, Abbreviation, LabelRef, List, Vector,
+    Number,
     // top-level
     Module,
 };

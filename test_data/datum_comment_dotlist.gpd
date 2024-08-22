@@ -1,0 +1,21 @@
+MalformedList { at: 0..12 }
+---
+ROOT@0..12
+  DATUM@0..12
+    LIST@0..12
+      LPAREN@0..1 "("
+      WHITESPACE@1..2 " "
+      DCOMMENT@2..6
+        DCOMMENT_SYM@2..4 "#;"
+        WHITESPACE@4..5 " "
+        DATUM@5..6
+          NUMBER@5..6 "3"
+      WHITESPACE@6..7 " "
+      DOT@7..8 "."
+      WHITESPACE@8..9 " "
+      DATUM@9..10
+        NUMBER@9..10 "3"
+      WHITESPACE@10..11 " "
+      RPAREN@11..12 ")"
+---
+( #; 3 . 3 )

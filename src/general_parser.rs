@@ -262,10 +262,8 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
             };
             builder.start_node_at(checkpoint, DCOMMENT.into());
             builder.finish_node();
-        }
-
-        // lists with a dot need to know how many datum have been completed
-        if in_list(checkpoints) {
+        } else if in_list(checkpoints) {
+            // lists with a dot need to know how many datum have been completed
             let Some((CheckpointItem::List(checkpoint, pre_dot, post_dot), span)) =
                 checkpoints.pop()
             else {

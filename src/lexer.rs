@@ -987,7 +987,7 @@ mod tests {
     fn test_number_arbtest_decimal() {
         arbtest(|u| {
             let number: ExactReal = u.arbitrary()?;
-            let decimal = number.display(10).unwrap();
+            let decimal = format!("#e{}", number.display(10).unwrap());
             check!(
                 SyntaxToken::lexer(&decimal).next()
                     == Some(Ok(SyntaxToken::Number(SchemeNumber::Exact(number)))),
@@ -1012,7 +1012,7 @@ mod tests {
             }
             let im: ExactReal = u.arbitrary()?;
             let im_decimal = format!(
-                "{}{}{}i",
+                "#e{}{}{}i",
                 number.display(10).unwrap(),
                 if im.is_numeric() && !im.is_neg() {
                     "+"

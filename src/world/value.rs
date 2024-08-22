@@ -1,7 +1,7 @@
 //! Representation of Scheme values
-use std::collections::HashMap;
+use core::fmt;
 
-use gc_arena::{Collect, Gc, GcRefLock, Mutation, RefLock};
+use gc_arena::{Collect, Gc, Mutation, RefLock};
 
 use crate::{
     runtime::external::ExternalRepresentationVisitor, DatumVisitor, ExactReal, Procedure,
@@ -11,6 +11,9 @@ use crate::{
 pub use port::{InputPort, OutputPort, PortType};
 
 mod port;
+
+pub type ValuePtr<'gc> = Gc<'gc, RefLock<Value<'gc>>>;
+pub type Integer = i64;
 
 // Type that stores all possible values!
 #[derive(Collect, Clone, Copy, Default, Debug)]
@@ -31,6 +34,10 @@ pub enum Value<'gc> {
     // The Rc is so that we don't have to pay to clone the string
     // unless we try to modify it
     String(String),
+    // the value of '<ident> (quote <ident>)
+    Symbol(String),
+    Bool(bool),
+    Char(char),
     // Strings might not need to be in the GC, so
     // onlu allow interned strings for now
     // GcString(GcString<'gc>),
@@ -40,9 +47,51 @@ pub enum Value<'gc> {
 
     Cons(ConsCell<'gc>),
     // Represents something runnable
-    Procedure(Gc<'gc, Procedure>),
+    Procedure(Gc<'gc, Procedure<'gc>>),
     // TODO records
     // I want to handle userdata the same way as we handle records
+}
+
+impl<'gc> Value<'gc> {
+    pub fn as_number(&self) -> Option<Integer> {
+        match self {
+            Self::Number(int) => Some(*int),
+            _ => None,
+        }
+    }
+
+    pub fn as_input_port(&self) -> Option<&InputPort> {
+        match self {
+            Self::InputPort(inp) => Some(inp.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn as_output_port(&self) -> Option<&OutputPort> {
+        match self {
+            Self::OutputPort(outp) => Some(outp.as_ref()),
+            _ => None,
+        }
+    }
+}
+
+impl<'gc> fmt::Display for Value<'gc> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Null => write!(f, "()"),
+            Value::Undefined => write!(f, "#<error>"),
+            Value::Void => write!(f, "#<undef>"),
+            Value::Number(n) => write!(f, "{n}"),
+            Value::String(s) => todo!(),
+            Value::Symbol(s) => todo!(),
+            Value::Bool(b) => todo!(),
+            Value::Char(c) => todo!(),
+            Value::InputPort(_) => todo!(),
+            Value::OutputPort(_) => todo!(),
+            Value::Cons(_) => todo!(),
+            Value::Procedure(_) => todo!(),
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -121,6 +170,3 @@ pub struct ConsCell<'gc> {
     car: Option<ValuePtr<'gc>>,
     cdr: Option<ValuePtr<'gc>>,
 }
-pub type ValuePtr<'gc> = Gc<'gc, RefLock<Value<'gc>>>;
-
-pub type Integer = i64;

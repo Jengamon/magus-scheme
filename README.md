@@ -45,3 +45,34 @@ Numbers are of particular interest to Schemers, and I'm happy to say that we sup
 all forms of numbers (and with how we store them, the Scheme `ieee-float` feature). However,
 we currently do not have a runtime that supports numbers beyond exact integers (for my purposes,
 this is fine).
+
+### IMPL NOTES
+
+## Hygenic macros
+
+~~(why is having hyg*i*ene considered *hyge*nic??? anyways)~~
+Hygenic macros have the property that "they mean the same thing everywhere".
+To put this in more formal terms, this means that the evaluation of a macro *always*
+takes place in the same environment, namely the one it was defined in.
+If I were to define in `hygiene.scm`:
+
+```scheme
+(import (scheme base))
+(define-syntax x! (syntax-rules () 
+    ((x! val)
+        (set! x val))
+))
+(define-syntax define-x (syntax-rules ()
+    ((define-x val)
+        (begin 
+            (define x val)
+            (x! (+ val 1))
+            x
+        ))
+))
+
+;; this should error!
+(define-x 6)
+;; but if *above* that line, you defined `x`, it would work and the
+;; value would be overwritten by (the number you passed in + 1)
+```

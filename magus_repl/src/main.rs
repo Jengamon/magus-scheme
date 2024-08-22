@@ -70,7 +70,6 @@ impl CommentPrinter {
 impl DatumVisitor for CommentPrinter {
     fn visit_list(&mut self, list: &magus::List) {
         println!("is list valid? {}", list.is_valid());
-        println!("is list special form? {:?}", list.special_form(false));
         self.print_comments(list);
         self.visit_composite(list);
     }

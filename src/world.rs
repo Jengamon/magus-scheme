@@ -6,8 +6,29 @@ use std::collections::HashMap;
 
 use gc_arena::{Arena, Collect, Gc, RefLock, Rootable};
 
-use crate::{runtime::interpreter::Interpreter, ContainsDatum, Module, SpecialForm};
+use crate::{
+    general_parse, general_parser::GeneralParserError, runtime::interpreter::Interpreter,
+    GAstNode as _, Module,
+};
 
+/*
+macros and special forms are defined here:
+special forms are macros that have access to the source of their expansion
+and are given in their own unique environment with access to their parent environment
+
+macros resemble piccolo::Sequences in that they must be resumable, but are
+simpler in that they only have 3 returns:
+Ok(Evaluating) - macro ran out of fuel for expansion, is interacting with something, etc.
+Ok(List) - the list this macro should expand into, to be
+Err(MacroError) - this macro failed evaluation for some reason
+
+so yeah it's basically a future.
+TODO Rip off piccolo::UserData (but w/o metatable stuff)
+for UserStruct, then store macros and special forms in the environment
+using that!
+*/
+
+pub mod any;
 pub mod fuel;
 pub mod value;
 
@@ -87,10 +108,11 @@ pub struct World {
     // a world is the technical definition of our entire Scheme environment, so this
     // should be ok!
     // FIXME look at how piccolo does stashing
-    pub(crate) root: WorldRoot,
+    // INFO actually maybe not? let's see??
+    root: WorldRoot,
     /// interner
     pub(crate) rodeo: lasso::Rodeo,
-    /// scripts that can be requested for execution
+    /// scripts that can be "included" in execution
     // TODO switch to hashbrown or ahash? might be faster maybe probably?
     // we use Spurs b/c we have the interner
     pub(crate) modules: HashMap<lasso::Spur, InternalModule>,
@@ -111,12 +133,61 @@ impl Default for World {
     }
 }
 
+#[derive(Debug)]
+pub struct SourceBundle {
+    pub filename: Box<str>,
+    pub case_insensitive: bool,
+    pub module: Module,
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("{} errors in {filename}", errors.len())]
+pub struct SourceBundleError {
+    pub filename: Box<str>,
+    pub code: Box<str>,
+    pub errors: Vec<GeneralParserError>,
+}
+
+impl SourceBundle {
+    pub fn new(
+        filename: impl AsRef<str>,
+        source: impl AsRef<str>,
+        case_insensitive: bool,
+    ) -> Result<Self, SourceBundleError> {
+        let filename = Box::from(filename.as_ref());
+        let source = source.as_ref();
+        let gparse = general_parse(source);
+        if !gparse.errors().is_empty() {
+            let errors = gparse.into_errors();
+            let code = Box::from(source);
+            Err(SourceBundleError {
+                code,
+                errors,
+                filename,
+            })
+        } else {
+            // if no errors, (well, even if errors)
+            // casting the root syntax node (the one returned by GAst::syntax)
+            // and unwrapping it is always safe
+            Ok(Self {
+                filename,
+                case_insensitive,
+                module: Module::cast(gparse.syntax()).unwrap(),
+            })
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum LoadSourceError {
-    #[error("invalid general AST")]
-    InvalidGAst,
     #[error("library already exists: {0}")]
     LibraryAlreadyExists(LibraryName),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum IncludeSourceError {
+    #[error("attempted to define library: {0}")]
+    DefineLibrary(LibraryName),
 }
 
 impl World {
@@ -146,48 +217,50 @@ impl World {
         self.libraries.get(&self.library_name(name.into().name())?)
     }
 
-    pub fn load_source(
+    /// include source as something that can be included using `include` or `include-ci`
+    ///
+    /// these are *not* allowed to conflict with loaded source filenames
+    pub fn include_sources(
         &mut self,
-        filename: impl AsRef<str>,
-        case_insensitive: bool,
-        module: Module,
-    ) -> Result<(), LoadSourceError> {
-        // TODO Detect if a given GAst is a library or a program by checking:
-        // Libraries are scheme files where the only top-level datum is a s-expr where the first element is "define-library"
+        includes: impl IntoIterator<Item = SourceBundle>,
+    ) -> Result<(), IncludeSourceError> {
+        // we don't define any libraries from these sources, so they *aren't*
+        // allowed to define any libraries (using define-library at the top level
+        // before any other statement (where they would be fine in a load_sources)
+        // is an *error* here)
         //
-        // parser might be a misnomer, and instead should be "evaluator" b/c it is when it comes to evaluation time
-        // that understanding what macros are defined in what order is extremely useful.
-        //
-        // NOTE Nahh looking at the chibi-scheme codebase, it seems that libraries are their own separate files (*.sld)
-        // that can (include ...) source files if they so please, so this will be our pattern too (except we'll just have *-lib.scm files)
-        //
+        // (well, we *do* allow lists in the shape of (define-library ...), but
+        // only if they can never be confused with a load_source's library definition)
+        todo!()
+    }
+
+    pub fn load_sources(
+        &mut self,
+        source: impl IntoIterator<Item = SourceBundle>,
+    ) -> Result<Vec<LibraryName>, LoadSourceError> {
         // NOTE Actually we will allow multiple libraries within a module, but
         // all libraries *must* precede any part of the program
-        let filename = self.rodeo.get_or_intern(filename.as_ref());
-        let mut module_datum = module.datum().peekable();
-        // the peeked datum has to be a list to be in library mode anyways...
-        while let Some(list) = module_datum.peek().and_then(|dat| dat.as_list()) {
-            if let Some(Ok(SpecialForm::DefineLibrary)) = list.special_form(case_insensitive) {
-                _ = filename;
-                todo!()
-            } else {
-                break;
-            }
-        }
+        // let filename = self.rodeo.get_or_intern(filename.as_ref());
+        // let mut module_datum = module.datum().peekable();
+        // store the parsed library data (the decls, as well as the vec of Datum within Begin forms)
+        let mut library_data = Vec::<()>::new();
+        // we load a bunch of sources together
+        // strip out and separate the defined libraries, then
+        // for include, include-ci, and include-library-definitions (which is *not* a special form)
+        // all reference files can only be referenced in the same iterator or a previous
+        // load_sources call
         // collect the remaining datum into a program
+        // return the library names registered (if any)
         todo!()
     }
 }
 
-// there is only 1 s-exp in the GAst, and it has "define-library" as it's first element. "(define-library ...)"
-// FIXME Make this more of a "parsed" library, with the nodes separated into groups like "body", "imports", "exports" etc.
-// and a source location
-// (how I wiss traits had narrowing...)
+// the runtime representation of library definitions.
+// all exports, imports should be defined,
+// and whether the body is Scheme source to be executed or a native definition
+// of runtime objects
 #[derive(Debug)]
-pub enum SchemeLibrary {
-    Scheme { filename: lasso::Spur, data: () },
-    Native(()),
-}
+pub struct SchemeLibrary {}
 
 #[cfg(test)]
 mod tests {

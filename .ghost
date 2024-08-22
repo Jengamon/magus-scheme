@@ -1,2 +1,7 @@
+# repl and file execution
 just
 just repl -
+cargo run --example test_port
+# testing
+just test
+just arbtest

@@ -4,12 +4,14 @@ use core::fmt;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use gc_arena::{Collect, Gc, Mutation, RefLock};
+use interpreter::Interpreter;
 use lasso::Rodeo;
 
-use crate::{world::value::ValuePtr, ExternalRepresentation};
+use crate::world::value::ValuePtr;
 
 pub mod external;
 pub mod interpreter;
+pub mod scheme_base;
 
 // First implement a treewalk interpreter that gets the sematics of Scheme correct, then
 // start using this as we start a VM to make it faster (?).
@@ -37,13 +39,13 @@ where
 
 // It is up to runtimes to implement procedures
 #[derive(Collect, Debug, Clone)]
-#[collect(require_static)]
-pub enum Procedure {
-    Code(Code),
+#[collect(no_drop)]
+pub enum Procedure<'gc> {
+    Code(Code<'gc>),
     Native(NativeProcedure),
 }
 
-impl Procedure {
+impl<'gc> Procedure<'gc> {
     // report the arity of a procedure
     pub fn arity(&self) -> Arity {
         match self {
@@ -61,23 +63,26 @@ impl Procedure {
 
     we should transform this into
 
-    evaluate 1 -> a
-    evaluate 2 -> b
-    evaluate + -> c
+    evaluate + -> a
+    evaluate + -> b
+    evaluate 1 -> c
+    evaluate 2 -> d
     call top 3
-    evaluate 3 -> d
-    evaluate + -> e
+    evaluate 3 -> e
     call top 3
     result last value on stack
 */
 
 /// A list to be executed
 #[derive(Debug, Clone, Collect)]
-#[collect(require_static)]
-pub struct Code {
-    pub(crate) repr: Vec<ExternalRepresentation>,
+#[collect(no_drop)]
+pub struct Code<'gc> {
+    pub(crate) repr: Vec<ValuePtr<'gc>>,
     // TODO Frame design to be able to point to any valid representation within repr
     pub(crate) pc: usize,
+    // TODO Store arity information
+    // for now, just using Arity
+    pub(crate) arity: Arity,
     /*
         we use a frames and jumps addressing system:
         elements in each list are enumerated, and then
@@ -94,14 +99,7 @@ pub struct Code {
 
 // TODO Display impl
 
-impl<T: IntoIterator<Item = ExternalRepresentation>> From<T> for Code {
-    fn from(value: T) -> Self {
-        Self {
-            repr: value.into_iter().collect(),
-            pc: 0,
-        }
-    }
-}
+impl<'gc> Code<'gc> {}
 
 #[derive(Collect, Clone)]
 #[collect(require_static)]
@@ -160,7 +158,8 @@ impl<'gc> Arguments<'gc> {
 }
 
 /// Procedure arity
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Collect)]
+#[collect(require_static)]
 pub enum Arity {
     Exact(usize),
     Min(usize),
@@ -179,6 +178,8 @@ impl Arity {
 // and have a fresh environment for executing the code it generates
 // (they *have* to be hygenic, how do we do?)
 // (maybe macros can "insert" an environment and evaluate code in different contexts?)
+// NOTE hygenic macros means that macros are always evaluated in the context they are
+// defined in (see README for notes)
 // (we maybe can think of macros as functions that operate on lists)
 // callback are done after and thus can interact with its surrounding environment
 
@@ -187,13 +188,14 @@ impl Arity {
 // lovely thing about scheme: Native code cannot make calls, they can only return a callable
 // the other code might call, or not.
 // Callbacks are essentially CPS procedures
-pub struct CallbackSuccess<'gc> {
-    pub returning: ValuePtr<'gc>,
-    pub continuation: Option<Procedure>,
-    pub fuel_used: u32,
-    pub fuel_interrupt: bool,
-}
 
+pub enum CallbackSuccess<'gc> {
+    /// Return a given value
+    Return(ValuePtr<'gc>),
+    /// Evaluate a given value in a given environment as the return value of this
+    /// function.
+    Eval(ValuePtr<'gc>, Option<()>),
+}
 type CallbackResult<'gc> = Result<CallbackSuccess<'gc>, Error<'gc>>;
 
 pub trait Callback {
@@ -207,7 +209,13 @@ pub trait Callback {
         &mut self,
         mc: &Mutation<'gc>,
         interner: &mut Rodeo,
-        continuation: Gc<'gc, Procedure>,
+        // continuation: Gc<'gc, Procedure>,
+        // give access to the continuation *and*
+        // environment (and possibly setting stuff in the environment)
+        // b/c of this, fuel manipulation/interrupting
+        // and changing the continuation can be handled by the interpreter's
+        // public interface
+        interpreter: &'gc Interpreter<'gc>,
         // args is guranteed to respect arity
         args: Arguments<'gc>,
         // None for second return means to not chenge the current continuation!

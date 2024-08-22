@@ -4,9 +4,7 @@ mod num;
 pub mod runtime;
 pub mod world;
 
-pub use general_parser::{
-    gast::*, general_parse, special_forms::SpecialForm, CompoundTermKind, TokenKind,
-};
+pub use general_parser::{gast::*, general_parse, CompoundTermKind, TokenKind};
 pub use num::{ExactReal, SchemeNumber};
 pub use runtime::{
     external::{
@@ -15,3 +13,4 @@ pub use runtime::{
     },
     Procedure,
 };
+pub use world::{any::Any, fuel::Fuel};

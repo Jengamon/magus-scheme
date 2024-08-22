@@ -71,11 +71,9 @@ enum RuntimeFrame<'gc> {
     Macro { useless: Gc<'gc, ()> },
 }
 
-// difference between define
-
 // an important thing to remember is that it is an error to attempt to evaluate
 // a circular-referential list!!!
-// define is only usable in a begin context
+// defines (define, define-syntax, define-record-type) are only usable in a begin context
 
 // my idea of steps of execution
 // for now this is left-to-right
@@ -85,3 +83,14 @@ enum RuntimeFrame<'gc> {
 
 // how to handle native procedures
 // 1. pass in current environment pointer, fuel, interner, and arguments from the frame if
+
+// Ok! even more valuable is this lesson:
+// special forms *have* to be importable!
+// the only "special form" that exists in the environment predefined is "import"
+// (not even begin is safe!! well, it's more that a top-lever structure might happen to start
+// with begin)
+// so what do we do?
+// *reifyyyyyyy*
+// special forms are to be treated the exact same as macros (hygiene and all), except
+// special forms have access to reading the current Scheme environment
+// and knowing their evaluation context (where they are being called)

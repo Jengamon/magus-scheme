@@ -9,7 +9,6 @@ use crate::{
     ExactReal, SchemeNumber,
 };
 pub mod gast;
-pub mod special_forms;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum TokenKind {
@@ -752,6 +751,10 @@ impl GAst {
 
     pub fn errors(&self) -> &[GeneralParserError] {
         &self.errors
+    }
+
+    pub fn into_errors(self) -> Vec<GeneralParserError> {
+        self.errors
     }
 }
 

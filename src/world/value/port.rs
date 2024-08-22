@@ -40,6 +40,10 @@ impl OutputPort {
     pub fn close(&mut self) -> Option<Arc<Mutex<dyn Writeable>>> {
         self.port.take()
     }
+
+    pub fn port_type(&self) -> PortType {
+        self.port_type
+    }
 }
 
 impl<T: Writeable> From<(Arc<Mutex<T>>, PortType)> for OutputPort {
@@ -119,6 +123,10 @@ pub struct InputPort {
 impl InputPort {
     pub fn close(&mut self) -> Option<Arc<Mutex<dyn Readable>>> {
         self.port.take()
+    }
+
+    pub fn port_type(&self) -> PortType {
+        self.port_type
     }
 }
 

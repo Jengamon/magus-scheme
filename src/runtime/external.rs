@@ -22,70 +22,65 @@ pub enum ExternalRepresentationKind {
 
 // Implement visitor pattern for ExternalRepresentation
 pub trait ExternalRepresentationVisitor {
-    fn visit_representation(&mut self, repr: &ExternalRepresentation, labels: &[usize]) {
+    fn visit_representation(&mut self, repr: &ExternalRepresentation) {
         match repr {
             ExternalRepresentation::Simple(kind) => match kind {
-                ExternalRepresentationKind::Label(label) => self.visit_label(*label, labels),
-                ExternalRepresentationKind::Boolean(bool) => self.visit_bool(*bool, labels),
-                ExternalRepresentationKind::Number(num) => self.visit_number(*num, labels),
-                ExternalRepresentationKind::String(strg) => {
-                    self.visit_string(strg.as_ref(), labels)
-                }
-                ExternalRepresentationKind::Char(chr) => self.visit_char(*chr, labels),
-                ExternalRepresentationKind::Symbol(sym) => self.visit_symbol(sym.as_ref(), labels),
-                ExternalRepresentationKind::List(lst) => self.visit_list(lst.as_slice(), labels),
-                ExternalRepresentationKind::Vector(vec) => {
-                    self.visit_vector(vec.as_slice(), labels)
-                }
+                ExternalRepresentationKind::Label(trigger) => self.visit_label(*trigger),
+                ExternalRepresentationKind::Boolean(bool) => self.visit_bool(*bool),
+                ExternalRepresentationKind::Number(num) => self.visit_number(*num),
+                ExternalRepresentationKind::String(strg) => self.visit_string(strg.as_ref()),
+                ExternalRepresentationKind::Char(chr) => self.visit_char(*chr),
+                ExternalRepresentationKind::Symbol(sym) => self.visit_symbol(sym.as_ref()),
+                ExternalRepresentationKind::List(lst) => self.visit_list(lst.as_slice()),
+                ExternalRepresentationKind::Vector(vec) => self.visit_vector(vec.as_slice()),
                 ExternalRepresentationKind::Bytevector(bytes) => {
-                    self.visit_bytevector(bytes.as_slice(), labels)
+                    self.visit_bytevector(bytes.as_slice())
                 }
             },
-            ExternalRepresentation::Labeled(label, repr) => self.visit_representation(
-                repr,
-                &labels
-                    .iter()
-                    .chain(std::iter::once(label))
-                    .copied()
-                    .collect::<Vec<_>>(),
-            ),
+            ExternalRepresentation::Labeled(label, repr) => {
+                self.visit_labeled(*label, repr.as_ref())
+            }
         }
     }
 
-    fn visit_label(&mut self, label: usize, labels: &[usize]) {
+    fn visit_labeled(&mut self, label: usize, repr: &ExternalRepresentation) {
         _ = label;
-        _ = labels;
+        _ = repr;
     }
 
-    fn visit_bool(&mut self, value: bool, _labels: &[usize]) {
+    fn visit_label(&mut self, trigger: usize) {
+        _ = trigger;
+    }
+
+    fn visit_bool(&mut self, value: bool) {
         _ = value;
     }
 
-    fn visit_number(&mut self, value: SchemeNumber, _labels: &[usize]) {
+    fn visit_number(&mut self, value: SchemeNumber) {
         _ = value;
     }
 
-    fn visit_string(&mut self, value: &str, _labels: &[usize]) {
+    fn visit_string(&mut self, value: &str) {
         _ = value;
     }
 
-    fn visit_char(&mut self, value: char, _labels: &[usize]) {
+    fn visit_char(&mut self, value: char) {
         _ = value;
     }
 
-    fn visit_symbol(&mut self, symbol: &str, _labels: &[usize]) {
+    fn visit_symbol(&mut self, symbol: &str) {
         _ = symbol;
     }
 
-    fn visit_list(&mut self, exprs: &[ExternalRepresentation], _labels: &[usize]) {
+    fn visit_list(&mut self, exprs: &[ExternalRepresentation]) {
         _ = exprs;
     }
 
-    fn visit_vector(&mut self, exprs: &[ExternalRepresentation], _labels: &[usize]) {
+    fn visit_vector(&mut self, exprs: &[ExternalRepresentation]) {
         _ = exprs;
     }
 
-    fn visit_bytevector(&mut self, bytes: &[u8], _labels: &[usize]) {
+    fn visit_bytevector(&mut self, bytes: &[u8]) {
         _ = bytes;
     }
 }

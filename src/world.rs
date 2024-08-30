@@ -30,18 +30,8 @@ using that!
 
 pub mod any;
 pub mod fuel;
+pub mod userstruct;
 pub mod value;
-
-pub(crate) struct InternalModule {
-    module: Module,
-    filename: lasso::Spur,
-}
-
-impl InternalModule {
-    pub fn filename_spur(&self) -> lasso::Spur {
-        self.filename
-    }
-}
 
 #[derive(Hash, Debug, Clone, PartialEq, Eq)]
 struct InternalLibraryName(Box<[lasso::Spur]>);
@@ -111,11 +101,18 @@ pub struct World {
     // INFO actually maybe not? let's see??
     root: WorldRoot,
     /// interner
-    pub(crate) rodeo: lasso::Rodeo,
     /// scripts that can be "included" in execution
     // TODO switch to hashbrown or ahash? might be faster maybe probably?
     // we use Spurs b/c we have the interner
     pub(crate) modules: HashMap<lasso::Spur, InternalModule>,
+    pub(crate) access: WorldAccess,
+}
+
+#[derive(Default)]
+pub struct WorldAccess {
+    // TODO FIX separate rodeo and libraries into auxillary struct so that
+    // they can be borrowed by Callback w/o borrowing the entire world
+    pub(crate) rodeo: lasso::Rodeo,
     /// libraries that can be imported from
     libraries: HashMap<InternalLibraryName, SchemeLibrary>,
 }
@@ -126,9 +123,8 @@ impl Default for World {
             root: WorldRoot::new(|_mc| WorldArena {
                 interpreters: HashMap::new(),
             }),
-            rodeo: lasso::Rodeo::default(),
             modules: HashMap::default(),
-            libraries: HashMap::default(),
+            access: WorldAccess::default(),
         }
     }
 }
@@ -138,6 +134,17 @@ pub struct SourceBundle {
     pub filename: Box<str>,
     pub case_insensitive: bool,
     pub module: Module,
+}
+
+pub(crate) struct InternalModule {
+    module: Module,
+    filename: lasso::Spur,
+}
+
+impl InternalModule {
+    pub fn filename_spur(&self) -> lasso::Spur {
+        self.filename
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -197,7 +204,7 @@ impl World {
     ) -> Option<InternalLibraryName> {
         Some(InternalLibraryName(
             name.into_iter()
-                .map(|s| self.rodeo.get(s.as_ref()))
+                .map(|s| self.access.rodeo.get(s.as_ref()))
                 .collect::<Option<_>>()?,
         ))
     }
@@ -208,13 +215,15 @@ impl World {
     ) -> InternalLibraryName {
         InternalLibraryName(
             name.into_iter()
-                .map(|s| self.rodeo.get_or_intern(s.as_ref()))
+                .map(|s| self.access.rodeo.get_or_intern(s.as_ref()))
                 .collect(),
         )
     }
 
     pub fn library(&self, name: impl Into<LibraryName>) -> Option<&SchemeLibrary> {
-        self.libraries.get(&self.library_name(name.into().name())?)
+        self.access
+            .libraries
+            .get(&self.library_name(name.into().name())?)
     }
 
     /// include source as something that can be included using `include` or `include-ci`
@@ -284,15 +293,15 @@ mod tests {
         let mut world = World::default();
 
         let ln: InternalLibraryName = world.library_name_mut(["lib"]);
-        check!(ln.display(&world.rodeo).to_string() == "(lib)");
+        check!(ln.display(&world.access.rodeo).to_string() == "(lib)");
 
         let ln: InternalLibraryName = world.library_name_mut(["lib", "apple"]);
-        check!(ln.display(&world.rodeo).to_string() == "(lib apple)");
+        check!(ln.display(&world.access.rodeo).to_string() == "(lib apple)");
 
         let ln: InternalLibraryName = world.library_name_mut(["lib", "apple", "λ"]);
-        check!(ln.display(&world.rodeo).to_string() == "(lib apple |λ|)");
+        check!(ln.display(&world.access.rodeo).to_string() == "(lib apple |λ|)");
 
         let ln: InternalLibraryName = world.library_name_mut(["lib", "apple", "λ", "pip|e"]);
-        check!(ln.display(&world.rodeo).to_string() == r"(lib apple |λ| |pip\|e|)");
+        check!(ln.display(&world.access.rodeo).to_string() == r"(lib apple |λ| |pip\|e|)");
     }
 }

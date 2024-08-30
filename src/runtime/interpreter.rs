@@ -21,11 +21,19 @@ fn in_scope<T>(world: &mut World, ctx: Option<StashedContext>, func: impl FnOnce
 StashedContext *must* implement Clone
 */
 
-use gc_arena::{Collect, Gc};
+use std::collections::VecDeque;
 
-use crate::world::value::ValuePtr;
+use gc_arena::{Collect, Gc, Mutation, RefLock};
 
-use super::Environment;
+use crate::{
+    world::{
+        value::{Value, ValueConvertError, ValuePtr},
+        World, WorldAccess,
+    },
+    Fuel,
+};
+
+use super::EnvironmentPtr;
 
 // An [`Interpreter`] will always interrupt *between* modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Collect, Default)]
@@ -44,31 +52,109 @@ pub enum InterpreterMode {
 
 /// An interpreter that knows how to operate frames of execution
 // Equivish to piccolo Executor
+// an individal stack of execution.
+// afaik we don't need Lua-style coroutines
 #[derive(Collect, Clone, Debug)]
 #[collect(no_drop)]
 pub struct Interpreter<'gc> {
     // TODO Mode might not be stored, but instead calculated
     // by looking at the runtime frame stack
     mode: InterpreterMode,
+    // TODO Allow for intermediate stack frames
+    // Because of this we prolly need to rework how returns work
+    // But we have to start impl so that we have *soemthign*
     // current environment
-    environment: Environment<'gc>,
-    // used to hold values on the way to procedure evaluation
-    stack: ValuePtr<'gc>,
+    environment: EnvironmentPtr<'gc>,
+    // holds the value to be returned
+    return_reg: Option<ValuePtr<'gc>>,
     // used to hold frames for evaluation
     // once we reach RUNTIME_STACK_MAX, we are not allowed to use any more frames
     // or we error with a StackOverflowError
     // note that macro expansion uses slots on the stack to make them
     // resumable
-    frame_stack: Vec<RuntimeFrame<'gc>>,
+    runtime_stack: Vec<RuntimeFrame<'gc>>,
+
+    current_item: Option<ValuePtr<'gc>>,
+    // continuation
+    continuation: VecDeque<ValuePtr<'gc>>,
+    // stack
+    stack: Vec<ValuePtr<'gc>>,
 }
 
+// b/c scheme has error handling, store this as a value, but use a unique type
+#[derive(Debug, thiserror::Error)]
+pub enum InterpreterError {
+    #[error("cannot execute a null value")]
+    ExecuteNull,
+}
+
+impl<'gc> Interpreter<'gc> {
+    pub(crate) fn step(
+        &mut self,
+        mc: &Mutation<'gc>,
+        access: &mut WorldAccess,
+        files: (),
+        fuel: &mut Fuel,
+    ) {
+        // something...
+        let mut work_done = false;
+        // don't do work if we're already done
+        if self.mode == InterpreterMode::Result {
+            return;
+        }
+        while fuel.should_continue() || !work_done {
+            // If the runtime stack is not empty, work on it
+            // TODO runtime stack
+            // TODO continue our continuation
+            // pop front of continuation
+            if let Some(next) = self
+                .current_item
+                .take()
+                .or_else(|| self.continuation.pop_front())
+            {
+                match *next.borrow() {
+                    Value::Null => {
+                        // TODO dynamic-wind handling?
+                        self.stack.push(Gc::new(
+                            mc,
+                            RefLock::new(Value::Error(Gc::new(
+                                mc,
+                                InterpreterError::ExecuteNull.into(),
+                            ))),
+                        ))
+                    }
+                    Value::Undefined => todo!(),
+                    Value::Void => todo!(),
+                    Value::Number(_) => todo!(),
+                    Value::String(_) => todo!(),
+                    Value::Symbol(_) => todo!(),
+                    Value::Bool(_) => todo!(),
+                    Value::Char(_) => todo!(),
+                    Value::InputPort(_) => todo!(),
+                    Value::OutputPort(_) => todo!(),
+                    Value::Cons(_) => todo!(),
+                    Value::Procedure(_) => todo!(),
+                    Value::Environment(_) => todo!(),
+                    Value::UserStruct(_) => todo!(),
+                    Value::Error(_) => todo!(),
+                }
+                work_done = true;
+                _ = next;
+            } else {
+                self.mode = InterpreterMode::Result;
+            }
+        }
+    }
+}
+
+// altrnatte frames for the current continuation
 #[derive(Collect, Clone, Debug)]
 #[collect(no_drop)]
 enum RuntimeFrame<'gc> {
-    // this frame is for evaluating program data
-    Program {},
+    // this frame is for evaluating Rust procedure
+    Native { stack: Vec<ValuePtr<'gc>> },
     // this frame is for macro expansion
-    Macro { useless: Gc<'gc, ()> },
+    Macro { ustack: Vec<ValuePtr<'gc>> },
 }
 
 // an important thing to remember is that it is an error to attempt to evaluate

@@ -1,13 +1,18 @@
 //! runtimes are responsible for reading worlds and executing on its contents (relative to a specific program)
 
 use core::fmt;
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::{Ref, RefCell, RefMut},
+    collections::HashMap,
+    rc::Rc,
+};
 
 use gc_arena::{Collect, Gc, Mutation, RefLock};
-use interpreter::Interpreter;
-use lasso::Rodeo;
 
-use crate::world::value::ValuePtr;
+use crate::world::{
+    value::{Value, ValuePtr},
+    WorldAccess,
+};
 
 pub mod external;
 pub mod interpreter;
@@ -41,7 +46,7 @@ where
 #[derive(Collect, Debug, Clone)]
 #[collect(no_drop)]
 pub enum Procedure<'gc> {
-    Code(Code<'gc>),
+    Code(Lambda<'gc>),
     Native(NativeProcedure),
 }
 
@@ -73,16 +78,20 @@ impl<'gc> Procedure<'gc> {
     result last value on stack
 */
 
+#[derive(Collect, Debug, Clone, Copy, PartialEq, Eq)]
+#[collect(require_static)]
+pub(crate) struct InternedFilename(pub(crate) lasso::Spur);
+
 /// A list to be executed
 #[derive(Debug, Clone, Collect)]
 #[collect(no_drop)]
-pub struct Code<'gc> {
+pub struct Lambda<'gc> {
     pub(crate) repr: Vec<ValuePtr<'gc>>,
-    // TODO Frame design to be able to point to any valid representation within repr
-    pub(crate) pc: usize,
     // TODO Store arity information
     // for now, just using Arity
     pub(crate) arity: Arity,
+    // list the source(s) of this lambda
+    pub(crate) sources: Box<(InternedFilename, (usize, usize))>,
     /*
         we use a frames and jumps addressing system:
         elements in each list are enumerated, and then
@@ -99,7 +108,7 @@ pub struct Code<'gc> {
 
 // TODO Display impl
 
-impl<'gc> Code<'gc> {}
+impl<'gc> Lambda<'gc> {}
 
 #[derive(Collect, Clone)]
 #[collect(require_static)]
@@ -125,35 +134,114 @@ impl fmt::Debug for NativeProcedure {
 // NOTE Error mechanism? Not natively, entirely handled by the Interpreter.
 // Native code can *raise* an error tho.
 
+// TODO make more involved, so that this can be the type stored in Value
+// for `environment`
+// TODO Allow for "frozen" environments to implement `environment` b/c
+// "The bindings of the environment represented by the specifier are immutable, as is the environment itself."
+// It should interact with set!, define, and friends to prevent any modification of the environment.
+/// Environemnts define the context for execution, with variable mappings
+/// macro definitions, and up to 1 reference to a parent environment
 #[derive(Collect, Debug, Clone, Copy)]
 #[collect(no_drop)]
 pub struct Environment<'gc> {
-    parent: Option<Gc<'gc, RefLock<Environment<'gc>>>>,
+    parent: Option<EnvironmentPtr<'gc>>,
     inner: Gc<'gc, RefLock<EnvironmentInner<'gc>>>,
+    /// This will make all [`Self::define`]s fail as it makes the
+    /// bindings immutable
+    is_frozen: bool,
+}
+pub type EnvironmentPtr<'gc> = Gc<'gc, RefLock<Environment<'gc>>>;
+
+#[derive(thiserror::Error, Debug)]
+#[error("environment is frozen")]
+pub struct FrozenError;
+
+impl<'gc> Environment<'gc> {
+    pub fn new(mc: &Mutation<'gc>, parent: Option<EnvironmentPtr<'gc>>) -> Self {
+        Self {
+            parent,
+            inner: Gc::new(
+                mc,
+                RefLock::new(EnvironmentInner {
+                    values: HashMap::default(),
+                }),
+            ),
+            is_frozen: false,
+        }
+    }
+
+    /// Sets the frozen flag. This is not a reversible operation.
+    pub fn freeze(&mut self, mc: &Mutation<'gc>) {
+        self.is_frozen = true;
+        for binding in self.inner.borrow_mut(mc).values.values_mut() {
+            binding.is_frozen = true;
+        }
+    }
+
+    pub fn get(&self, name: impl AsRef<str>) -> Option<Binding<'gc>> {
+        if let Some(value) = self.inner.borrow().values.get(name.as_ref()) {
+            Some(*value)
+        } else if let Some(parent) = self.parent {
+            parent.borrow().get(name)
+        } else {
+            None
+        }
+    }
+
+    /// Creates a new binding in the current environment, replacing any binding that might already exist
+    /// which is returned is successful.
+    ///
+    /// Fails if the environment the definition is attempted in is frozen
+    pub fn define(
+        &mut self,
+        mc: &Mutation<'gc>,
+        name: impl AsRef<str>,
+        value: ValuePtr<'gc>,
+        is_frozen: bool,
+    ) -> Result<Option<Binding<'gc>>, FrozenError> {
+        self.is_frozen
+            .then(|| {
+                self.inner
+                    .borrow_mut(mc)
+                    .values
+                    .insert(Box::from(name.as_ref()), Binding { value, is_frozen })
+            })
+            .ok_or(FrozenError)
+    }
 }
 
-impl<'gc> Environment<'gc> {}
-
-/// Environemnts define the context for execution, with variable mappings
-/// macro definitions, and up to 1 reference to a parent environment
-#[derive(Collect, Debug)]
+#[derive(Collect, Debug, Clone)]
 #[collect(no_drop)]
-pub struct EnvironmentInner<'gc> {
-    pub values: HashMap<Box<str>, ValuePtr<'gc>>,
+struct EnvironmentInner<'gc> {
+    pub values: HashMap<Box<str>, Binding<'gc>>,
 }
 
-/// Nice argument handler
-pub struct Arguments<'gc>(pub Vec<ValuePtr<'gc>>);
-impl<'gc> Arguments<'gc> {
-    /// Creates an error if the arity does not match
-    pub fn force_arity<const N: usize>(self) -> Result<[ValuePtr<'gc>; N], BoxError> {
-        #[derive(thiserror::Error, Debug)]
-        #[error("arity mismatch: found {0} arguments, expected {N}")]
-        struct ArityMismatch<const N: usize>(usize);
+/// Represents the value at a certain location in an environment.
+///
+/// A particular binding can be frozen to make sure that no change of its held value
+/// is made through it.
+#[derive(Collect, Debug, Clone, Copy)]
+#[collect(no_drop)]
+pub struct Binding<'gc> {
+    value: ValuePtr<'gc>,
+    is_frozen: bool,
+}
 
-        let arg_len = self.0.len();
-        TryInto::<[ValuePtr<'gc>; N]>::try_into(self.0)
-            .map_err(|_| BoxError::from(ArityMismatch::<N>(arg_len)))
+impl<'gc> Binding<'gc> {
+    pub fn read<T>(&self, func: impl FnOnce(Ref<Value<'gc>>) -> T) -> T {
+        func(self.value.borrow())
+    }
+
+    pub fn write<T>(
+        &self,
+        mc: &Mutation<'gc>,
+        func: impl FnOnce(RefMut<Value<'gc>>) -> T,
+    ) -> Option<T> {
+        if self.is_frozen {
+            None
+        } else {
+            Some(func(self.value.borrow_mut(mc)))
+        }
     }
 }
 
@@ -189,15 +277,24 @@ impl Arity {
 // the other code might call, or not.
 // Callbacks are essentially CPS procedures
 
-pub enum CallbackSuccess<'gc> {
-    /// Return a given value
-    Return(ValuePtr<'gc>),
-    /// Evaluate a given value in a given environment as the return value of this
-    /// function.
-    Eval(ValuePtr<'gc>, Option<()>),
+pub enum CallbackReturn<'gc> {
+    /// Suspend this call, and return to the main loop
+    Suspend,
+    /// Return the value at the top of the stack
+    Return,
+    /// Evaluate the top of the stack in the given environment
+    /// and push its return value to our stack
+    Eval(Option<EnvironmentPtr<'gc>>),
+    /// Make the top of the stack the current continuation,
+    /// with the previous continuation as its argument
+    Continuation,
 }
-type CallbackResult<'gc> = Result<CallbackSuccess<'gc>, Error<'gc>>;
+type CallbackResult<'gc> = Result<CallbackReturn<'gc>, Error<'gc>>;
 
+// TODO Prolly make this more Sequence-like...
+// so that they can freely call back into Interpreter code...
+// this is done by providing a stack, and having returns simply indicate actions
+// to make
 pub trait Callback {
     fn name(&self) -> Option<&str> {
         None
@@ -208,18 +305,41 @@ pub trait Callback {
     fn call<'gc>(
         &mut self,
         mc: &Mutation<'gc>,
-        interner: &mut Rodeo,
+        access: &WorldAccess,
         // continuation: Gc<'gc, Procedure>,
         // give access to the continuation *and*
         // environment (and possibly setting stuff in the environment)
         // b/c of this, fuel manipulation/interrupting
         // and changing the continuation can be handled by the interpreter's
         // public interface
-        interpreter: &'gc Interpreter<'gc>,
-        // args is guranteed to respect arity
-        args: Arguments<'gc>,
-        // None for second return means to not chenge the current continuation!
+        // interpreter: &'gc Interpreter<'gc>,
+        // stack starts with the arguments on it
+        stack: &'gc mut Vec<ValuePtr<'gc>>,
     ) -> CallbackResult<'gc>;
+}
+
+#[derive(Collect)]
+#[collect(no_drop)]
+pub enum MacroReturn<'gc> {
+    /// Evaluate a value in the environment of this macro's invocation,
+    /// or a given environment, then return to this macro
+    Eval(Option<EnvironmentPtr<'gc>>),
+    /// Rewrite the this macro's invocation into the value at the top of
+    /// the stack
+    Rewrite,
+}
+
+pub trait Macro {
+    fn rewrite<'gc>(
+        &mut self,
+        mc: &Mutation<'gc>,
+        // environment this macro is being invoked in
+        environment: EnvironmentPtr<'gc>,
+        // TODO World interner/libraries struct
+        access: &WorldAccess,
+        // starts with unevaluated inputs
+        stack: &'gc mut Vec<ValuePtr<'gc>>,
+    ) -> Result<MacroReturn<'gc>, Error<'gc>>;
 }
 
 /*

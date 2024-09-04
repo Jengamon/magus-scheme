@@ -8,11 +8,16 @@ use std::{
 };
 
 use gc_arena::{Collect, Gc, Mutation, RefLock};
+use interpreter::Continuation;
 use lasso::Rodeo;
 
-use crate::world::{
-    value::{Value, ValuePtr},
-    WorldArena,
+use crate::{
+    value::ErrorBox,
+    world::{
+        value::{Value, ValuePtr},
+        WorldArena,
+    },
+    Fuel,
 };
 
 pub mod external;
@@ -27,20 +32,7 @@ pub mod scheme_base;
 #[collect(no_drop)]
 pub enum Error<'gc> {
     Value(ValuePtr<'gc>),
-    Static(Gc<'gc, BoxError>),
-}
-
-#[derive(Collect, Clone, Debug)]
-#[collect(require_static)]
-pub struct BoxError(pub Rc<dyn std::error::Error>);
-
-impl<E> From<E> for BoxError
-where
-    E: std::error::Error + 'static,
-{
-    fn from(value: E) -> Self {
-        Self(Rc::new(value))
-    }
+    Static(Gc<'gc, ErrorBox>),
 }
 
 // It is up to runtimes to implement procedures
@@ -283,12 +275,11 @@ pub enum CallbackReturn<'gc> {
     Suspend,
     /// Return the value at the top of the stack
     Return,
+    /// Escape the current continuation into the given continuation
+    Continuation(Continuation<'gc>),
     /// Evaluate the top of the stack in the given environment
     /// and push its return value to our stack
     Eval(Option<EnvironmentPtr<'gc>>),
-    /// Make the top of the stack the current continuation,
-    /// with the previous continuation as its argument
-    Continuation,
 }
 type CallbackResult<'gc> = Result<CallbackReturn<'gc>, Error<'gc>>;
 
@@ -316,7 +307,8 @@ pub trait Callback {
         // public interface
         // interpreter: &'gc Interpreter<'gc>,
         // stack starts with the arguments on it
-        stack: &'gc mut Vec<ValuePtr<'gc>>,
+        continuation: &Continuation<'gc>,
+        fuel: &mut Fuel,
     ) -> CallbackResult<'gc>;
 }
 

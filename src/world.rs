@@ -102,14 +102,14 @@ impl<'gc> SchemeLibrary<'gc> {
 
 #[derive(Collect)]
 #[collect(no_drop)]
-pub(crate) struct WorldArena<'gc> {
+pub struct WorldArena<'gc> {
     pub(crate) interpreters: HashMap<RuntimeKey, Gc<'gc, RefLock<Interpreter<'gc>>>>,
 
     // value that is (eq? '())
     pub(crate) null_val: ValuePtr<'gc>,
 
     /// libraries that can be imported from
-    pub(crate) libraries: HashMap<Static<InternalLibraryName>, SchemeLibrary<'gc>>,
+    libraries: HashMap<Static<InternalLibraryName>, SchemeLibrary<'gc>>,
 }
 pub(crate) type WorldRoot = Arena<Rootable![WorldArena<'_>]>;
 

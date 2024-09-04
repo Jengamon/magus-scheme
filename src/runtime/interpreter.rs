@@ -21,19 +21,18 @@ fn in_scope<T>(world: &mut World, ctx: Option<StashedContext>, func: impl FnOnce
 StashedContext *must* implement Clone
 */
 
-use std::collections::{HashMap, VecDeque};
-
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 
 use crate::{
+    value::ConsCell,
     world::{
-        value::{Value, ValueConvertError, ValuePtr},
-        World, WorldAccess, WorldArena,
+        value::{Value, ValuePtr},
+        WorldArena,
     },
     Fuel,
 };
 
-use super::{Environment, EnvironmentInner, EnvironmentPtr};
+use super::{Environment, EnvironmentPtr, Error};
 
 // An [`Interpreter`] will always interrupt *between* modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Collect, Default)]
@@ -50,6 +49,47 @@ pub enum InterpreterMode {
     Result,
 }
 
+#[derive(Collect, Clone, Debug)]
+#[collect(no_drop)]
+pub struct Continuation<'gc> {
+    // there's only one pointer!
+    execution: Option<ValuePtr<'gc>>,
+    pub stack: Vec<ValuePtr<'gc>>,
+    runtime_stack: Vec<RuntimeFrame<'gc>>,
+    pub environment: EnvironmentPtr<'gc>,
+}
+
+impl<'gc> Continuation<'gc> {
+    pub fn new(
+        execution: ValuePtr<'gc>,
+        stack: Vec<ValuePtr<'gc>>,
+        runtime_stack: Vec<RuntimeFrame<'gc>>,
+        environment: EnvironmentPtr<'gc>,
+    ) -> Self {
+        Self {
+            execution: Some(execution),
+            stack,
+            runtime_stack,
+            environment,
+        }
+    }
+
+    /// A continuation with no value to execute, which causes a return of the value of
+    /// the result of the current continuation
+    pub fn result(
+        stack: Vec<ValuePtr<'gc>>,
+        runtime_stack: Vec<RuntimeFrame<'gc>>,
+        environment: EnvironmentPtr<'gc>,
+    ) -> Self {
+        Self {
+            execution: None,
+            stack,
+            runtime_stack,
+            environment,
+        }
+    }
+}
+
 /// An interpreter that knows how to operate frames of execution
 // Equivish to piccolo Executor
 // an individal stack of execution.
@@ -60,8 +100,6 @@ pub struct Interpreter<'gc> {
     // TODO Mode might not be stored, but instead calculated
     // by looking at the runtime frame stack
     mode: InterpreterMode,
-    // current environment (publically accessible)
-    pub environment: EnvironmentPtr<'gc>,
     // holds the value to be returned
     return_reg: ValuePtr<'gc>,
     // used to hold frames for evaluation
@@ -69,13 +107,15 @@ pub struct Interpreter<'gc> {
     // or we error with a StackOverflowError
     // note that macro expansion uses slots on the stack to make them
     // resumable
-    runtime_stack: Vec<RuntimeFrame<'gc>>,
 
-    current_item: Option<ValuePtr<'gc>>,
+    // current_item: Option<ValuePtr<'gc>>,
     // continuation
-    continuation: VecDeque<ValuePtr<'gc>>,
+    // continuation: VecDeque<ValuePtr<'gc>>,
+    // FIXME make continuation the current state (stack and runtime stack) along with the next value to execute
     // stack
-    stack: Vec<ValuePtr<'gc>>,
+    // stack: Vec<ValuePtr<'gc>>,
+    // runtime_stack: Vec<RuntimeFrame<'gc>>,
+    continuation: Continuation<'gc>,
 }
 
 // b/c scheme has error handling, store this as a value, but use a unique type
@@ -86,32 +126,20 @@ pub enum InterpreterError {
 }
 
 impl<'gc> Interpreter<'gc> {
-    pub fn new(mc: &Mutation<'gc>, arena: &WorldArena) -> Self {
+    pub fn new(mc: &Mutation<'gc>, arena: &WorldArena<'gc>, initial_exec: ValuePtr<'gc>) -> Self {
         Self {
             mode: InterpreterMode::Ready,
-            environment: Gc::new(
-                mc,
-                RefLock::new(Environment {
-                    parent: None,
-                    is_frozen: false,
-                    inner: Gc::new(
-                        mc,
-                        RefLock::new(EnvironmentInner {
-                            values: HashMap::default(),
-                        }),
-                    ),
-                }),
-            ),
             return_reg: arena.null_val,
+            continuation: Continuation::new(
+                initial_exec,
+                Vec::new(),
+                Vec::new(),
+                Gc::new(mc, RefLock::new(Environment::new(mc, None))),
+            ),
         }
     }
-    pub(crate) fn step(
-        &mut self,
-        mc: &Mutation<'gc>,
-        access: &mut WorldAccess,
-        files: (),
-        fuel: &mut Fuel,
-    ) {
+
+    pub fn step(&mut self, mc: &Mutation<'gc>, arena: &mut WorldArena<'gc>, fuel: &mut Fuel) {
         // something...
         let mut work_done = false;
         // don't do work if we're already done
@@ -123,50 +151,79 @@ impl<'gc> Interpreter<'gc> {
             // TODO runtime stack
             // TODO continue our continuation
             // pop front of continuation
-            if let Some(next) = self
-                .current_item
-                .take()
-                .or_else(|| self.continuation.pop_front())
-            {
-                match *next.borrow() {
-                    // Value::Null => {
-                    //     // TODO dynamic-wind handling?
-                    //     self.stack.push(Gc::new(
-                    //         mc,
-                    //         RefLock::new(Value::Error(Gc::new(
-                    //             mc,
-                    //             InterpreterError::ExecuteNull.into(),
-                    //         ))),
-                    //     ))
-                    // }
+            if let Some(exec) = self.continuation.execution {
+                match *exec.borrow() {
+                    // attempting to "execute" or return this produces an error!
+                    // (also applies if an environment contains this value and it is being returned
+                    // by symbol)
                     Value::Undefined => todo!(),
-                    Value::Void => todo!(),
-                    Value::Number(_) => todo!(),
-                    Value::String(_) => todo!(),
+                    // symbol means to look up the value in the current environment, and
+                    // put *that* into the return register (does *not* execute cons-cells!)
                     Value::Symbol(_) => todo!(),
+                    // There are 2 forms of executable lists:
+                    // after macro expansion
+                    // - initial item is a *Procedure*. the args are evaluated and passed into the procedure as a continuation.
+                    // - initial item is a symbol, in which case the value of the symbol is looked up in the environment
+                    // and must be a Procedure for execution.
+                    // - initial item is the symbol "begin", where there is special handling for the fact that begin is
+                    // a sequence
+                    Value::Cons(cons) => {
+                        // expand macros
+                        // execute procedure
+                        // store procedure result in result_reg
+                    }
+                    // most values, if they end up in an execution slot,
+                    // mean "set the return value of this context to this value"
+                    // is just means to set the return_reg to the value given
+                    Value::Void => todo!(),
                     Value::Bool(_) => todo!(),
                     Value::Char(_) => todo!(),
                     Value::InputPort(_) => todo!(),
                     Value::OutputPort(_) => todo!(),
-                    Value::Cons(_) => todo!(),
+                    Value::Number(_) => todo!(),
+                    Value::String(_) => todo!(),
                     Value::Procedure(_) => todo!(),
                     Value::Environment(_) => todo!(),
                     Value::UserStruct(_) => todo!(),
                     Value::Error(_) => todo!(),
+                    Value::Vector(_) => todo!(),
                 }
                 work_done = true;
-                _ = next;
             } else {
                 self.mode = InterpreterMode::Result;
             }
         }
+    }
+
+    // attempt to expand macros on children of this cons recursively
+    fn expand(
+        &mut self,
+        mc: &Mutation<'gc>,
+        arena: &mut WorldArena<'gc>,
+    ) -> Result<ValuePtr<'gc>, Error<'gc>> {
+        // we expand macros for children bottom-up, right-to-left
+        // so something like:
+        // (argboy 3 (lambda (x) (+ x 1)))
+        // if we have defined
+        // (define-syntax argboy (syntax-rules () ((argboy v lam) (lam v))))
+        // we expand the `lambda` first, into a procedure, then
+        // we expand `argboy`.
+        //
+        // Any non-cons value is copied to the output as-is.
+        //
+        // NOTE We currently do not support expanding self-referetial lists, as they are not executable,
+        // so if we encounter a cons that references itself, it is copied to the output *as-is*.
+        //
+        // NOTE If we don't find a macro for a cons, we copy the cons cell as-is. (distinct from
+        // *finding* a macro, but its expansion failing)
+        todo!()
     }
 }
 
 // altrnatte frames for the current continuation
 #[derive(Collect, Clone, Debug)]
 #[collect(no_drop)]
-enum RuntimeFrame<'gc> {
+pub enum RuntimeFrame<'gc> {
     // this frame is for evaluating Rust procedure
     Native { stack: Vec<ValuePtr<'gc>> },
     // this frame is for macro expansion

@@ -13,4 +13,4 @@ pub use runtime::{
     },
     Procedure,
 };
-pub use world::{any::Any, fuel::Fuel};
+pub use world::{any::Any, fuel::Fuel, value};

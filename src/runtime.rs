@@ -8,10 +8,11 @@ use std::{
 };
 
 use gc_arena::{Collect, Gc, Mutation, RefLock};
+use lasso::Rodeo;
 
 use crate::world::{
     value::{Value, ValuePtr},
-    WorldAccess,
+    WorldArena,
 };
 
 pub mod external;
@@ -305,7 +306,8 @@ pub trait Callback {
     fn call<'gc>(
         &mut self,
         mc: &Mutation<'gc>,
-        access: &WorldAccess,
+        arena: &WorldArena,
+        rodeo: &mut Rodeo,
         // continuation: Gc<'gc, Procedure>,
         // give access to the continuation *and*
         // environment (and possibly setting stuff in the environment)
@@ -324,7 +326,7 @@ pub enum MacroReturn<'gc> {
     /// Evaluate a value in the environment of this macro's invocation,
     /// or a given environment, then return to this macro
     Eval(Option<EnvironmentPtr<'gc>>),
-    /// Rewrite the this macro's invocation into the value at the top of
+    /// Rewrite this macro's invocation into the value at the top of
     /// the stack
     Rewrite,
 }
@@ -333,10 +335,10 @@ pub trait Macro {
     fn rewrite<'gc>(
         &mut self,
         mc: &Mutation<'gc>,
+        arena: &WorldArena,
+        rodeo: &mut Rodeo,
         // environment this macro is being invoked in
         environment: EnvironmentPtr<'gc>,
-        // TODO World interner/libraries struct
-        access: &WorldAccess,
         // starts with unevaluated inputs
         stack: &'gc mut Vec<ValuePtr<'gc>>,
     ) -> Result<MacroReturn<'gc>, Error<'gc>>;

@@ -21,19 +21,19 @@ fn in_scope<T>(world: &mut World, ctx: Option<StashedContext>, func: impl FnOnce
 StashedContext *must* implement Clone
 */
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 
 use crate::{
     world::{
         value::{Value, ValueConvertError, ValuePtr},
-        World, WorldAccess,
+        World, WorldAccess, WorldArena,
     },
     Fuel,
 };
 
-use super::EnvironmentPtr;
+use super::{Environment, EnvironmentInner, EnvironmentPtr};
 
 // An [`Interpreter`] will always interrupt *between* modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Collect, Default)]
@@ -60,13 +60,10 @@ pub struct Interpreter<'gc> {
     // TODO Mode might not be stored, but instead calculated
     // by looking at the runtime frame stack
     mode: InterpreterMode,
-    // TODO Allow for intermediate stack frames
-    // Because of this we prolly need to rework how returns work
-    // But we have to start impl so that we have *soemthign*
-    // current environment
-    environment: EnvironmentPtr<'gc>,
+    // current environment (publically accessible)
+    pub environment: EnvironmentPtr<'gc>,
     // holds the value to be returned
-    return_reg: Option<ValuePtr<'gc>>,
+    return_reg: ValuePtr<'gc>,
     // used to hold frames for evaluation
     // once we reach RUNTIME_STACK_MAX, we are not allowed to use any more frames
     // or we error with a StackOverflowError
@@ -89,6 +86,25 @@ pub enum InterpreterError {
 }
 
 impl<'gc> Interpreter<'gc> {
+    pub fn new(mc: &Mutation<'gc>, arena: &WorldArena) -> Self {
+        Self {
+            mode: InterpreterMode::Ready,
+            environment: Gc::new(
+                mc,
+                RefLock::new(Environment {
+                    parent: None,
+                    is_frozen: false,
+                    inner: Gc::new(
+                        mc,
+                        RefLock::new(EnvironmentInner {
+                            values: HashMap::default(),
+                        }),
+                    ),
+                }),
+            ),
+            return_reg: arena.null_val,
+        }
+    }
     pub(crate) fn step(
         &mut self,
         mc: &Mutation<'gc>,
@@ -113,16 +129,16 @@ impl<'gc> Interpreter<'gc> {
                 .or_else(|| self.continuation.pop_front())
             {
                 match *next.borrow() {
-                    Value::Null => {
-                        // TODO dynamic-wind handling?
-                        self.stack.push(Gc::new(
-                            mc,
-                            RefLock::new(Value::Error(Gc::new(
-                                mc,
-                                InterpreterError::ExecuteNull.into(),
-                            ))),
-                        ))
-                    }
+                    // Value::Null => {
+                    //     // TODO dynamic-wind handling?
+                    //     self.stack.push(Gc::new(
+                    //         mc,
+                    //         RefLock::new(Value::Error(Gc::new(
+                    //             mc,
+                    //             InterpreterError::ExecuteNull.into(),
+                    //         ))),
+                    //     ))
+                    // }
                     Value::Undefined => todo!(),
                     Value::Void => todo!(),
                     Value::Number(_) => todo!(),

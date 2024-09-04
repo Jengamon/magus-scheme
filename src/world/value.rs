@@ -1,17 +1,16 @@
 //! Representation of Scheme values
-use core::fmt;
-use std::{collections::HashMap, rc::Rc};
+use std::collections::HashMap;
 
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 
 use crate::{
-    runtime::{external::ExternalRepresentationVisitor, Environment, EnvironmentPtr},
+    runtime::{external::ExternalRepresentationVisitor, EnvironmentPtr},
     DatumVisitor, ExactReal, Procedure, SchemeNumber,
 };
 
 pub use port::{InputPort, OutputPort, PortType};
 
-use super::userstruct::UserStruct;
+use super::{userstruct::UserStruct, WorldArena};
 
 mod port;
 
@@ -19,12 +18,9 @@ pub type ValuePtr<'gc> = Gc<'gc, RefLock<Value<'gc>>>;
 pub type Integer = i64;
 
 // Type that stores all possible values!
-#[derive(Collect, Clone, Copy, Default, Debug)]
+#[derive(Collect, Clone, Copy, Debug)]
 #[collect(no_drop)]
 pub enum Value<'gc> {
-    // This is the value written as ()
-    #[default]
-    Null,
     // Attempting to access this value is an error
     // (but the binding exists for the purposes of set!)
     // TODO allow syntax-rules special form to define an auxillary macro `undefined`
@@ -41,6 +37,7 @@ pub enum Value<'gc> {
     Symbol(String),
     Bool(bool),
     Char(char),
+    Vector(Vector<'gc>),
     // Strings might not need to be in the GC, so
     // onlu allow interned strings for now
     // GcString(GcString<'gc>),
@@ -56,6 +53,82 @@ pub enum Value<'gc> {
     Error(Gc<'gc, ErrorBox>),
     // TODO records
     // I want to handle userdata the same way as we handle records
+}
+
+pub trait ValueVisitor<'gc> {
+    fn visit_value(&mut self, value: ValuePtr<'gc>) {
+        match *value.borrow() {
+            Value::Undefined => self.visit_undefined(value),
+            Value::Void => self.visit_void(value),
+            Value::Vector(vec) => self.visit_vector(vec, value),
+            Value::Cons(cons) => self.visit_cons(cons, value),
+            Value::Number(int) => self.visit_number(int, value),
+            Value::String(str) => self.visit_string(str, value),
+            Value::Symbol(sym) => self.visit_symbol(sym, value),
+            Value::Bool(bool) => self.visit_bool(bool, value),
+            Value::Char(char) => self.visit_char(char, value),
+            Value::InputPort(inp) => self.visit_input_port(inp, value),
+            Value::OutputPort(oup) => self.visit_output_port(oup, value),
+            Value::Procedure(_proc) => todo!(),
+            Value::Environment(_env) => todo!(),
+            Value::UserStruct(_uss) => todo!(),
+            Value::Error(_err) => todo!(),
+        }
+    }
+
+    fn visit_undefined(&mut self, value: ValuePtr<'gc>) {
+        let _ = value;
+    }
+
+    fn visit_void(&mut self, value: ValuePtr<'gc>) {
+        let _ = value;
+    }
+
+    fn visit_number(&mut self, integer: Integer, value: ValuePtr<'gc>) {
+        let _ = value;
+        _ = integer;
+    }
+
+    fn visit_string(&mut self, string: String, value: ValuePtr<'gc>) {
+        let _ = value;
+        _ = string;
+    }
+
+    fn visit_symbol(&mut self, symbol: String, value: ValuePtr<'gc>) {
+        let _ = value;
+        _ = symbol;
+    }
+
+    fn visit_bool(&mut self, bool: bool, value: ValuePtr<'gc>) {
+        let _ = value;
+        _ = bool;
+    }
+
+    fn visit_char(&mut self, char: char, value: ValuePtr<'gc>) {
+        let _ = value;
+        _ = char;
+    }
+
+    fn visit_input_port(&mut self, input_port: Gc<'gc, InputPort>, value: ValuePtr<'gc>) {
+        let _ = value;
+        _ = input_port;
+    }
+
+    fn visit_output_port(&mut self, output_port: Gc<'gc, OutputPort>, value: ValuePtr<'gc>) {
+        let _ = value;
+        _ = output_port;
+    }
+
+    fn visit_cons(&mut self, cons: ConsCell<'gc>, value: ValuePtr<'gc>) {
+        let _ = value;
+        _ = cons;
+    }
+
+    fn visit_vector(&mut self, vec: Vector<'gc>, value: ValuePtr<'gc>) {
+        let _ = value;
+        _ = vec;
+    }
+    // TODO procedure, environment, userstruct, error
 }
 
 impl<'gc> Value<'gc> {
@@ -112,29 +185,36 @@ pub enum ValueConvertError {
     UnsupportedNumber(SchemeNumber),
 }
 
-pub struct ValueConvert<'gc> {
-    mutation: &'gc Mutation<'gc>,
-    interner: &'gc mut lasso::Rodeo,
+// TODO Use world instead, to allow for WorldRoot::null_val usage (more like Self::ensure_null)
+pub struct ValueConvert<'world, 'gc> {
+    mutation: &'world Mutation<'gc>,
+    interner: &'world mut lasso::Rodeo,
+    arena: &'world WorldArena<'gc>,
     value_stack: Vec<Result<ValuePtr<'gc>, ValueConvertError>>,
     labeled: HashMap<usize, ValuePtr<'gc>>,
 }
 
-impl<'gc> ValueConvert<'gc> {
-    pub fn new(mutation: &'gc Mutation<'gc>, interner: &'gc mut lasso::Rodeo) -> Self {
+impl<'w, 'gc> ValueConvert<'w, 'gc> {
+    pub fn new(
+        mutation: &'w Mutation<'gc>,
+        arena: &'w WorldArena<'gc>,
+        interner: &'gc mut lasso::Rodeo,
+    ) -> Self {
         Self {
             mutation,
             interner,
+            arena,
             value_stack: vec![],
             labeled: HashMap::default(),
         }
     }
 }
 
-impl<'gc> DatumVisitor for ValueConvert<'gc> {
+impl<'w, 'gc> DatumVisitor for ValueConvert<'w, 'gc> {
     // TODO allow source to directly be converted into value
 }
 
-impl<'gc> ExternalRepresentationVisitor for ValueConvert<'gc> {
+impl<'w, 'gc> ExternalRepresentationVisitor for ValueConvert<'w, 'gc> {
     fn visit_number(&mut self, value: crate::SchemeNumber) {
         match value {
             SchemeNumber::Exact(ExactReal::Integer { value, is_neg }) => {
@@ -186,10 +266,50 @@ impl<'gc> GcString<'gc> {
     }
 }
 */
+
+#[derive(Collect, Clone, Copy, Debug)]
+#[collect(no_drop)]
+pub struct Vector<'gc> {
+    pub vec: Gc<'gc, RefLock<Vec<ValuePtr<'gc>>>>,
+}
+
 // Steal a little bit of linked list
 #[derive(Collect, Clone, Copy, Debug)]
 #[collect(no_drop)]
 pub struct ConsCell<'gc> {
-    car: Option<ValuePtr<'gc>>,
-    cdr: Option<ValuePtr<'gc>>,
+    pub car: Option<ValuePtr<'gc>>,
+    pub cdr: Option<ValuePtr<'gc>>,
+}
+
+impl<'gc> ConsCell<'gc> {
+    pub fn empty() -> Self {
+        Self {
+            car: None,
+            cdr: None,
+        }
+    }
+
+    pub(super) fn from_iter<
+        T: IntoIterator<
+            Item = ValuePtr<'gc>,
+            IntoIter = impl DoubleEndedIterator<Item = ValuePtr<'gc>>,
+        >,
+    >(
+        mc: &Mutation<'gc>,
+        iter: T,
+    ) -> Self {
+        let mut iter = iter.into_iter().rev();
+
+        let mut current = ConsCell::empty();
+        while let Some(item) = iter.next() {
+            let new_cell = ConsCell {
+                cdr: Some(Gc::new(mc, RefLock::new(Value::Cons(current)))),
+                car: Some(item),
+            };
+
+            current = new_cell;
+        }
+
+        current
+    }
 }

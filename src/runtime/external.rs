@@ -15,7 +15,10 @@ pub enum ExternalRepresentationKind {
     Symbol(Box<str>),
     // attempting to evaluate this if empty is an error
     // a quote of an empty list evaluates to null
-    List(Vec<ExternalRepresentation>),
+    List {
+        value: Vec<ExternalRepresentation>,
+        has_dot: bool,
+    },
     Vector(Vec<ExternalRepresentation>),
     Bytevector(Vec<u8>),
 }
@@ -31,7 +34,10 @@ pub trait ExternalRepresentationVisitor {
                 ExternalRepresentationKind::String(strg) => self.visit_string(strg.as_ref()),
                 ExternalRepresentationKind::Char(chr) => self.visit_char(*chr),
                 ExternalRepresentationKind::Symbol(sym) => self.visit_symbol(sym.as_ref()),
-                ExternalRepresentationKind::List(lst) => self.visit_list(lst.as_slice()),
+                ExternalRepresentationKind::List {
+                    value: lst,
+                    has_dot,
+                } => self.visit_list(lst.as_slice(), *has_dot),
                 ExternalRepresentationKind::Vector(vec) => self.visit_vector(vec.as_slice()),
                 ExternalRepresentationKind::Bytevector(bytes) => {
                     self.visit_bytevector(bytes.as_slice())
@@ -72,8 +78,9 @@ pub trait ExternalRepresentationVisitor {
         _ = symbol;
     }
 
-    fn visit_list(&mut self, exprs: &[ExternalRepresentation]) {
+    fn visit_list(&mut self, exprs: &[ExternalRepresentation], has_dot: bool) {
         _ = exprs;
+        _ = has_dot;
     }
 
     fn visit_vector(&mut self, exprs: &[ExternalRepresentation]) {
@@ -135,7 +142,10 @@ impl ToExternal for ExternalRepresentation {
 // null is an empty list
 impl ToExternal for () {
     fn to_external(&self) -> ExternalRepresentation {
-        ExternalRepresentation::Simple(ExternalRepresentationKind::List(Vec::new()))
+        ExternalRepresentation::Simple(ExternalRepresentationKind::List {
+            value: Vec::new(),
+            has_dot: false,
+        })
     }
 }
 
@@ -188,7 +198,7 @@ impl<'a> ToExternal for &'a [u8] {
 }
 
 pub enum ListOrVector<'a, T> {
-    List(&'a [T]),
+    List(&'a [T], bool),
     Vector(&'a [T]),
 }
 
@@ -198,9 +208,10 @@ where
 {
     fn to_external(&self) -> ExternalRepresentation {
         ExternalRepresentation::Simple(match self {
-            Self::List(lst) => ExternalRepresentationKind::List(
-                lst.iter().map(|item| item.to_external()).collect(),
-            ),
+            Self::List(lst, dotted) => ExternalRepresentationKind::List {
+                value: lst.iter().map(|item| item.to_external()).collect(),
+                has_dot: *dotted,
+            },
             Self::Vector(vct) => ExternalRepresentationKind::Vector(
                 vct.iter().map(|item| item.to_external()).collect(),
             ),
@@ -252,15 +263,35 @@ impl fmt::Display for ExternalRepresentationKind {
             }
             // please don't use \ as any part of your identifier, it is literally not.
             Self::Symbol(sym) => write!(f, "|{}|", sym.replace('|', "\\|")),
-            Self::List(lst) => {
-                write!(
-                    f,
-                    "({})",
-                    lst.iter()
-                        .map(|ext| ext.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                )
+            Self::List {
+                value: lst,
+                has_dot,
+            } => {
+                if !has_dot {
+                    write!(
+                        f,
+                        "({})",
+                        lst.iter()
+                            .map(|ext| ext.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    )
+                } else {
+                    let list_len = lst.len();
+                    let last_item = lst.last();
+                    write!(
+                        f,
+                        "({} . {})",
+                        lst.iter()
+                            .take(list_len.saturating_sub(1))
+                            .map(|ext| ext.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                        last_item
+                            .map(|ext| ext.to_string())
+                            .unwrap_or(String::new())
+                    )
+                }
             }
             Self::Vector(vec) => {
                 write!(
@@ -293,16 +324,15 @@ impl TryFrom<Datum> for ExternalRepresentation {
     fn try_from(value: Datum) -> Result<Self, Self::Error> {
         if let Some(kind) = value.kind() {
             match kind {
-                DatumKind::List => Ok(ExternalRepresentation::Simple(
-                    ExternalRepresentationKind::List(
-                        value
-                            .as_list()
-                            .unwrap()
-                            .datum()
-                            .filter_map(|dat| dat.try_into().ok())
-                            .collect(),
-                    ),
-                )),
+                DatumKind::List => {
+                    let list = value.as_list().unwrap();
+                    Ok(ExternalRepresentation::Simple(
+                        ExternalRepresentationKind::List {
+                            value: list.datum().filter_map(|dat| dat.try_into().ok()).collect(),
+                            has_dot: list.has_dot(),
+                        },
+                    ))
+                }
                 DatumKind::Bytevector => Ok(ExternalRepresentation::Simple(
                     ExternalRepresentationKind::Bytevector(
                         value.as_bytevector().unwrap().bytes().collect(),
@@ -340,8 +370,8 @@ impl TryFrom<Datum> for ExternalRepresentation {
                         .find_map(|dat| dat.try_into().ok())
                         .ok_or(())?;
                     Ok(ExternalRepresentation::Simple(
-                        ExternalRepresentationKind::List(
-                            [
+                        ExternalRepresentationKind::List {
+                            value: [
                                 ExternalRepresentation::Simple(ExternalRepresentationKind::Symbol(
                                     Box::from(abbrev.kind().ok_or(())?.to_string().as_str()),
                                 )),
@@ -349,7 +379,8 @@ impl TryFrom<Datum> for ExternalRepresentation {
                             ]
                             .into_iter()
                             .collect(),
-                        ),
+                            has_dot: false,
+                        },
                     ))
                 }
                 DatumKind::Symbol => Ok(ExternalRepresentation::Simple(

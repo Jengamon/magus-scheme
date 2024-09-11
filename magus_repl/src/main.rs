@@ -26,11 +26,14 @@ fn main() -> anyhow::Result<()> {
                 "{}",
                 Labeled(
                     0,
-                    ListOrVector::List(&[
-                        StringOrSymbol::Symbol("quote").to_external(),
-                        Label(0).to_external(),
-                        ().to_external()
-                    ])
+                    ListOrVector::List(
+                        &[
+                            StringOrSymbol::Symbol("quote").to_external(),
+                            Label(0).to_external(),
+                            ().to_external()
+                        ],
+                        false
+                    )
                 )
                 .to_external()
             );
@@ -126,6 +129,33 @@ fn repl() -> anyhow::Result<()> {
         // General parse
         let gast = magus::general_parse(&input);
 
+        let idx = LineIndex::new(src);
+
+        let blocks = (!gast.errors().is_empty())
+            .then_some(gast.errors())
+            .map(|errors| {
+                errors.iter().flat_map(|err| {
+                    Block::new(
+                        &idx,
+                        [Label::new(err.span())
+                            .with_text(err.to_string())
+                            .with_style(|s| s.red().to_string())],
+                    )
+                })
+            });
+
+        if let Some(blocks) = blocks {
+            for block in blocks.map(|blk| blk.map_code(|c| CodeWidth::new(c, c.len()))) {
+                println!("{}[repl.scm]", block.prologue());
+                print!("{block}");
+                println!("{}", block.epilogue());
+            }
+        }
+
+        if !gast.errors().is_empty() {
+            continue;
+        }
+
         // Tell me your secrets
         let module = Module::cast(gast.syntax()).unwrap();
 
@@ -193,29 +223,6 @@ fn repl() -> anyhow::Result<()> {
                 println!("{repr}");
             }
         }
-        let idx = LineIndex::new(src);
-
-        let blocks = (!gast.errors().is_empty())
-            .then_some(gast.errors())
-            .map(|errors| {
-                errors.iter().flat_map(|err| {
-                    Block::new(
-                        &idx,
-                        [Label::new(err.span())
-                            .with_text(err.to_string())
-                            .with_style(|s| s.red().to_string())],
-                    )
-                })
-            });
-
-        if let Some(blocks) = blocks {
-            for block in blocks.map(|blk| blk.map_code(|c| CodeWidth::new(c, c.len()))) {
-                println!("{}[repl.scm]", block.prologue());
-                print!("{block}");
-                println!("{}", block.epilogue());
-            }
-        }
-
         let tokens = Token::lexer(src);
 
         for (tok, span) in tokens {

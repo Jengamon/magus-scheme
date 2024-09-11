@@ -615,8 +615,7 @@ impl List {
             .any(|elem| matches!(elem, MagusSyntaxElement::Token(tok) if tok.kind() == DOT))
     }
 
-    /// This only asks if a list is syntactically valid, it does not check if the list should be in
-    /// a certain shape because it is a special form. use [`List::special_form()`] for that
+    /// Checks if a list is syntactically valid.
     pub fn is_valid(&self) -> bool {
         let dot_token = self.0.children_with_tokens().find_map(|elem| match elem {
             MagusSyntaxElement::Token(tok) if tok.kind() == DOT => Some(tok),

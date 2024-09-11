@@ -80,6 +80,7 @@ impl Fuel {
     }
 }
 
+#[expect(unused)]
 pub(crate) fn count_fuel(per_item: i32, count: usize) -> i32 {
     i32::try_from(count)
         .unwrap_or(i32::MAX)

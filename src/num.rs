@@ -39,7 +39,7 @@ impl fmt::Display for SchemeNumber {
             }
             SchemeNumber::Inexact(inex) => write!(f, "#i{inex}"),
             SchemeNumber::InexactComplex { real, imaginary } => {
-                write!(f, "#i{real}{imaginary:#}i")
+                write!(f, "#i{real}{imaginary:+#}i")
             }
         }
     }

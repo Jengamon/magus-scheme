@@ -185,6 +185,7 @@ pub enum ValueConvertError {
     UnsupportedNumber(SchemeNumber),
 }
 
+#[expect(unused)]
 // TODO Use world instead, to allow for WorldRoot::null_val usage (more like Self::ensure_null)
 pub struct ValueConvert<'world, 'gc> {
     mutation: &'world Mutation<'gc>,
@@ -298,10 +299,8 @@ impl<'gc> ConsCell<'gc> {
         mc: &Mutation<'gc>,
         iter: T,
     ) -> Self {
-        let mut iter = iter.into_iter().rev();
-
         let mut current = ConsCell::empty();
-        while let Some(item) = iter.next() {
+        for item in iter.into_iter().rev() {
             let new_cell = ConsCell {
                 cdr: Some(Gc::new(mc, RefLock::new(Value::Cons(current)))),
                 car: Some(item),

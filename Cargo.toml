@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = [".", "magus_repl"]
+members = ["."]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,7 +11,7 @@ name = "magus"
 version.workspace = true
 rust-version.workspace = true
 edition = "2021"
-description = "R7RS-scheme implementation in Rust using gc-arena"
+description = "DSL implementation in Rust for magicflute"
 
 [[test]]
 name = "frontend_datatest"
@@ -20,7 +20,7 @@ harness = false
 [dependencies]
 arbitrary = { version = "1", features = ["derive"] }
 gc-arena = { git = "https://github.com/kyren/gc-arena", rev = "5a7534b883b703f23cfb8c3cfdf033460aa77ea9" }
-icu_casemap = "1.5.1"
+icu_casemap = "1.5"
 lasso = { version = "0.7.2" }
 logos = { version = "0.14.1" }
 # petgraph = "0.6.5"

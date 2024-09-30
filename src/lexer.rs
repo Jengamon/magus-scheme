@@ -427,12 +427,10 @@ fn read_number(
                             };
                         }
                         Some('i' | 'I') if is_imaginary => {
-                            // b/c of how we parse/detect imaginary numbers, is_neg_state will always be set
-                            // when encountering an imaginary number
-                            assert!(is_neg_state.is_some());
+                            let _ = iter.next();
                             return Ok(ExactReal::Integer {
                                 value: number_state.unwrap(),
-                                is_neg: is_neg_state.unwrap(),
+                                is_neg: is_neg_state.unwrap_or(false),
                             });
                         }
                         Some(c) if c.is_digit(radix) => {
@@ -616,14 +614,33 @@ fn read_number(
                 })
             }
             Some(_) => Err(LexerError::MalformedNumber)?,
-            None if !just_imaginary => Ok(SchemeNumber::Exact(real_part)),
-            None => Ok(SchemeNumber::ExactComplex {
-                real: ExactReal::Integer {
-                    value: 0,
-                    is_neg: false,
-                },
-                imaginary: real_part,
-            }),
+            None if !just_imaginary => match real_part {
+                // If the written representation of a number has no exactness prefix,
+                // the constant is inexact if it contains a decimal point or an exponent.
+                // Otherwise, it is exact.
+                deci @ ExactReal::Decimal { .. } if !contains_flag('e') => {
+                    Ok(SchemeNumber::Inexact(deci.inexact()))
+                }
+                _ => Ok(SchemeNumber::Exact(real_part)),
+            },
+            None => match real_part {
+                // If the written representation of a number has no exactness prefix,
+                // the constant is inexact if it contains a decimal point or an exponent.
+                // Otherwise, it is exact.
+                deci @ ExactReal::Decimal { .. } if !contains_flag('e') => {
+                    Ok(SchemeNumber::InexactComplex {
+                        real: 0.,
+                        imaginary: deci.inexact(),
+                    })
+                }
+                _ => Ok(SchemeNumber::ExactComplex {
+                    real: ExactReal::Integer {
+                        value: 0,
+                        is_neg: false,
+                    },
+                    imaginary: real_part,
+                }),
+            },
         }
     } else {
         // we handle !contains_flag e and contains_flag i
@@ -699,7 +716,7 @@ impl NestedCommentToken {
     }
 }
 
-/// Tokens are lexed from some source, and can arbitrarily borrow from it.
+/// Tokens corresponding to general Scheme code
 #[derive(Debug, Clone, PartialEq, Logos, Arbitrary)]
 #[logos(error = LexerError)]
 pub enum SyntaxToken {
@@ -757,7 +774,7 @@ pub enum SyntaxToken {
     #[regex(r"#?\\[a-zA-Z]+", priority = 2, callback = process_named_character)]
     #[regex(r"(?i)#?\\x[0-9a-f]+", callback = process_hex_character)]
     Character(char),
-    #[regex(r#""([^\\"]|\\[abntr"\\xX])*""#, process_string)]
+    #[regex(r#""([^\\"]|\\[abntr"\\xX]|\\[ \n\t\r]+)*""#, process_string)]
     String(Box<str>),
 
     // The number tower is supported at least by the lexer (and currently is mostly rejected by the general parser)
@@ -979,7 +996,7 @@ mod tests {
     fn test_number_arbtest_decimal() {
         arbtest(|u| {
             let number: ExactReal = u.arbitrary()?;
-            let decimal = number.display(10).unwrap();
+            let decimal = format!("#e{}", number.display(10).unwrap());
             check!(
                 SyntaxToken::lexer(&decimal).next()
                     == Some(Ok(SyntaxToken::Number(SchemeNumber::Exact(number)))),
@@ -1004,7 +1021,7 @@ mod tests {
             }
             let im: ExactReal = u.arbitrary()?;
             let im_decimal = format!(
-                "{}{}{}i",
+                "#e{}{}{}i",
                 number.display(10).unwrap(),
                 if im.is_numeric() && !im.is_neg() {
                     "+"

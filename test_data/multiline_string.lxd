@@ -1,0 +1,8 @@
+---
+[0..92] Syntax(String("This is a cool string which is split\t over multiple lines of text"))
+---
+"This is a cool string \
+	which is \    split\t over \
+	
+	multiple lines \x6f;\x66; \
+	text"

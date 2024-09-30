@@ -4,18 +4,35 @@
 use core::fmt;
 use std::collections::HashMap;
 
-use crate::general_parser::Module;
+use gc_arena::{Arena, Collect, Gc, Mutation, RefLock, Rootable, Static};
+use value::{ConsCell, Value, ValuePtr, ValueVisitor, Vector};
 
-pub(crate) struct InternalModule {
-    module: Module,
-    filename: lasso::Spur,
-}
+use crate::{
+    general_parse, general_parser::GeneralParserError, runtime::interpreter::Interpreter,
+    GAstNode as _, Module,
+};
 
-impl InternalModule {
-    pub fn filename_spur(&self) -> lasso::Spur {
-        self.filename
-    }
-}
+/*
+macros and special forms are defined here:
+special forms are macros that have access to the source of their expansion
+and are given in their own unique environment with access to their parent environment
+
+macros resemble piccolo::Sequences in that they must be resumable, but are
+simpler in that they only have 3 returns:
+Ok(Evaluating) - macro ran out of fuel for expansion, is interacting with something, etc.
+Ok(List) - the list this macro should expand into, to be
+Err(MacroError) - this macro failed evaluation for some reason
+
+so yeah it's basically a future.
+TODO Rip off piccolo::UserData (but w/o metatable stuff)
+for UserStruct, then store macros and special forms in the environment
+using that!
+*/
+
+pub mod any;
+pub mod fuel;
+pub mod userstruct;
+pub mod value;
 
 #[derive(Hash, Debug, Clone, PartialEq, Eq)]
 struct InternalLibraryName(Box<[lasso::Spur]>);
@@ -63,35 +80,119 @@ impl<T: IntoIterator<Item = impl AsRef<str>>> From<T> for LibraryName {
     }
 }
 
-// TODO rework runtime system using piccolo's stashing b/c
-// runtimes have to go *inside* the arena, as they can hold GC data.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Collect)]
+#[collect(require_static)]
 pub struct RuntimeKey(usize);
 
-#[derive(Default)]
+// the runtime representation of library definitions.
+// all exports, imports should be defined,
+// and whether the body is Scheme source to be executed or a native definition
+// of runtime objects
+#[derive(Debug, Collect)]
+#[collect(no_drop)]
+pub struct SchemeLibrary<'gc> {
+    items: HashMap<Box<str>, ValuePtr<'gc>>,
+}
+
+impl<'gc> SchemeLibrary<'gc> {
+    pub fn exports(&self) -> &HashMap<Box<str>, ValuePtr<'gc>> {
+        &self.items
+    }
+}
+
+#[derive(Collect)]
+#[collect(no_drop)]
+pub struct WorldArena<'gc> {
+    pub(crate) interpreters: HashMap<RuntimeKey, Gc<'gc, RefLock<Interpreter<'gc>>>>,
+
+    // value that is (eq? '())
+    pub(crate) null_val: ValuePtr<'gc>,
+
+    /// libraries that can be imported from
+    libraries: HashMap<Static<InternalLibraryName>, SchemeLibrary<'gc>>,
+}
+pub(crate) type WorldRoot = Arena<Rootable![WorldArena<'_>]>;
+
+impl<'gc> WorldArena<'gc> {
+    pub fn null(&self) -> ValuePtr<'gc> {
+        self.null_val
+    }
+
+    pub fn from_iter<
+        T: IntoIterator<
+            Item = ValuePtr<'gc>,
+            IntoIter = impl DoubleEndedIterator<Item = ValuePtr<'gc>>,
+        >,
+    >(
+        &self,
+        mc: &Mutation<'gc>,
+        iter: T,
+    ) -> ValuePtr<'gc> {
+        match ConsCell::from_iter(mc, iter) {
+            ConsCell {
+                car: None,
+                cdr: None,
+            } => self.null_val,
+            cons => {
+                let ptr = Gc::new(mc, RefLock::new(Value::Cons(cons)));
+                Self::ensure_null(self, mc, ptr);
+                ptr
+            }
+        }
+    }
+
+    // Convert ConsCell [ None None ] to root null_val
+    pub fn ensure_null(&self, mc: &Mutation<'gc>, value_ptr: ValuePtr<'gc>) {
+        let mut ensure_null = EnsureNullVisitor {
+            mutation: mc,
+            null: &self.null_val.borrow(),
+        };
+        ensure_null.visit_value(value_ptr);
+    }
+}
+
+struct EnsureNullVisitor<'a, 'gc> {
+    mutation: &'a Mutation<'gc>,
+    null: &'a Value<'gc>,
+}
+
+impl<'a, 'gc> ValueVisitor<'gc> for EnsureNullVisitor<'a, 'gc> {
+    fn visit_cons(&mut self, cons: ConsCell<'gc>, value: ValuePtr<'gc>) {
+        if cons.car.is_none() && cons.cdr.is_none() {
+            *value.unlock(self.mutation).borrow_mut() = *self.null;
+            return;
+        }
+
+        if let Some(car) = cons.car {
+            self.visit_value(car);
+        }
+
+        if let Some(cdr) = cons.cdr {
+            self.visit_value(cdr);
+        }
+    }
+
+    fn visit_vector(&mut self, vec: value::Vector<'gc>, _value: ValuePtr<'gc>) {
+        for elem in vec.vec.borrow().iter() {
+            self.visit_value(*elem)
+        }
+    }
+}
+
 pub struct World {
     // TODO Make World also have the gc-arenas for values and rc-refcell (hashmap?) for runtimes
     // so that runtimes can be interacted with stashed.
     // a world is the technical definition of our entire Scheme environment, so this
     // should be ok!
     // FIXME look at how piccolo does stashing
-    runtimes: HashMap<RuntimeKey, ()>,
+    // INFO actually maybe not? let's see??
+    root: WorldRoot,
+    pub(crate) rodeo: lasso::Rodeo,
     /// interner
-    rodeo: lasso::Rodeo,
-    /// scripts that can be requested for execution
+    /// scripts that can be "included" in execution
     // TODO switch to hashbrown or ahash? might be faster maybe probably?
     // we use Spurs b/c we have the interner
-    modules: HashMap<lasso::Spur, InternalModule>,
-    /// libraries that can be imported from
-    libraries: HashMap<InternalLibraryName, SchemeLibrary>,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum LoadSourceError {
-    #[error("invalid general AST")]
-    InvalidGAst,
-    #[error("library already exists: {0}")]
-    LibraryAlreadyExists(LibraryName),
+    pub(crate) modules: HashMap<lasso::Spur, InternalModule>,
 }
 
 impl World {
@@ -117,38 +218,132 @@ impl World {
         )
     }
 
-    pub fn library(&self, name: impl Into<LibraryName>) -> Option<&SchemeLibrary> {
-        self.libraries.get(&self.library_name(name.into().name())?)
+    /// include source as something that can be included using `include` or `include-ci`
+    ///
+    /// these are *not* allowed to conflict with loaded source filenames
+    pub fn include_sources(
+        &mut self,
+        includes: impl IntoIterator<Item = SourceBundle>,
+    ) -> Result<(), IncludeSourceError> {
+        // we don't define any libraries from these sources, so they *aren't*
+        // allowed to define any libraries (using define-library at the top level
+        // before any other statement (where they would be fine in a load_sources)
+        // is an *error* here)
+        //
+        // (well, we *do* allow lists in the shape of (define-library ...), but
+        // only if they can never be confused with a load_source's library definition)
+
+        todo!()
     }
 
-    pub fn load_source(
+    pub fn load_sources(
         &mut self,
-        filename: impl AsRef<str>,
-        module: Module,
-    ) -> Result<(), LoadSourceError> {
-        // TODO Detect if a given GAst is a library or a program by checking:
-        // Libraries are scheme files where the only top-level datum is a s-expr where the first element is "define-library"
-        //
-        // parser might be a misnomer, and instead should be "evaluator" b/c it is when it comes to evaluation time
-        // that understanding what macros are defined in what order is extremely useful.
-        //
-        // NOTE Nahh looking at the chibi-scheme codebase, it seems that libraries are their own separate files (*.sld)
-        // that can (include ...) source files if they so please, so this will be our pattern too (except we'll just have *-lib.scm files)
-        //
+        source: impl IntoIterator<Item = SourceBundle>,
+    ) -> Result<Vec<LibraryName>, LoadSourceError> {
         // NOTE Actually we will allow multiple libraries within a module, but
         // all libraries *must* precede any part of the program
+        // let filename = self.rodeo.get_or_intern(filename.as_ref());
+        // let mut module_datum = module.datum().peekable();
+        // store the parsed library data (the decls, as well as the vec of Datum within Begin forms)
+        let mut library_data = Vec::<()>::new();
+
+        // TODO actually collect the export/import decls per-library, and if all
+        // imports exist before this library decl is encountered, then
+        // interpret the declarations to completion (technically i32::MAX)
+        // and store the results in the world root
+
+        // we load a bunch of sources together
+        // strip out and separate the defined libraries, then
+        // for include, include-ci, and include-library-definitions (which is *not* a special form)
+        // all reference files can only be referenced in the same iterator or a previous
+        // load_sources call
+        // collect the remaining datum into a program
+        // return the library names registered (if any)
         todo!()
     }
 }
 
-// there is only 1 s-exp in the GAst, and it has "define-library" as it's first element. "(define-library ...)"
-// FIXME Make this more of a "parsed" library, with the nodes separated into groups like "body", "imports", "exports" etc.
-// and a source location
-// (how I wiss traits had narrowing...)
+impl Default for World {
+    fn default() -> Self {
+        Self {
+            root: WorldRoot::new(|mc| WorldArena {
+                interpreters: HashMap::new(),
+                // this value
+                null_val: ValuePtr::new(mc, RefLock::new(Value::Cons(ConsCell::empty()))),
+                libraries: HashMap::default(),
+            }),
+            modules: HashMap::default(),
+            rodeo: lasso::Rodeo::default(),
+        }
+    }
+}
+
 #[derive(Debug)]
-pub enum SchemeLibrary {
-    Scheme { filename: lasso::Spur, data: () },
-    Native(()),
+pub struct SourceBundle {
+    pub filename: Box<str>,
+    pub case_insensitive: bool,
+    pub module: Module,
+}
+
+pub(crate) struct InternalModule {
+    module: Module,
+    filename: lasso::Spur,
+}
+
+impl InternalModule {
+    pub fn filename_spur(&self) -> lasso::Spur {
+        self.filename
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("{} errors in {filename}", errors.len())]
+pub struct SourceBundleError {
+    pub filename: Box<str>,
+    pub code: Box<str>,
+    pub errors: Vec<GeneralParserError>,
+}
+
+impl SourceBundle {
+    pub fn new(
+        filename: impl AsRef<str>,
+        source: impl AsRef<str>,
+        case_insensitive: bool,
+    ) -> Result<Self, SourceBundleError> {
+        let filename = Box::from(filename.as_ref());
+        let source = source.as_ref();
+        let gparse = general_parse(source);
+        if !gparse.errors().is_empty() {
+            let errors = gparse.into_errors();
+            let code = Box::from(source);
+            Err(SourceBundleError {
+                code,
+                errors,
+                filename,
+            })
+        } else {
+            // if no errors, (well, even if errors)
+            // casting the root syntax node (the one returned by GAst::syntax)
+            // and unwrapping it is always safe
+            Ok(Self {
+                filename,
+                case_insensitive,
+                module: Module::cast(gparse.syntax()).unwrap(),
+            })
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum LoadSourceError {
+    #[error("library already exists: {0}")]
+    LibraryAlreadyExists(LibraryName),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum IncludeSourceError {
+    #[error("attempted to define library: {0}")]
+    DefineLibrary(LibraryName),
 }
 
 #[cfg(test)]

@@ -160,11 +160,9 @@ impl<'gc> Interpreter<'gc> {
                     // symbol means to look up the value in the current environment, and
                     // put *that* into the return register (does *not* execute cons-cells!)
                     Value::Symbol(_) => todo!(),
-                    // There are 2 forms of executable lists:
+                    // There is 1 form of executable list:
                     // after macro expansion
                     // - initial item is a *Procedure*. the args are evaluated and passed into the procedure as a continuation.
-                    // - initial item is a symbol, in which case the value of the symbol is looked up in the environment
-                    // and must be a Procedure for execution.
                     // - initial item is the symbol "begin", where there is special handling for the fact that begin is
                     // a sequence
                     Value::Cons(cons) => {

@@ -279,7 +279,7 @@ pub enum CallbackReturn<'gc> {
     Continuation(Continuation<'gc>),
     /// Evaluate the top of the stack in the given environment
     /// and push its return value to our stack
-    Eval(Option<EnvironmentPtr<'gc>>),
+    Call(Option<EnvironmentPtr<'gc>>),
 }
 type CallbackResult<'gc> = Result<CallbackReturn<'gc>, Error<'gc>>;
 

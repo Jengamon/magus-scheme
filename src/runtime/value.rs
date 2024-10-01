@@ -5,13 +5,13 @@ use std::string::String as StdString;
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 
 use crate::{
-    runtime::{external::ExternalRepresentationVisitor, EnvironmentPtr},
-    DatumVisitor, ExactReal, Procedure, SchemeNumber,
+    compiler::environment::EnvironmentPtr, DatumVisitor, ExactReal, ExternalRepresentationVisitor,
+    SchemeNumber,
 };
 
 pub use port::{InputPort, OutputPort, PortType};
 
-use super::{userstruct::UserStruct, WorldArena};
+use super::{userstruct::UserStruct, RuntimeArena};
 
 mod port;
 
@@ -48,12 +48,16 @@ pub enum Value<'gc> {
 
     Cons(ConsCell<'gc>),
     // Represents something runnable
-    Procedure(Gc<'gc, Procedure<'gc>>),
-    Environment(EnvironmentPtr<'gc>),
+    // Procedure(Gc<'gc, Procedure>),
+    // Environment(EnvironmentPtr<'gc>),
     UserStruct(UserStruct<'gc>),
+    // QUESTION Move from ErrorBox to an Any based pointer that
+    // can specify predicate type (read-error?, file-error?, etc.)
     Error(Gc<'gc, ErrorBox>),
     // TODO records
     // I want to handle userdata the same way as we handle records
+    // TODO syntax-rules (transformers)
+    Transformer(()),
 }
 
 pub trait ValueVisitor<'gc> {
@@ -70,10 +74,11 @@ pub trait ValueVisitor<'gc> {
             Value::Char(char) => self.visit_char(char, value),
             Value::InputPort(inp) => self.visit_input_port(inp, value),
             Value::OutputPort(oup) => self.visit_output_port(oup, value),
-            Value::Procedure(_proc) => todo!(),
-            Value::Environment(_env) => todo!(),
+            // Value::Procedure(_proc) => todo!(),
+            // Value::Environment(_env) => todo!(),
             Value::UserStruct(_uss) => todo!(),
             Value::Error(_err) => todo!(),
+            Value::Transformer(_trans) => todo!(),
         }
     }
 
@@ -129,7 +134,7 @@ pub trait ValueVisitor<'gc> {
         let _ = value;
         _ = vec;
     }
-    // TODO procedure, environment, userstruct, error
+    // TODO procedure, environment, userstruct, error, transformer
 }
 
 impl<'gc> Value<'gc> {
@@ -191,7 +196,7 @@ pub enum ValueConvertError {
 pub struct ValueConvert<'world, 'gc> {
     mutation: &'world Mutation<'gc>,
     interner: &'world mut lasso::Rodeo,
-    arena: &'world WorldArena<'gc>,
+    arena: &'world RuntimeArena<'gc>,
     value_stack: Vec<Result<ValuePtr<'gc>, ValueConvertError>>,
     labeled: HashMap<usize, ValuePtr<'gc>>,
 }
@@ -199,7 +204,7 @@ pub struct ValueConvert<'world, 'gc> {
 impl<'w, 'gc> ValueConvert<'w, 'gc> {
     pub fn new(
         mutation: &'w Mutation<'gc>,
-        arena: &'w WorldArena<'gc>,
+        arena: &'w RuntimeArena<'gc>,
         interner: &'gc mut lasso::Rodeo,
     ) -> Self {
         Self {

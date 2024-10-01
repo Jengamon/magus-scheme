@@ -1,375 +1,186 @@
-//! runtimes are responsible for reading worlds and executing on its contents (relative to a specific program)
+//! This is the runtime used to execute the R5RS-based script
 
 use core::fmt;
-use std::{
-    cell::{Ref, RefCell, RefMut},
-    collections::HashMap,
-    rc::Rc,
-};
+use std::collections::HashMap;
 
-use gc_arena::{Collect, Gc, Mutation, RefLock};
-use interpreter::Continuation;
-use lasso::Rodeo;
+use gc_arena::{Arena, Collect, Gc, Mutation, RefLock, Rootable, Static};
+use value::{ConsCell, Value, ValuePtr, ValueVisitor, Vector};
 
 use crate::{
-    value::ErrorBox,
-    world::{
-        value::{Value, ValuePtr},
-        WorldArena,
-    },
-    Fuel,
+    general_parse,
+    general_parser::{gast, GeneralParserError},
+    ContainsDatum, Datum, GAstNode as _, Module,
 };
 
-pub mod external;
-pub mod interpreter;
-pub mod scheme_base;
-
-// First implement a treewalk interpreter that gets the sematics of Scheme correct, then
-// start using this as we start a VM to make it faster (?).
-
-/// Errors as held in the program
-#[derive(Collect, Clone, Copy, Debug)]
-#[collect(no_drop)]
-pub enum Error<'gc> {
-    Value(ValuePtr<'gc>),
-    Static(Gc<'gc, ErrorBox>),
-}
-
-// It is up to runtimes to implement procedures
-#[derive(Collect, Debug, Clone)]
-#[collect(no_drop)]
-pub enum Procedure<'gc> {
-    Code(Lambda<'gc>),
-    Native(NativeProcedure),
-}
-
-impl<'gc> Procedure<'gc> {
-    // report the arity of a procedure
-    pub fn arity(&self) -> Arity {
-        match self {
-            Self::Code(code) => {
-                _ = code;
-                todo!("report arity for code blocks")
-            }
-            Self::Native(nat) => nat.0.borrow().arity(),
-        }
-    }
-}
-
 /*
-    (+ (+ 1 2) 3)
+macros and special forms are defined here:
+special forms are macros that have access to the source of their expansion
+and are given in their own unique environment with access to their parent environment
 
-    we should transform this into
+macros resemble piccolo::Sequences in that they must be resumable, but are
+simpler in that they only have 3 returns:
+Ok(Evaluating) - macro ran out of fuel for expansion, is interacting with something, etc.
+Ok(List) - the list this macro should expand into, to be
+Err(MacroError) - this macro failed evaluation for some reason
 
-    evaluate + -> a
-    evaluate + -> b
-    evaluate 1 -> c
-    evaluate 2 -> d
-    call top 3
-    evaluate 3 -> e
-    call top 3
-    result last value on stack
+so yeah it's basically a future.
+TODO Rip off piccolo::UserData (but w/o metatable stuff)
+for UserStruct, then store macros and special forms in the environment
+using that!
 */
 
-#[derive(Collect, Debug, Clone, Copy, PartialEq, Eq)]
+pub mod any;
+pub mod fuel;
+pub mod userstruct;
+pub mod value;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Collect)]
 #[collect(require_static)]
-pub(crate) struct InternedFilename(pub(crate) lasso::Spur);
-
-/// A list to be executed
-#[derive(Debug, Clone, Collect)]
-#[collect(no_drop)]
-pub struct Lambda<'gc> {
-    pub(crate) repr: Vec<ValuePtr<'gc>>,
-    // TODO Store arity information
-    // for now, just using Arity
-    pub(crate) arity: Arity,
-    // list the source(s) of this lambda
-    pub(crate) sources: Box<(InternedFilename, (usize, usize))>,
-    /*
-        we use a frames and jumps addressing system:
-        elements in each list are enumerated, and then
-        the length of each list is calculated, so
-        ( + (+ x y) z w)
-        as these numbers
-        ( 0 (1 2 3) 4 5)
-        and jumps are recorded where lists end with a count to consume, so
-        the jumps for this are (3, 3) (4, 4) meaning after pushing the value of
-        y to the stack, evaluate the top 3 items (bottom is always a procedure if correct)
-        then after evaluating w evaluate the top 4 items
-    */
-}
-
-// TODO Display impl
-
-impl<'gc> Lambda<'gc> {}
-
-#[derive(Collect, Clone)]
-#[collect(require_static)]
-pub struct NativeProcedure(Rc<RefCell<dyn Callback>>);
-impl<T: Callback + 'static> From<T> for NativeProcedure {
-    fn from(value: T) -> Self {
-        Self(Rc::new(RefCell::new(value)))
-    }
-}
-
-impl fmt::Debug for NativeProcedure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(name) = self.0.borrow().name() {
-            write!(f, "#<procedure {name} {:p}>", self.0)
-        } else {
-            write!(f, "#<procedure {:p}>", self.0)
-        }
-    }
-}
-
-// TODO Rework this as we have to make this interruptable b/c
-// fuel can run out at any time. but we *only* make it interruptable
-// NOTE Error mechanism? Not natively, entirely handled by the Interpreter.
-// Native code can *raise* an error tho.
-
-// TODO make more involved, so that this can be the type stored in Value
-// for `environment`
-// TODO Allow for "frozen" environments to implement `environment` b/c
-// "The bindings of the environment represented by the specifier are immutable, as is the environment itself."
-// It should interact with set!, define, and friends to prevent any modification of the environment.
-/// Environemnts define the context for execution, with variable mappings
-/// macro definitions, and up to 1 reference to a parent environment
-#[derive(Collect, Debug, Clone, Copy)]
-#[collect(no_drop)]
-pub struct Environment<'gc> {
-    parent: Option<EnvironmentPtr<'gc>>,
-    inner: Gc<'gc, RefLock<EnvironmentInner<'gc>>>,
-    /// This will make all [`Self::define`]s fail as it makes the
-    /// bindings immutable
-    is_frozen: bool,
-}
-pub type EnvironmentPtr<'gc> = Gc<'gc, RefLock<Environment<'gc>>>;
-
-#[derive(thiserror::Error, Debug)]
-#[error("environment is frozen")]
-pub struct FrozenError;
-
-impl<'gc> Environment<'gc> {
-    pub fn new(mc: &Mutation<'gc>, parent: Option<EnvironmentPtr<'gc>>) -> Self {
-        Self {
-            parent,
-            inner: Gc::new(
-                mc,
-                RefLock::new(EnvironmentInner {
-                    values: HashMap::default(),
-                }),
-            ),
-            is_frozen: false,
-        }
-    }
-
-    /// Sets the frozen flag. This is not a reversible operation.
-    pub fn freeze(&mut self, mc: &Mutation<'gc>) {
-        self.is_frozen = true;
-        for binding in self.inner.borrow_mut(mc).values.values_mut() {
-            binding.is_frozen = true;
-        }
-    }
-
-    pub fn get(&self, name: impl AsRef<str>) -> Option<Binding<'gc>> {
-        if let Some(value) = self.inner.borrow().values.get(name.as_ref()) {
-            Some(*value)
-        } else if let Some(parent) = self.parent {
-            parent.borrow().get(name)
-        } else {
-            None
-        }
-    }
-
-    /// Creates a new binding in the current environment, replacing any binding that might already exist
-    /// which is returned is successful.
-    ///
-    /// Fails if the environment the definition is attempted in is frozen
-    pub fn define(
-        &mut self,
-        mc: &Mutation<'gc>,
-        name: impl AsRef<str>,
-        value: ValuePtr<'gc>,
-        is_frozen: bool,
-    ) -> Result<Option<Binding<'gc>>, FrozenError> {
-        self.is_frozen
-            .then(|| {
-                self.inner
-                    .borrow_mut(mc)
-                    .values
-                    .insert(Box::from(name.as_ref()), Binding { value, is_frozen })
-            })
-            .ok_or(FrozenError)
-    }
-}
-
-#[derive(Collect, Debug, Clone)]
-#[collect(no_drop)]
-struct EnvironmentInner<'gc> {
-    pub values: HashMap<Box<str>, Binding<'gc>>,
-}
-
-/// Represents the value at a certain location in an environment.
-///
-/// A particular binding can be frozen to make sure that no change of its held value
-/// is made through it.
-#[derive(Collect, Debug, Clone, Copy)]
-#[collect(no_drop)]
-pub struct Binding<'gc> {
-    value: ValuePtr<'gc>,
-    is_frozen: bool,
-}
-
-impl<'gc> Binding<'gc> {
-    pub fn read<T>(&self, func: impl FnOnce(Ref<Value<'gc>>) -> T) -> T {
-        func(self.value.borrow())
-    }
-
-    pub fn write<T>(
-        &self,
-        mc: &Mutation<'gc>,
-        func: impl FnOnce(RefMut<Value<'gc>>) -> T,
-    ) -> Option<T> {
-        if self.is_frozen {
-            None
-        } else {
-            Some(func(self.value.borrow_mut(mc)))
-        }
-    }
-}
-
-/// Procedure arity
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Collect)]
-#[collect(require_static)]
-pub enum Arity {
-    Exact(usize),
-    Min(usize),
-}
-
-impl Arity {
-    pub fn is_satisfied(&self, len: usize) -> bool {
-        match self {
-            Self::Exact(e) => *e == len,
-            Self::Min(m) => *m <= len,
-        }
-    }
-}
-
-// macros interact with code before it is evaluated,
-// and have a fresh environment for executing the code it generates
-// (they *have* to be hygenic, how do we do?)
-// (maybe macros can "insert" an environment and evaluate code in different contexts?)
-// NOTE hygenic macros means that macros are always evaluated in the context they are
-// defined in (see README for notes)
-// (we maybe can think of macros as functions that operate on lists)
-// callback are done after and thus can interact with its surrounding environment
-
-/// A native callback is quite simple: it must map from
-/// a Vec<Value<'gc>> -> Result<Value<'gc>, Error<'gc>> in essence
-// lovely thing about scheme: Native code cannot make calls, they can only return a callable
-// the other code might call, or not.
-// Callbacks are essentially CPS procedures
-
-pub enum CallbackReturn<'gc> {
-    /// Suspend this call, and return to the main loop
-    Suspend,
-    /// Return the value at the top of the stack
-    Return,
-    /// Escape the current continuation into the given continuation
-    Continuation(Continuation<'gc>),
-    /// Evaluate the top of the stack in the given environment
-    /// and push its return value to our stack
-    Call(Option<EnvironmentPtr<'gc>>),
-}
-type CallbackResult<'gc> = Result<CallbackReturn<'gc>, Error<'gc>>;
-
-// TODO Prolly make this more Sequence-like...
-// so that they can freely call back into Interpreter code...
-// this is done by providing a stack, and having returns simply indicate actions
-// to make
-pub trait Callback {
-    fn name(&self) -> Option<&str> {
-        None
-    }
-
-    fn arity(&self) -> Arity;
-
-    fn call<'gc>(
-        &mut self,
-        mc: &Mutation<'gc>,
-        arena: &WorldArena,
-        rodeo: &mut Rodeo,
-        // continuation: Gc<'gc, Procedure>,
-        // give access to the continuation *and*
-        // environment (and possibly setting stuff in the environment)
-        // b/c of this, fuel manipulation/interrupting
-        // and changing the continuation can be handled by the interpreter's
-        // public interface
-        // interpreter: &'gc Interpreter<'gc>,
-        // stack starts with the arguments on it
-        continuation: &Continuation<'gc>,
-        fuel: &mut Fuel,
-    ) -> CallbackResult<'gc>;
-}
+pub struct RuntimeKey(usize);
 
 #[derive(Collect)]
 #[collect(no_drop)]
-pub enum MacroReturn<'gc> {
-    /// Evaluate a value in the environment of this macro's invocation,
-    /// or a given environment, then return to this macro
-    Eval(Option<EnvironmentPtr<'gc>>),
-    /// Rewrite this macro's invocation into the value at the top of
-    /// the stack
-    Rewrite,
-}
+pub struct RuntimeArena<'gc> {
+    // pub(crate) interpreters: HashMap<RuntimeKey, Gc<'gc, RefLock<Interpreter<'gc>>>>,
 
-pub trait Macro {
-    fn rewrite<'gc>(
-        &mut self,
+    // value that is (eq? '())
+    pub(crate) null_val: ValuePtr<'gc>,
+}
+pub(crate) type RuntimeRoot = Arena<Rootable![RuntimeArena<'_>]>;
+
+impl<'gc> RuntimeArena<'gc> {
+    pub fn null(&self) -> ValuePtr<'gc> {
+        self.null_val
+    }
+
+    pub fn from_iter<
+        T: IntoIterator<
+            Item = ValuePtr<'gc>,
+            IntoIter = impl DoubleEndedIterator<Item = ValuePtr<'gc>>,
+        >,
+    >(
+        &self,
         mc: &Mutation<'gc>,
-        arena: &WorldArena,
-        rodeo: &mut Rodeo,
-        // environment this macro is being invoked in
-        environment: EnvironmentPtr<'gc>,
-        // starts with unevaluated inputs
-        stack: &'gc mut Vec<ValuePtr<'gc>>,
-    ) -> Result<MacroReturn<'gc>, Error<'gc>>;
-}
-
-/*
-so that:
-pub struct CallWithCurrentContinuation;
-impl Callback for CallWithCurrentContinuation {
-    fn name(&self) -> Option<&str> { Some("call-with-current-continuation") }
-    fn arity(&self) -> Arity { Arity::Exact(1) }
-    fn call<'gc>(
-        &mut self,
-        environment: Environment<'gc>,
-        interner: &mut Rodeo,
-        continuation: Gc<'gc, Continuation>,
-        fuel: &mut Fuel,
-        args: Arguments<'gc>,
-    ) -> Result<(CallbackResult<'gc>, Option<Continuation>), Error<'gc>> {
-        #[derive(thiserror::Error, Debug)]
-        enum CallCcError {
-            #[error("cannot call a non-procedure")]
-            NoProc,
-            #[error("procedure must have exactly 1 argument")]
-            ProcArgs,
-        }
-
-        let [Value::Procedure(proc)] = args.force_arity::<1>()? else {
-            return Err(CallCcError::NoProc)?;
-        };
-
-        // the proc must have exactly 1 argument: the continuation
-        if proc.arity() == Arity::Exact(1) {
-            Ok((CallbackReturn::Value(Value::Procedure(
-continuation.procedure()
-
-            )), proc.into()))
-        } else {
-            Err(CallCcError::ProcArgs)?
+        iter: T,
+    ) -> ValuePtr<'gc> {
+        match ConsCell::from_iter(mc, iter) {
+            ConsCell {
+                car: None,
+                cdr: None,
+            } => self.null_val,
+            cons => {
+                let ptr = Gc::new(mc, RefLock::new(Value::Cons(cons)));
+                Self::ensure_null(self, mc, ptr);
+                ptr
+            }
         }
     }
-}*/
+
+    // Convert ConsCell [ None None ] to root null_val
+    pub fn ensure_null(&self, mc: &Mutation<'gc>, value_ptr: ValuePtr<'gc>) {
+        let mut ensure_null = EnsureNullVisitor {
+            mutation: mc,
+            null: &self.null_val.borrow(),
+        };
+        ensure_null.visit_value(value_ptr);
+    }
+}
+
+struct EnsureNullVisitor<'a, 'gc> {
+    mutation: &'a Mutation<'gc>,
+    null: &'a Value<'gc>,
+}
+
+impl<'a, 'gc> ValueVisitor<'gc> for EnsureNullVisitor<'a, 'gc> {
+    fn visit_cons(&mut self, cons: ConsCell<'gc>, value: ValuePtr<'gc>) {
+        if cons.car.is_none() && cons.cdr.is_none() {
+            *value.unlock(self.mutation).borrow_mut() = *self.null;
+            return;
+        }
+
+        if let Some(car) = cons.car {
+            self.visit_value(car);
+        }
+
+        if let Some(cdr) = cons.cdr {
+            self.visit_value(cdr);
+        }
+    }
+
+    fn visit_vector(&mut self, vec: Vector<'gc>, _value: ValuePtr<'gc>) {
+        for elem in vec.vec.borrow().iter() {
+            self.visit_value(*elem)
+        }
+    }
+}
+
+pub struct Runtime {
+    // TODO Make World also have the gc-arenas for values and rc-refcell (hashmap?) for runtimes
+    // so that runtimes can be interacted with stashed.
+    // a world is the technical definition of our entire Scheme environment, so this
+    // should be ok!
+    // FIXME look at how piccolo does stashing
+    // INFO actually maybe not? let's see??
+    root: RuntimeRoot,
+    pub(crate) rodeo: lasso::Rodeo,
+}
+
+impl Runtime {}
+
+impl Default for Runtime {
+    fn default() -> Self {
+        Self {
+            root: RuntimeRoot::new(|mc| RuntimeArena {
+                // interpreters: HashMap::new(),
+                // this value
+                null_val: ValuePtr::new(mc, RefLock::new(Value::Cons(ConsCell::empty()))),
+            }),
+            rodeo: lasso::Rodeo::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceBundle {
+    pub filename: Box<str>,
+    pub case_insensitive: bool,
+    pub module: Module,
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("{} errors in {filename}", errors.len())]
+pub struct SourceBundleError {
+    pub filename: Box<str>,
+    pub code: Box<str>,
+    pub errors: Vec<GeneralParserError>,
+}
+
+impl SourceBundle {
+    pub fn new(
+        filename: impl AsRef<str>,
+        source: impl AsRef<str>,
+        case_insensitive: bool,
+    ) -> Result<Self, SourceBundleError> {
+        let filename = Box::from(filename.as_ref());
+        let source = source.as_ref();
+        let gparse = general_parse(source);
+        if !gparse.errors().is_empty() {
+            let errors = gparse.into_errors();
+            let code = Box::from(source);
+            Err(SourceBundleError {
+                code,
+                errors,
+                filename,
+            })
+        } else {
+            // if no errors, (well, even if errors)
+            // casting the root syntax node (the one returned by GAst::syntax)
+            // and unwrapping it is always safe
+            Ok(Self {
+                filename,
+                case_insensitive,
+                module: Module::cast(gparse.syntax()).unwrap(),
+            })
+        }
+    }
+}

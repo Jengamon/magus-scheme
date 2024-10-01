@@ -219,15 +219,6 @@ where
     }
 }
 
-// the ultimate goal
-// b/c of how scheme works, this
-// is literally the runnable code
-// ...
-// TODO Do we want Rust code to be able to participate?
-// it should be possible
-// ok, so we don't really prettify the code this produces...
-//
-// This is a quick and dirty way to print an external representation
 impl fmt::Display for ExternalRepresentationKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

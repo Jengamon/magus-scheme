@@ -11,7 +11,7 @@ name = "magus"
 version.workspace = true
 rust-version.workspace = true
 edition = "2021"
-description = "R7RS-scheme implementation in Rust using gc-arena"
+description = "R5RS-scheme implementation in Rust using gc-arena"
 
 [[test]]
 name = "frontend_datatest"

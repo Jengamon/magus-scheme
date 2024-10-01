@@ -9,9 +9,9 @@ graph TD
     gparse -->|GAst| wd
     gparse2 -->|GAst| wd
     ext[External Code] --> |NativeLibrary| wd
-    wd[World] -.-> Treewalk
-    wd -.-> VM
-    wd -.-> obk([Other Runtime])
+    wd[World] --> Compiler
+    Compiler --> VM
+    Compiler -.-> Treewalk
 ```
 
 ### Frontend
@@ -36,8 +36,27 @@ make implementing Scheme macros easier \[I hope...])
 
 The runtime is responsible for reading and executing on a World's GAst.
 
-Treewalk is a treewalk interpreter, which is the slowest execution method, but it's goal is to be auditable, and used as a reference implementation.
-VM is a virtual machine whose goal is to speed up execution, while maintaining 100% accuracy with Treewalk.
+It consists of 2 parts:
+- Compiler
+- VM/Treewalk
+
+- [ ] compiler can interpret Rust-side macros
+- [ ] compiler can interpret Scheme-side macros
+- [ ] treewalk can interpret code
+- [ ] compiler can produce VM bytecode
+- [ ] vm can interpret code
+
+#### Compiler
+It is the job of the compiler to:
+- interpret macros
+- produce runnable code from a world and source
+
+It takes in a World, and a filename, and returns code that can be ran on an interpreter.
+
+#### VM/Treewalk
+
+VM is an interpreter that relies on the compiler converting code into bytecode before it can execute.
+Treewalk is one that only needs macros to be interpreted by the compiler to get the resulting code.
 
 ## Numbers
 
@@ -58,13 +77,13 @@ If I were to define in `hygiene.scm`:
 
 ```scheme
 (import (scheme base))
-(define-syntax x! (syntax-rules () 
+(define-syntax x! (syntax-rules ()
     ((x! val)
         (set! x val))
 ))
 (define-syntax define-x (syntax-rules ()
     ((define-x val)
-        (begin 
+        (begin
             (define x val)
             (x! (+ val 1))
             x

@@ -1,10 +1,11 @@
 //! Representation of Scheme values
 use std::collections::HashMap;
+use std::string::String as StdString;
 
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 
 use crate::{
-    runtime::{external::ExternalRepresentationVisitor, EnvironmentPtr},
+    compiler::environment::EnvironmentPtr, runtime::external::ExternalRepresentationVisitor,
     DatumVisitor, ExactReal, Procedure, SchemeNumber,
 };
 
@@ -30,11 +31,11 @@ pub enum Value<'gc> {
     Void,
     // For now, we only support exact integers, so
     Number(Integer),
-    // The Rc is so that we don't have to pay to clone the string
-    // unless we try to modify it
-    String(String),
+    // Strings must be easily accessed/edited, so prefer to store a "String"
+    // over slices or intered strings
+    String(Gc<'gc, RefLock<StdString>>),
     // the value of '<ident> (quote <ident>)
-    Symbol(String),
+    Symbol(Symbol),
     Bool(bool),
     Char(char),
     Vector(Vector<'gc>),
@@ -63,7 +64,7 @@ pub trait ValueVisitor<'gc> {
             Value::Vector(vec) => self.visit_vector(vec, value),
             Value::Cons(cons) => self.visit_cons(cons, value),
             Value::Number(int) => self.visit_number(int, value),
-            Value::String(str) => self.visit_string(str, value),
+            Value::String(str) => self.visit_string(str.as_ref().borrow().as_str(), value),
             Value::Symbol(sym) => self.visit_symbol(sym, value),
             Value::Bool(bool) => self.visit_bool(bool, value),
             Value::Char(char) => self.visit_char(char, value),
@@ -89,12 +90,12 @@ pub trait ValueVisitor<'gc> {
         _ = integer;
     }
 
-    fn visit_string(&mut self, string: String, value: ValuePtr<'gc>) {
+    fn visit_string(&mut self, string: &str, value: ValuePtr<'gc>) {
         let _ = value;
         _ = string;
     }
 
-    fn visit_symbol(&mut self, symbol: String, value: ValuePtr<'gc>) {
+    fn visit_symbol(&mut self, symbol: Symbol, value: ValuePtr<'gc>) {
         let _ = value;
         _ = symbol;
     }
@@ -249,8 +250,8 @@ impl<T: std::error::Error + 'static> From<T> for ErrorBox {
 
 #[derive(Collect, Clone, Copy, Debug)]
 #[collect(require_static)]
-pub struct String(pub lasso::Spur);
-impl From<lasso::Spur> for String {
+pub struct Symbol(pub lasso::Spur);
+impl From<lasso::Spur> for Symbol {
     fn from(value: lasso::Spur) -> Self {
         Self(value)
     }

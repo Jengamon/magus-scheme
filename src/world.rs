@@ -8,8 +8,10 @@ use gc_arena::{Arena, Collect, Gc, Mutation, RefLock, Rootable, Static};
 use value::{ConsCell, Value, ValuePtr, ValueVisitor, Vector};
 
 use crate::{
-    general_parse, general_parser::GeneralParserError, runtime::interpreter::Interpreter,
-    GAstNode as _, Module,
+    general_parse,
+    general_parser::{gast, GeneralParserError},
+    runtime::interpreter::Interpreter,
+    ContainsDatum, Datum, GAstNode as _, Module,
 };
 
 /*
@@ -100,6 +102,31 @@ impl<'gc> SchemeLibrary<'gc> {
     }
 }
 
+// A GAst extension used for declaring libraries
+pub struct SchemeLibraryDeclaration {
+    filename: Box<str>,
+    case_insensitive: bool,
+    data: gast::List,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum LibraryDeclError {}
+
+impl SchemeLibraryDeclaration {
+    pub fn new(
+        filename_spur: lasso::Spur,
+        case_insensitive: bool,
+        maybe_decl: gast::List,
+    ) -> Option<Result<Self, LibraryDeclError>> {
+        // A library declaration *never* has a dot.
+        if maybe_decl.has_dot() {
+            return None;
+        }
+
+        todo!()
+    }
+}
+
 #[derive(Collect)]
 #[collect(no_drop)]
 pub struct WorldArena<'gc> {
@@ -172,7 +199,7 @@ impl<'a, 'gc> ValueVisitor<'gc> for EnsureNullVisitor<'a, 'gc> {
         }
     }
 
-    fn visit_vector(&mut self, vec: value::Vector<'gc>, _value: ValuePtr<'gc>) {
+    fn visit_vector(&mut self, vec: Vector<'gc>, _value: ValuePtr<'gc>) {
         for elem in vec.vec.borrow().iter() {
             self.visit_value(*elem)
         }
@@ -193,6 +220,9 @@ pub struct World {
     // TODO switch to hashbrown or ahash? might be faster maybe probably?
     // we use Spurs b/c we have the interner
     pub(crate) modules: HashMap<lasso::Spur, InternalModule>,
+
+    /// sources for libraries that are to-be-compiled from Scheme
+    scheme_libraries: Vec<SchemeLibraryDeclaration>,
 }
 
 impl World {
@@ -218,48 +248,61 @@ impl World {
         )
     }
 
-    /// include source as something that can be included using `include` or `include-ci`
-    ///
-    /// these are *not* allowed to conflict with loaded source filenames
-    pub fn include_sources(
-        &mut self,
-        includes: impl IntoIterator<Item = SourceBundle>,
-    ) -> Result<(), IncludeSourceError> {
-        // we don't define any libraries from these sources, so they *aren't*
-        // allowed to define any libraries (using define-library at the top level
-        // before any other statement (where they would be fine in a load_sources)
-        // is an *error* here)
-        //
-        // (well, we *do* allow lists in the shape of (define-library ...), but
-        // only if they can never be confused with a load_source's library definition)
-
-        todo!()
-    }
-
+    /// Returns duplicate source bundles as an error, as well
+    /// as any errors when reading a library declarations
     pub fn load_sources(
         &mut self,
-        source: impl IntoIterator<Item = SourceBundle>,
-    ) -> Result<Vec<LibraryName>, LoadSourceError> {
+        sources: impl IntoIterator<Item = SourceBundle>,
+    ) -> Result<(), (Vec<SourceBundle>, Vec<LibraryDeclError>)> {
         // NOTE Actually we will allow multiple libraries within a module, but
         // all libraries *must* precede any part of the program
-        // let filename = self.rodeo.get_or_intern(filename.as_ref());
-        // let mut module_datum = module.datum().peekable();
-        // store the parsed library data (the decls, as well as the vec of Datum within Begin forms)
-        let mut library_data = Vec::<()>::new();
 
-        // TODO actually collect the export/import decls per-library, and if all
-        // imports exist before this library decl is encountered, then
-        // interpret the declarations to completion (technically i32::MAX)
-        // and store the results in the world root
+        let mut duplicates = vec![];
+        let mut library_errors = vec![];
+        for source in sources {
+            let filename_spur = self.rodeo.get_or_intern(&source.filename);
+            let mut datum_iter = source.module.datum().peekable();
+            while let Some(maybe_lib_decl) = datum_iter
+                .peek()
+                .and_then(|data| data.as_list())
+                .and_then(|lst| {
+                    SchemeLibraryDeclaration::new(filename_spur, source.case_insensitive, lst)
+                })
+            {
+                match maybe_lib_decl {
+                    Ok(lib_decl) => {
+                        self.scheme_libraries.push(lib_decl);
+                    }
+                    Err(e) => {
+                        library_errors.push(e);
+                    }
+                }
+                _ = datum_iter.next();
+            }
 
-        // we load a bunch of sources together
-        // strip out and separate the defined libraries, then
-        // for include, include-ci, and include-library-definitions (which is *not* a special form)
-        // all reference files can only be referenced in the same iterator or a previous
-        // load_sources call
-        // collect the remaining datum into a program
-        // return the library names registered (if any)
-        todo!()
+            // wrap the rest as a module declaration
+            #[allow(clippy::map_entry)]
+            if !self.modules.contains_key(&filename_spur) {
+                self.modules.insert(
+                    filename_spur,
+                    InternalModule {
+                        datum: datum_iter.collect(),
+                        case_insensitive: source.case_insensitive,
+                        filename: filename_spur,
+                    },
+                );
+            } else {
+                // so that we can just *move* source
+                drop(datum_iter);
+                duplicates.push(source);
+            }
+        }
+
+        if duplicates.is_empty() && library_errors.is_empty() {
+            Ok(())
+        } else {
+            Err((duplicates, library_errors))
+        }
     }
 }
 
@@ -272,28 +315,18 @@ impl Default for World {
                 null_val: ValuePtr::new(mc, RefLock::new(Value::Cons(ConsCell::empty()))),
                 libraries: HashMap::default(),
             }),
+            scheme_libraries: Vec::new(),
             modules: HashMap::default(),
             rodeo: lasso::Rodeo::default(),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SourceBundle {
     pub filename: Box<str>,
     pub case_insensitive: bool,
     pub module: Module,
-}
-
-pub(crate) struct InternalModule {
-    module: Module,
-    filename: lasso::Spur,
-}
-
-impl InternalModule {
-    pub fn filename_spur(&self) -> lasso::Spur {
-        self.filename
-    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -334,16 +367,16 @@ impl SourceBundle {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum LoadSourceError {
-    #[error("library already exists: {0}")]
-    LibraryAlreadyExists(LibraryName),
+pub(crate) struct InternalModule {
+    datum: Vec<Datum>,
+    case_insensitive: bool,
+    filename: lasso::Spur,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum IncludeSourceError {
-    #[error("attempted to define library: {0}")]
-    DefineLibrary(LibraryName),
+impl InternalModule {
+    pub fn filename_spur(&self) -> lasso::Spur {
+        self.filename
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,4 @@
+---
+[0..3] Syntax(Number(ExactComplex { real: Integer { value: 0, is_neg: false }, imaginary: Integer { value: 43, is_neg: false } }))
+---
+43i

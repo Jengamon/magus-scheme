@@ -1,3 +1,4 @@
+pub mod compiler;
 pub mod general_parser;
 pub mod lexer;
 mod num;

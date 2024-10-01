@@ -24,7 +24,7 @@ StashedContext *must* implement Clone
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 
 use crate::{
-    value::ConsCell,
+    compiler::environment::{Environment, EnvironmentPtr},
     world::{
         value::{Value, ValuePtr},
         WorldArena,
@@ -32,7 +32,7 @@ use crate::{
     Fuel,
 };
 
-use super::{Environment, EnvironmentPtr, Error};
+use super::Error;
 
 // An [`Interpreter`] will always interrupt *between* modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Collect, Default)]
@@ -41,9 +41,7 @@ pub enum InterpreterMode {
     /// ready to start execution
     #[default]
     Ready,
-    /// Expanding macros
-    MacroExpansion,
-    /// running resulting AST
+    /// running code
     Running,
     /// run finished, result is ready
     Result,

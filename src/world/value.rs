@@ -5,7 +5,7 @@ use std::string::String as StdString;
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 
 use crate::{
-    runtime::{external::ExternalRepresentationVisitor, EnvironmentPtr},
+    compiler::environment::EnvironmentPtr, runtime::external::ExternalRepresentationVisitor,
     DatumVisitor, ExactReal, Procedure, SchemeNumber,
 };
 

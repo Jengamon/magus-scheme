@@ -1,8 +1,17 @@
+use std::collections::HashMap;
+
 use clap::Parser;
 use codesnake::{Block, CodeWidth, Label, LineIndex};
+use gc_arena::{Collect, Gc, Mutation, RefLock};
 use magus::{
-    lexer::Token, Comment, ContainsDatum, ContainsTrivia, DatumVisitor, ExternalRepresentation,
-    GAstNode, MagusSyntaxElementRef, Module, Symbol,
+    lexer::Token,
+    treewalk::Treewalk,
+    value::{
+        IntoValue, Lambda, LambdaCall, ProcedureError, ProcedureReturn, Typecheck, ValuePtr,
+        ValueType,
+    },
+    Comment, ContainsDatum, ContainsTrivia, DatumVisitor, ExternalRepresentation, Fuel, GAstNode,
+    MagusSyntaxElementRef, Module, Symbol,
 };
 use rustyline::{
     history::{History, MemHistory},
@@ -123,6 +132,8 @@ fn repl() -> anyhow::Result<()> {
     let mut readline =
         rustyline::Editor::<(), _>::with_history(Config::default(), MemHistory::new())?;
 
+    let mut interp = Treewalk::default();
+
     while let Ok(input) = read_prompt(&mut readline) {
         let src = input.as_str();
 
@@ -233,6 +244,162 @@ fn repl() -> anyhow::Result<()> {
                 Ok(Token::NestedComment(nc)) => println!("[{span:?}] {nc:?}"),
                 Err(err) => println!("[{span:?}] {}", err.to_string().red()),
             }
+        }
+
+        // evaluate using treewalk
+        let exec = interp.new_executor(module, |mc, env| {
+            let mut env = env.borrow_mut(mc);
+            env.define(mc, "x", 3i64, false).unwrap();
+
+            // define a lambda for +
+            let all_numbers_typecheck = |op: &'static str| {
+                Typecheck::new(move |sig| {
+                    if sig.iter().all(|ty| ty == &ValueType::Number) && !sig.is_empty() {
+                        Ok(())
+                    } else {
+                        Err(anyhow::anyhow!("cannot {op} nothing"))
+                    }
+                })
+            };
+
+            fn plus_impl<'gc>(
+                _root: &mut TestRoot<'gc>,
+                mc: &Mutation<'gc>,
+                call: &mut LambdaCall<'gc>,
+                _fuel: &mut Fuel,
+            ) -> Result<ProcedureReturn<'gc>, ProcedureError<'gc>> {
+                // TODO make this nicer...
+                let mut total = 0;
+                while !call.stack.is_empty() {
+                    let Some(v) = call.pop::<i64>() else {
+                        unreachable!("typechecking");
+                    };
+                    total += v;
+                }
+                call.push(mc, total);
+                Ok(ProcedureReturn::Return)
+            }
+
+            fn mul_impl<'gc>(
+                _root: &mut (),
+                mc: &Mutation<'gc>,
+                call: &mut LambdaCall<'gc>,
+                _fuel: &mut Fuel,
+            ) -> Result<ProcedureReturn<'gc>, ProcedureError<'gc>> {
+                // TODO make this nicer...
+                let mut total = 1;
+                while !call.stack.is_empty() {
+                    let Some(v) = call.pop::<i64>() else {
+                        unreachable!("typechecking");
+                    };
+                    total *= v;
+                }
+                call.push(mc, total);
+                Ok(ProcedureReturn::Return)
+            }
+
+            fn sub_impl<'gc>(
+                _root: &mut (),
+                mc: &Mutation<'gc>,
+                call: &mut LambdaCall<'gc>,
+                _fuel: &mut Fuel,
+            ) -> Result<ProcedureReturn<'gc>, ProcedureError<'gc>> {
+                // TODO make this nicer...
+                let mut data = vec![];
+                while !call.stack.is_empty() {
+                    let Some(v) = call.pop::<i64>() else {
+                        unreachable!("typechecking");
+                    };
+                    data.push(v);
+                }
+                let init = data.pop().unwrap();
+                data.reverse();
+                call.push(mc, data.into_iter().fold(init, |acc, it| acc - it));
+                Ok(ProcedureReturn::Return)
+            }
+
+            fn div_impl<'gc>(
+                _root: &mut (),
+                mc: &Mutation<'gc>,
+                call: &mut LambdaCall<'gc>,
+                _fuel: &mut Fuel,
+            ) -> Result<ProcedureReturn<'gc>, ProcedureError<'gc>> {
+                // TODO make this nicer...
+                let mut data = vec![];
+                while !call.stack.is_empty() {
+                    let Some(v) = call.pop::<i64>() else {
+                        unreachable!("typechecking");
+                    };
+                    data.push(v);
+                }
+                let init = data.pop().unwrap();
+                data.reverse();
+                call.push(mc, data.into_iter().fold(init, |acc, it| acc / it));
+                Ok(ProcedureReturn::Return)
+            }
+
+            #[derive(Collect, Debug)]
+            #[collect(no_drop)]
+            struct TestRoot<'gc> {
+                i: magus::value::Value<'gc>,
+            }
+
+            let troot = TestRoot {
+                i: 3i64.into_value(mc),
+            };
+            let plus_lambda =
+                Lambda::with_root_typecheck(mc, all_numbers_typecheck("add"), troot, plus_impl);
+            let sub_lambda =
+                Lambda::with_typecheck(mc, all_numbers_typecheck("subtract"), sub_impl);
+            let mul_lambda =
+                Lambda::with_typecheck(mc, all_numbers_typecheck("multiply"), mul_impl);
+            let div_lambda = Lambda::with_typecheck(mc, all_numbers_typecheck("divide"), div_impl);
+            env.define(mc, "+", plus_lambda, false).unwrap();
+            env.define(mc, "-", sub_lambda, false).unwrap();
+            env.define(mc, "/", div_lambda, false).unwrap();
+            env.define(mc, "*", mul_lambda, false).unwrap();
+        });
+        let mut fuel = Fuel::with(1);
+        let mut running = true;
+
+        // collect all garbage from previous runs
+        interp.arena_mut(|arena| {
+            arena.collect_all();
+        });
+
+        while running {
+            fuel.refill(10, 1);
+            running = interp
+                .run(exec.clone(), |ctx, mut exec| {
+                    exec.step(&ctx, &mut fuel);
+                    let scope_info: HashMap<_, _> = exec
+                        .all_scopes()
+                        .cloned()
+                        .map(|s| (s.bottom(), s))
+                        .collect();
+                    println!("== STACK CHECK fuel: {} ==", fuel.remaining());
+                    for (idx, ptr) in exec.full_stack().iter().enumerate() {
+                        let resolved = ptr.borrow().resolve_into(ctx.interner.clone());
+                        let idx_key = (idx != 0).then_some(idx);
+                        if let Some(scope) = scope_info.get(&idx_key) {
+                            println!(
+                                "- {idx}: {resolved} (({}))",
+                                scope.label().unwrap_or("<<root>>")
+                            );
+                        } else {
+                            println!("- {idx}: {resolved}");
+                        }
+                    }
+
+                    let metrics = ctx.mutation.metrics();
+                    println!(
+                        "MEMORY: {} bytes (debt {})",
+                        metrics.total_allocation(),
+                        metrics.allocation_debt()
+                    );
+                    exec.can_continue()
+                })
+                .unwrap();
         }
 
         readline.add_history_entry(input)?;

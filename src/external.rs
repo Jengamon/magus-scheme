@@ -3,8 +3,7 @@ use core::fmt;
 use crate::{ContainsDatum, Datum, DatumKind, SchemeNumber};
 
 // all scheme code can be represented by these structures
-// macros interact with this, Treewalk runs this
-// TODO Vm converts this into bytecode to run
+// macros interact with this
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExternalRepresentationKind {
     Label(usize),
@@ -326,7 +325,12 @@ impl TryFrom<Datum> for ExternalRepresentation {
                 }
                 DatumKind::Bytevector => Ok(ExternalRepresentation::Simple(
                     ExternalRepresentationKind::Bytevector(
-                        value.as_bytevector().unwrap().bytes().collect(),
+                        value
+                            .as_bytevector()
+                            .unwrap()
+                            .bytes()
+                            .collect::<Option<Vec<_>>>()
+                            .ok_or(())?,
                     ),
                 )),
                 DatumKind::Vector => Ok(ExternalRepresentation::Simple(
@@ -384,7 +388,7 @@ impl TryFrom<Datum> for ExternalRepresentation {
                         value.as_number().unwrap().number().ok_or(())?,
                     ),
                 )),
-                DatumKind::StringToken => Ok(ExternalRepresentation::Simple(
+                DatumKind::String => Ok(ExternalRepresentation::Simple(
                     ExternalRepresentationKind::String(
                         value.as_string().unwrap().string().ok_or(())?,
                     ),

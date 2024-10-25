@@ -1,22 +1,57 @@
 //! Representation of Scheme values
-use std::collections::HashMap;
+use core::fmt;
 use std::string::String as StdString;
+use std::{collections::HashMap, rc::Rc};
 
 use gc_arena::{Collect, Gc, Mutation, RefLock};
+use lasso::{IntoResolver, RodeoResolver};
 
 use crate::{
-    compiler::environment::EnvironmentPtr, DatumVisitor, ExactReal, ExternalRepresentationVisitor,
-    SchemeNumber,
+    compiler::{environment::EnvironmentPtr, Transformer},
+    DatumVisitor, ExactReal, ExternalRepresentationVisitor, SchemeNumber,
 };
 
 pub use port::{InputPort, OutputPort, PortType};
 
 use super::{userstruct::UserStruct, RuntimeArena};
 
+pub use convert::{FromValue, IntoValue, TryIntoValue};
+mod convert;
+pub use error::{DisplaySchemeError, SchemeError, SchemeErrorPtr, SchemeErrorType, StackFrame};
+mod error;
+pub use lambda::{
+    Lambda, LambdaCall, LambdaPtr, Procedure, ProcedureError, ProcedureReturn, TypeFilter,
+    Typecheck,
+};
+
+mod lambda;
 mod port;
 
 pub type ValuePtr<'gc> = Gc<'gc, RefLock<Value<'gc>>>;
 pub type Integer = i64;
+
+#[derive(Collect, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[collect(require_static)]
+pub enum ValueType {
+    Undefined,
+    Void,
+    Number,
+    Inexact,
+    String,
+    Symbol,
+    Bool,
+    Char,
+    Vector,
+    Bytevector,
+    InputPort,
+    OutputPort,
+    Cons,
+    Environment,
+    UserStruct,
+    Transformer,
+    Lambda,
+    Error,
+}
 
 // Type that stores all possible values!
 #[derive(Collect, Clone, Copy, Debug)]
@@ -29,8 +64,8 @@ pub enum Value<'gc> {
     Undefined,
     // the return value of set! and definitions (define, define-record-type, define-syntax)
     Void,
-    // For now, we only support exact integers, so
     Number(Integer),
+    Inexact(f64),
     // Strings must be easily accessed/edited, so prefer to store a "String"
     // over slices or intered strings
     String(Gc<'gc, RefLock<StdString>>),
@@ -39,6 +74,7 @@ pub enum Value<'gc> {
     Bool(bool),
     Char(char),
     Vector(Vector<'gc>),
+    Bytevector(Bytevector<'gc>),
     // Strings might not need to be in the GC, so
     // onlu allow interned strings for now
     // GcString(GcString<'gc>),
@@ -49,15 +85,121 @@ pub enum Value<'gc> {
     Cons(ConsCell<'gc>),
     // Represents something runnable
     // Procedure(Gc<'gc, Procedure>),
-    // Environment(EnvironmentPtr<'gc>),
+    Environment(EnvironmentPtr<'gc>),
     UserStruct(UserStruct<'gc>),
     // QUESTION Move from ErrorBox to an Any based pointer that
     // can specify predicate type (read-error?, file-error?, etc.)
-    Error(Gc<'gc, ErrorBox>),
+    // Error(Gc<'gc, ErrorBox>),
     // TODO records
     // I want to handle userdata the same way as we handle records
     // TODO syntax-rules (transformers)
-    Transformer(()),
+    Transformer(RuntimeTransformer<'gc>),
+    // Uniquely our lambda's are typed, it's just that (for now)
+    // Scheme code simply marks all parameters as untyped
+    Lambda(LambdaPtr<'gc>),
+    // A Scheme-side error
+    Error(SchemeErrorPtr<'gc>),
+}
+
+impl<'gc> Value<'gc> {
+    pub fn value_type(&self) -> ValueType {
+        match self {
+            Value::Undefined => ValueType::Undefined,
+            Value::Void => ValueType::Void,
+            Value::Number(_) => ValueType::Number,
+            Value::Inexact(_) => ValueType::Inexact,
+            Value::String(_) => ValueType::String,
+            Value::Symbol(_) => ValueType::Symbol,
+            Value::Bool(_) => ValueType::Bool,
+            Value::Char(_) => ValueType::Char,
+            Value::Vector(_) => ValueType::Vector,
+            Value::Bytevector(_) => ValueType::Bytevector,
+            Value::InputPort(_) => ValueType::InputPort,
+            Value::OutputPort(_) => ValueType::OutputPort,
+            Value::Cons(_) => ValueType::Cons,
+            Value::Environment(_) => ValueType::Environment,
+            Value::UserStruct(_) => ValueType::UserStruct,
+            Value::Transformer(_) => ValueType::Transformer,
+            Value::Lambda(_) => ValueType::Lambda,
+            Value::Error(_) => ValueType::Error,
+        }
+    }
+
+    pub fn resolve_into<K: lasso::Key>(
+        self,
+        resolver: impl IntoResolver<Resolver = RodeoResolver<K>> + 'static,
+    ) -> ResolvedValue<'gc, K> {
+        self.resolve(Rc::new(resolver.into_resolver()))
+    }
+
+    pub fn resolve<K: lasso::Key>(self, resolver: Rc<RodeoResolver<K>>) -> ResolvedValue<'gc, K> {
+        ResolvedValue {
+            value: self,
+            resolver,
+        }
+    }
+}
+
+#[derive(Collect)]
+#[collect(no_drop)]
+pub struct ResolvedValue<'gc, K: lasso::Key> {
+    value: Value<'gc>,
+    #[collect(require_static)]
+    resolver: Rc<RodeoResolver<K>>,
+}
+
+impl<'gc, K: lasso::Key> fmt::Debug for ResolvedValue<'gc, K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedValue")
+            .field("value", &self.value)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'gc> fmt::Display for ResolvedValue<'gc, lasso::Spur> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.value {
+            Value::Undefined => write!(f, "#<undef>"),
+            Value::Void => write!(f, "#<void>"),
+            Value::Number(n) => write!(f, "{n}"),
+            Value::Inexact(fp) => write!(f, "{fp}"),
+            Value::String(s) => write!(f, "\"{}\"", s.borrow().replace('\"', "\\\"")),
+            Value::Symbol(sym) => write!(f, "'{}", self.resolver.resolve(&sym.0)),
+            Value::Bool(b) => write!(f, "#{}", if b { "t" } else { "f" }),
+            Value::Char(c) => write!(f, "#\\{c}"),
+            Value::Vector(vec) => {
+                write!(f, "#(")?;
+                for (idx, elem) in vec.vec.borrow().iter().copied().enumerate() {
+                    if idx != 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", elem.borrow().resolve(self.resolver.clone()))?;
+                }
+                write!(f, ")")?;
+                Ok(())
+            }
+            Value::Bytevector(bv) => {
+                write!(f, "#u8(")?;
+                for (idx, elem) in bv.vec.borrow().iter().enumerate() {
+                    if idx != 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "#x{:02x}", elem)?;
+                }
+                write!(f, ")")?;
+                Ok(())
+            }
+            Value::InputPort(_) => todo!(),
+            Value::OutputPort(_) => todo!(),
+            // TODO this needs special handling, b/c a cons might recurse into itself
+            Value::Cons(_) => todo!(),
+            Value::Environment(_) => todo!(),
+            Value::UserStruct(_) => todo!(),
+            Value::Transformer(_) => todo!(),
+            Value::Lambda(lambda) => write!(f, "<lambda {:p}>", lambda),
+            Value::Error(_) => todo!(),
+        }
+    }
 }
 
 pub trait ValueVisitor<'gc> {
@@ -66,8 +208,10 @@ pub trait ValueVisitor<'gc> {
             Value::Undefined => self.visit_undefined(value),
             Value::Void => self.visit_void(value),
             Value::Vector(vec) => self.visit_vector(vec, value),
+            Value::Bytevector(vec) => self.visit_bytevector(vec, value),
             Value::Cons(cons) => self.visit_cons(cons, value),
             Value::Number(int) => self.visit_number(int, value),
+            Value::Inexact(iex) => self.visit_inexact(iex, value),
             Value::String(str) => self.visit_string(str.as_ref().borrow().as_str(), value),
             Value::Symbol(sym) => self.visit_symbol(sym, value),
             Value::Bool(bool) => self.visit_bool(bool, value),
@@ -75,10 +219,12 @@ pub trait ValueVisitor<'gc> {
             Value::InputPort(inp) => self.visit_input_port(inp, value),
             Value::OutputPort(oup) => self.visit_output_port(oup, value),
             // Value::Procedure(_proc) => todo!(),
-            // Value::Environment(_env) => todo!(),
+            Value::Environment(_env) => todo!(),
             Value::UserStruct(_uss) => todo!(),
-            Value::Error(_err) => todo!(),
+            // Value::Error(_err) => todo!(),
             Value::Transformer(_trans) => todo!(),
+            Value::Lambda(_lam) => todo!(),
+            Value::Error(_err) => todo!(),
         }
     }
 
@@ -91,6 +237,11 @@ pub trait ValueVisitor<'gc> {
     }
 
     fn visit_number(&mut self, integer: Integer, value: ValuePtr<'gc>) {
+        let _ = value;
+        _ = integer;
+    }
+
+    fn visit_inexact(&mut self, integer: f64, value: ValuePtr<'gc>) {
         let _ = value;
         _ = integer;
     }
@@ -134,6 +285,11 @@ pub trait ValueVisitor<'gc> {
         let _ = value;
         _ = vec;
     }
+
+    fn visit_bytevector(&mut self, vec: Bytevector<'gc>, value: ValuePtr<'gc>) {
+        let _ = value;
+        _ = vec;
+    }
     // TODO procedure, environment, userstruct, error, transformer
 }
 
@@ -159,30 +315,6 @@ impl<'gc> Value<'gc> {
         }
     }
 }
-
-// // used for `display` impl
-// ACTAUMAJDIJLLY because strings are stored in the interner, we have to use the World
-// to get display or write working
-// impl<'gc> fmt::Display for Value<'gc> {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         match self {
-//             Value::Null => write!(f, "()"),
-//             Value::Undefined => write!(f, "#<error>"),
-//             Value::Void => write!(f, "#<undef>"),
-//             Value::Number(n) => write!(f, "{n}"),
-//             Value::String(s) => write!(f, r#""{}""#, s.0),
-//             Value::Symbol(s) => write!(f, "{}"),
-//             Value::Bool(b) => write!(f, "{b}"),
-//             Value::Char(c) => todo!(),
-//             Value::InputPort(_) => todo!(),
-//             Value::OutputPort(_) => todo!(),
-//             Value::Cons(_) => todo!(),
-//             Value::Procedure(_) => todo!(),
-//             Value::Environment(_) => todo!(),
-//             Value::UserStruct(_) => todo!(),
-//         }
-//     }
-// }
 
 #[derive(thiserror::Error, Debug)]
 pub enum ValueConvertError {
@@ -217,10 +349,8 @@ impl<'w, 'gc> ValueConvert<'w, 'gc> {
     }
 }
 
-impl<'w, 'gc> DatumVisitor for ValueConvert<'w, 'gc> {
-    // TODO allow source to directly be converted into value
-}
-
+// RN this is tuned for Magicflute
+// Convert an external representation into a GC'd value
 impl<'w, 'gc> ExternalRepresentationVisitor for ValueConvert<'w, 'gc> {
     fn visit_number(&mut self, value: crate::SchemeNumber) {
         match value {
@@ -242,14 +372,17 @@ impl<'w, 'gc> ExternalRepresentationVisitor for ValueConvert<'w, 'gc> {
     }
 }
 
-// FIXME ASK Make this like UserStruct, but *with* additional data, to handle
-// error predicates
-#[derive(Collect, Debug)]
-#[collect(require_static)]
-pub struct ErrorBox(pub Box<dyn std::error::Error>);
-impl<T: std::error::Error + 'static> From<T> for ErrorBox {
-    fn from(value: T) -> Self {
-        Self(Box::new(value))
+#[derive(Collect, Clone, Copy)]
+#[collect(no_drop)]
+pub struct RuntimeTransformer<'gc>(pub Gc<'gc, std::rc::Rc<dyn Transformer>>);
+impl<'gc> From<Gc<'gc, std::rc::Rc<dyn Transformer>>> for RuntimeTransformer<'gc> {
+    fn from(value: Gc<'gc, std::rc::Rc<dyn Transformer>>) -> Self {
+        Self(value)
+    }
+}
+impl<'gc> core::fmt::Debug for RuntimeTransformer<'gc> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<transformer {:p}>", self.0)
     }
 }
 
@@ -261,18 +394,17 @@ impl From<lasso::Spur> for Symbol {
         Self(value)
     }
 }
-/*
-use gc_arena::Mutation;
-use std::string::String as StdString;
+
 #[derive(Collect, Clone, Copy, Debug)]
 #[collect(no_drop)]
-pub struct GcString<'gc>(Gc<'gc, StdString>);
-impl<'gc> GcString<'gc> {
-    pub fn new(mc: &Mutation<'gc>, string: impl AsRef<str>) -> Self {
-        Self(Gc::new(mc, string.as_ref().to_owned()))
+pub struct Bytevector<'gc> {
+    pub vec: Gc<'gc, RefLock<Vec<u8>>>,
+}
+impl<'gc> From<Gc<'gc, RefLock<Vec<u8>>>> for Bytevector<'gc> {
+    fn from(value: Gc<'gc, RefLock<Vec<u8>>>) -> Self {
+        Self { vec: value }
     }
 }
-*/
 
 #[derive(Collect, Clone, Copy, Debug)]
 #[collect(no_drop)]

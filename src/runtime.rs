@@ -1,8 +1,5 @@
 //! This is the runtime used to execute the R5RS-based script
 
-use core::fmt;
-use std::collections::HashMap;
-
 use gc_arena::{Arena, Collect, Gc, Mutation, RefLock, Rootable, Static};
 use value::{ConsCell, Value, ValuePtr, ValueVisitor, Vector};
 
@@ -12,37 +9,14 @@ use crate::{
     ContainsDatum, Datum, GAstNode as _, Module,
 };
 
-/*
-macros and special forms are defined here:
-special forms are macros that have access to the source of their expansion
-and are given in their own unique environment with access to their parent environment
-
-macros resemble piccolo::Sequences in that they must be resumable, but are
-simpler in that they only have 3 returns:
-Ok(Evaluating) - macro ran out of fuel for expansion, is interacting with something, etc.
-Ok(List) - the list this macro should expand into, to be
-Err(MacroError) - this macro failed evaluation for some reason
-
-so yeah it's basically a future.
-TODO Rip off piccolo::UserData (but w/o metatable stuff)
-for UserStruct, then store macros and special forms in the environment
-using that!
-*/
-
 pub mod any;
 pub mod fuel;
 pub mod userstruct;
 pub mod value;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Collect)]
-#[collect(require_static)]
-pub struct RuntimeKey(usize);
-
 #[derive(Collect)]
 #[collect(no_drop)]
 pub struct RuntimeArena<'gc> {
-    // pub(crate) interpreters: HashMap<RuntimeKey, Gc<'gc, RefLock<Interpreter<'gc>>>>,
-
     // value that is (eq? '())
     pub(crate) null_val: ValuePtr<'gc>,
 }
@@ -86,9 +60,9 @@ impl<'gc> RuntimeArena<'gc> {
     }
 }
 
-struct EnsureNullVisitor<'a, 'gc> {
-    mutation: &'a Mutation<'gc>,
-    null: &'a Value<'gc>,
+pub struct EnsureNullVisitor<'a, 'gc> {
+    pub mutation: &'a Mutation<'gc>,
+    pub null: &'a Value<'gc>,
 }
 
 impl<'a, 'gc> ValueVisitor<'gc> for EnsureNullVisitor<'a, 'gc> {
@@ -114,7 +88,7 @@ impl<'a, 'gc> ValueVisitor<'gc> for EnsureNullVisitor<'a, 'gc> {
     }
 }
 
-pub struct Runtime {
+pub struct Source {
     // TODO Make World also have the gc-arenas for values and rc-refcell (hashmap?) for runtimes
     // so that runtimes can be interacted with stashed.
     // a world is the technical definition of our entire Scheme environment, so this
@@ -125,14 +99,12 @@ pub struct Runtime {
     pub(crate) rodeo: lasso::Rodeo,
 }
 
-impl Runtime {}
+impl Source {}
 
-impl Default for Runtime {
+impl Default for Source {
     fn default() -> Self {
         Self {
             root: RuntimeRoot::new(|mc| RuntimeArena {
-                // interpreters: HashMap::new(),
-                // this value
                 null_val: ValuePtr::new(mc, RefLock::new(Value::Cons(ConsCell::empty()))),
             }),
             rodeo: lasso::Rodeo::default(),
@@ -183,4 +155,13 @@ impl SourceBundle {
             })
         }
     }
+}
+
+pub struct FuelCosts;
+impl FuelCosts {
+    pub const CALL_COST: i32 = 10;
+    // cost of loading a piece of data
+    pub const LOAD_COST: i32 = 4;
+    // cost of loading a var from environment
+    pub const ENV_COST: i32 = 4;
 }

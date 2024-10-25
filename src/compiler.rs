@@ -49,6 +49,13 @@
 //! LAMBDA 1
 //! CONTINUE
 
+use core::fmt;
+use std::{collections::HashMap, rc::Rc};
+
+use environment::{Environment, EnvironmentPtr};
+
+use crate::{value::ValuePtr, Module};
+
 pub mod bytecode;
 pub mod environment;
 
@@ -143,6 +150,103 @@ pub mod environment;
 
 // call-with-current-continuation or call/cc can be represented by:
 // (define (call/cc* f k) (f k))
+
+// our compiler is environment aware, so that we can do a little typechecking
+// here.
+//
+// the compiler takes in a base environment, which is definable in Rust, and
+// a Source, which holds executable values, and defines a structure that can then be passed to
+// the Source in order to execute that Source.
+
+/// An implementation of a transformer or "macro"
+pub trait Transformer {}
+
+/// External value
+#[derive(Clone)]
+pub enum ExternValue {
+    Integer(i64),
+    String(Box<str>),
+    Bool(bool),
+    Transformer(Rc<dyn Transformer>),
+}
+impl fmt::Debug for ExternValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Integer(i) => write!(f, "{i}"),
+            Self::String(s) => write!(f, "{s}"),
+            Self::Bool(b) => write!(f, "{b}"),
+            Self::Transformer(trans) => write!(f, "<transformer {trans:p}>"),
+        }
+    }
+}
+
+/// An external, non-gc'ed description on an environment
+pub type CompilerEnvironment = HashMap<Box<str>, ExternValue>;
+
+/// Compiler output
+#[derive(Clone, Debug)]
+pub struct CompilerOutput {}
+
+#[derive(thiserror::Error, Debug)]
+#[error("TODO: write errors using codesnake?")]
+pub struct CompilerErrors {
+    errors: Vec<CompilerError>,
+}
+
+/// Describes the values *inside* an environment
+enum ValueDescription {
+    Number {
+        is_integer: bool,
+        unsigned: bool,
+        within_u32: bool,
+    },
+    String,
+    Transformer {},
+}
+
+/// Describes the types and values of an environment
+struct EnvironmentDescription {
+    values: HashMap<Box<str>, ValueDescription>,
+}
+
+/// Trait to query information from environments
+trait EnvironmentQuery {
+    fn declare(&self) -> EnvironmentDescription;
+}
+
+impl EnvironmentQuery for CompilerEnvironment {
+    fn declare(&self) -> EnvironmentDescription {
+        todo!()
+    }
+}
+
+impl<'gc> EnvironmentQuery for Environment<'gc> {
+    fn declare(&self) -> EnvironmentDescription {
+        todo!()
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum CompilerError {}
+
+pub struct Compiler;
+
+impl Compiler {
+    pub fn compile(
+        env: CompilerEnvironment,
+        code: Module,
+    ) -> Result<CompilerOutput, CompilerErrors> {
+        todo!()
+    }
+
+    // used for `eval` to compile a value as code to run!
+    pub fn compile_eval<'gc>(
+        env: EnvironmentPtr<'gc>,
+        value: ValuePtr<'gc>,
+    ) -> Result<CompilerOutput, CompilerErrors> {
+        todo!()
+    }
+}
 
 // NOTE *every* IR Frame has an implicit continuation parameter
 /// An IR Frame

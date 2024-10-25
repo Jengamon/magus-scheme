@@ -5,7 +5,7 @@ use std::{
 
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 
-use crate::value::{Value, ValuePtr};
+use crate::value::{IntoValue, Value, ValuePtr};
 
 // TODO make more involved, so that this can be the type stored in Value
 // for `environment`
@@ -29,6 +29,14 @@ pub type EnvironmentPtr<'gc> = Gc<'gc, RefLock<Environment<'gc>>>;
 #[derive(thiserror::Error, Debug)]
 #[error("environment is frozen")]
 pub struct FrozenError;
+
+#[derive(thiserror::Error, Debug)]
+pub enum RebindError {
+    #[error("`{0}` is not defined")]
+    NameNotFound(Box<str>),
+    #[error(transparent)]
+    Frozen(#[from] FrozenError),
+}
 
 impl<'gc> Environment<'gc> {
     pub fn new(mc: &Mutation<'gc>, parent: Option<EnvironmentPtr<'gc>>) -> Self {
@@ -62,18 +70,46 @@ impl<'gc> Environment<'gc> {
         }
     }
 
+    pub fn rebind_ptr(
+        &mut self,
+        mc: &Mutation<'gc>,
+        name: impl AsRef<str>,
+        value: ValuePtr<'gc>,
+    ) -> Result<ValuePtr<'gc>, RebindError> {
+        if self.is_frozen {
+            return Err(FrozenError)?;
+        }
+        let name = Box::from(name.as_ref());
+        if let Some(binding) = self.inner.borrow_mut(mc).values.get_mut(&name) {
+            let old_value = binding.value;
+            binding.value = value;
+            Ok(old_value)
+        } else {
+            Err(RebindError::NameNotFound(name))
+        }
+    }
+
+    pub fn rebind(
+        &mut self,
+        mc: &Mutation<'gc>,
+        name: impl AsRef<str>,
+        value: impl IntoValue<'gc>,
+    ) -> Result<ValuePtr<'gc>, RebindError> {
+        self.rebind_ptr(mc, name, Gc::new(mc, RefLock::new(value.into_value(mc))))
+    }
+
     /// Creates a new binding in the current environment, replacing any binding that might already exist
     /// which is returned is successful.
     ///
-    /// Fails if the environment the definition is attempted in is frozen
-    pub fn define(
+    /// Fails if the environment is frozen
+    pub fn define_ptr(
         &mut self,
         mc: &Mutation<'gc>,
         name: impl AsRef<str>,
         value: ValuePtr<'gc>,
         is_frozen: bool,
     ) -> Result<Option<Binding<'gc>>, FrozenError> {
-        self.is_frozen
+        (!self.is_frozen)
             .then(|| {
                 self.inner
                     .borrow_mut(mc)
@@ -81,6 +117,25 @@ impl<'gc> Environment<'gc> {
                     .insert(Box::from(name.as_ref()), Binding { value, is_frozen })
             })
             .ok_or(FrozenError)
+    }
+
+    /// Creates a new binding in the current environment, replacing any binding that might already exist
+    /// which is returned is successful.
+    ///
+    /// Fails if the environment is frozen
+    pub fn define(
+        &mut self,
+        mc: &Mutation<'gc>,
+        name: impl AsRef<str>,
+        value: impl IntoValue<'gc>,
+        is_frozen: bool,
+    ) -> Result<Option<Binding<'gc>>, FrozenError> {
+        self.define_ptr(
+            mc,
+            name,
+            Gc::new(mc, RefLock::new(value.into_value(mc))),
+            is_frozen,
+        )
     }
 }
 
@@ -102,6 +157,10 @@ pub struct Binding<'gc> {
 }
 
 impl<'gc> Binding<'gc> {
+    pub fn get(&self) -> ValuePtr<'gc> {
+        self.value
+    }
+
     pub fn read<T>(&self, func: impl FnOnce(Ref<Value<'gc>>) -> T) -> T {
         func(self.value.borrow())
     }

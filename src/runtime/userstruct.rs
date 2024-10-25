@@ -3,9 +3,11 @@
 
 use std::hash::{Hash, Hasher};
 
-use gc_arena::{arena::Root, barrier, Collect, Mutation, Rootable, Static};
+use gc_arena::{arena::Root, barrier, Collect, Gc, Mutation, Rootable, Static};
 
-use super::any::Any;
+use super::any::{Any, AnyInner};
+
+pub type UserStructInner<'gc> = AnyInner<()>;
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 #[error("UserStruct type mismatch")]
@@ -62,15 +64,15 @@ impl<'gc> UserStruct<'gc> {
     pub fn new_static<T: 'static>(mc: &Mutation<'gc>, val: T) -> Self {
         Self::new::<Static<T>>(mc, Static(val))
     }
-    /*
-        pub fn from_inner(inner: Gc<'gc, UserDataInner<'gc>>) -> Self {
-            Self(Any::from_inner(inner))
-        }
 
-        pub fn into_inner(self) -> Gc<'gc, UserDataInner<'gc>> {
-            self.0.into_inner()
-        }
-    */
+    pub fn from_inner(inner: Gc<'gc, UserStructInner<'gc>>) -> Self {
+        Self(Any::from_inner(inner))
+    }
+
+    pub fn into_inner(self) -> Gc<'gc, UserStructInner<'gc>> {
+        self.0.into_inner()
+    }
+
     /// Check if a `UserData` was created with the type `R` passed to [`UserData::new`].
     ///
     /// `UserData` is identified by the `TypeId` of the [`trait@Rootable`] impl, NOT the type

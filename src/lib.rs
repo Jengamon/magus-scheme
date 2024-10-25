@@ -4,6 +4,7 @@ pub mod general_parser;
 pub mod lexer;
 mod num;
 pub mod runtime;
+pub mod treewalk;
 
 pub use external::{
     ExternalRepresentation, ExternalRepresentationKind, ExternalRepresentationVisitor, Label,

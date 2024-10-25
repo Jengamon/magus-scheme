@@ -1,18 +1,16 @@
-# Magus - an R5RS impl for Magicflute
+# Magus - an R5RS-ish impl for Magicflute
 
-## Architecture
+So we are targeting R5RS and R7RS as we please. In general:
+- R7RS has case-sensitivity. since we already wrote the code, might as well use it...
+- R7RS has a module system + `include`. we don't need that, so we won't
+- R7RS has a library system. this is nopen't we are not doing that.
+- R5RS has no error handling. we want error handling.
 
-```mermaid
-graph TD
-    lex[Lexer] -->|Tokens| gparse[General Parser]
-    lex2[Lexer] -->|Tokens| gparse2[General Parser]
-    gparse -->|GAst| wd
-    gparse2 -->|GAst| wd
-    ext[External Code] --> |NativeLibrary| wd
-    wd[World] --> Compiler
-    Compiler --> VM
-    Compiler -.-> Treewalk
-```
+So while it is correct to say we are *some* form of Scheme, we aren't going to be
+hardlining any specific implementation. (But I do want to add the Racket syntax-parameter
+extension, and also look around for any *non-syntactical* changes that would make life easier.)
+(I'd want to mull more for any syntax changes, b/c there *is* value in saying that the lexer/parser
+is *just* R7RS)
 
 ### Frontend
 
@@ -80,7 +78,6 @@ takes place in the same environment, namely the one it was defined in.
 If I were to define in `hygiene.scm`:
 
 ```scheme
-(import (scheme base))
 (define-syntax x! (syntax-rules ()
     ((x! val)
         (set! x val))

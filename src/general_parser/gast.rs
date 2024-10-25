@@ -245,7 +245,7 @@ pub trait DatumVisitor {
                 }
                 DatumKind::Number => self.visit_number(&datum.as_number().unwrap()),
                 DatumKind::Bytevector => self.visit_bytevector(&datum.as_bytevector().unwrap()),
-                DatumKind::StringToken => self.visit_string(&datum.as_string().unwrap()),
+                DatumKind::String => self.visit_string(&datum.as_string().unwrap()),
                 DatumKind::Character => self.visit_char(&datum.as_char().unwrap()),
                 DatumKind::Boolean => self.visit_bool(&datum.as_bool().unwrap()),
             }
@@ -525,7 +525,7 @@ pub enum DatumKind {
     Abbreviation,
     Symbol,
     Number,
-    StringToken,
+    String,
     Character,
     Boolean,
     LabelRef,
@@ -550,7 +550,7 @@ impl Datum {
                 SYMBOL => Some(DatumKind::Symbol),
                 DTRIGGER => Some(DatumKind::LabelRef),
                 NUMBER => Some(DatumKind::Number),
-                STRING => Some(DatumKind::StringToken),
+                STRING => Some(DatumKind::String),
                 CHARACTER => Some(DatumKind::Character),
                 BOOLEAN => Some(DatumKind::Boolean),
                 _ => None,
@@ -608,6 +608,11 @@ impl List {
         self.datum().next()
     }
 
+    /// Get the tail elements
+    pub fn tail(&self) -> impl Iterator<Item = Datum> + '_ {
+        self.datum().skip(1)
+    }
+
     /// Looks for a dot token within (without checking for valid structure)
     pub fn has_dot(&self) -> bool {
         self.0
@@ -663,28 +668,20 @@ contains!(datum Vector);
 #[derive(Debug, Clone)]
 pub struct Bytevector(MagusSyntaxNode);
 impl Bytevector {
-    pub fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
-        self.datum()
-            .filter_map(|dat| dat.as_number())
-            .filter_map(|num| match num.number() {
+    pub fn bytes(&self) -> impl Iterator<Item = Option<u8>> + '_ {
+        self.datum().map(
+            |dat| match dat.as_number().as_ref().and_then(Number::number) {
                 Some(SchemeNumber::Exact(ExactReal::Integer {
                     value,
                     is_neg: false,
                 })) if value <= 255 => Some(value as u8),
                 _ => None,
-            })
+            },
+        )
     }
 
     pub fn is_valid(&self) -> bool {
-        self.0.children()
-            .filter_map(Datum::cast)
-            .map(|dat| dat.as_number())
-            .all(|maybe_byte| match maybe_byte {
-                Some(num) => num.number().is_some_and(|sn|
-                    matches!(sn, SchemeNumber::Exact(ExactReal::Integer { value, is_neg: false }) if value <= 255)
-                ),
-                None => false
-            })
+        self.bytes().all(|b| b.is_some())
     }
 }
 simple_gast!(node Bytevector from BYTEVECTOR);

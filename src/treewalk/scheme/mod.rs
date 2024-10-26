@@ -7,7 +7,7 @@
 
 // we copy the module structure of the standard R7RS library
 
-mod base;
+pub mod base;
 
 pub use base::SchemeBase;
 use gc_arena::{Collect, Gc, Mutation, RefLock};

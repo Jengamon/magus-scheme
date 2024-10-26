@@ -4,8 +4,9 @@ use core::fmt;
 use std::rc::Rc;
 
 use gc_arena::{unsize, Collect, Gc, Mutation, RefLock};
+use rowan::TextRange;
 
-use crate::treewalk::TreewalkExecutor;
+use crate::treewalk::{StackValue, TreewalkExecutor};
 use crate::Fuel;
 
 use crate::runtime::{
@@ -77,13 +78,15 @@ pub enum LambdaStage {
 #[collect(no_drop)]
 pub struct LambdaCall<'gc> {
     /// TODO use StackValue
-    pub stack: Vec<ValuePtr<'gc>>,
+    pub stack: Vec<StackValue<'gc>>,
     args: usize,
     stage: LambdaStage,
 
     lambda_id: Gc<'gc, ()>,
     // TODO Hold source information about the lambda so that
     // stack values can be synthesized
+    #[collect(require_static)]
+    range: TextRange,
 }
 
 impl<'gc> LambdaCall<'gc> {
@@ -96,14 +99,20 @@ impl<'gc> LambdaCall<'gc> {
         self.args
     }
 
-    /// TODO Synthesize stack value
     pub fn push(&mut self, mc: &Mutation<'gc>, value: impl IntoValue<'gc>) {
-        self.stack
-            .push(Gc::new(mc, RefLock::new(value.into_value(mc))))
+        // self.range is the range of code from which this call was created
+        let new_value = StackValue {
+            value: Gc::new(mc, RefLock::new(value.into_value(mc))),
+            range: Some(self.range),
+            touch_count: 0,
+            chunk: Err(true),
+            environment: None,
+        };
+        self.stack.push(new_value)
     }
 
     /// TODO Work with StackValues
-    pub fn pop<V: FromValue<'gc>>(&mut self) -> Result<V, Option<ValuePtr<'gc>>> {
+    pub fn pop<V: FromValue<'gc>>(&mut self) -> Result<V, Option<StackValue<'gc>>> {
         let ptr = self.stack.pop();
         ptr.and_then(|vp| V::from_value(*vp.borrow())).ok_or(ptr)
     }
@@ -126,7 +135,10 @@ pub enum ProcedureReturn<'gc> {
     ///
     /// If `is_tail` is set, it is called as a tailcall, and this procedure will have returned.
     /// If not, the result of the call will be pushed to the top of the stack
-    Call { code: ValuePtr<'gc>, is_tail: bool },
+    Call {
+        code: StackValue<'gc>,
+        is_tail: bool,
+    },
 
     /// This procedure has ended.
     ///
@@ -370,13 +382,18 @@ impl<'gc> Lambda<'gc> {
     }
 
     /// Create a new lambda call for this lambda
-    pub fn call(&self, initial_stack: impl IntoIterator<Item = ValuePtr<'gc>>) -> LambdaCall<'gc> {
+    pub fn call(
+        &self,
+        initial_stack: impl IntoIterator<Item = StackValue<'gc>>,
+        range: TextRange,
+    ) -> LambdaCall<'gc> {
         let stack: Vec<_> = initial_stack.into_iter().collect();
         LambdaCall {
             args: stack.len(),
             stack,
             stage: LambdaStage::Typecheck,
             lambda_id: self.id,
+            range,
         }
     }
 

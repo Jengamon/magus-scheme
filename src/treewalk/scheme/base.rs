@@ -2,12 +2,88 @@ use gc_arena::{Collect, Gc, Mutation, RefLock};
 
 use crate::{
     runtime::lambda::{
-        Lambda, LambdaCall, ProcedureError, ProcedureResult, ProcedureReturn, Typecheck,
+        Lambda, LambdaCall, LambdaPtr, ProcedureError, ProcedureResult, ProcedureReturn, Typecheck,
     },
     treewalk::TreewalkExecutor,
-    value::{Value, ValuePtr, ValueType},
+    value::ValueType,
     Fuel,
 };
+
+pub mod macros {
+
+    use gc_arena::Collect;
+
+    use crate::{
+        transformer::{Macro, MacroInstruction, MacroReturn},
+        treewalk::{Context, StackValue, TreewalkExecutor},
+        value::Value,
+        Fuel,
+    };
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Define;
+
+    impl<'gc> Macro<'gc> for Define {
+        fn rewrite(
+            &mut self,
+            _ctx: &Context<'gc>,
+            executor: &mut TreewalkExecutor<'gc>,
+            _fuel: &mut Fuel,
+        ) -> anyhow::Result<MacroReturn<'gc>> {
+            // RN only support <name> <val> input
+            let Some(value) = executor.stack.pop() else {
+                return Err(anyhow::anyhow!("no define value"));
+            };
+            let Some(name) = executor.stack.pop().and_then(|v| v.borrow().as_symbol()) else {
+                return Err(anyhow::anyhow!("no define name"));
+            };
+
+            Ok(MacroReturn::Return(vec![
+                MacroInstruction::Evaluate(value, None),
+                MacroInstruction::Define { name: name.0 },
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct SetBang;
+
+    impl<'gc> Macro<'gc> for SetBang {
+        fn rewrite(
+            &mut self,
+            ctx: &Context<'gc>,
+            executor: &mut TreewalkExecutor<'gc>,
+            _fuel: &mut Fuel,
+        ) -> anyhow::Result<MacroReturn<'gc>> {
+            // only support <name> <val> input
+            let Ok([name, value]): Result<[StackValue<'gc>; 2], _> = executor.stack().try_into()
+            else {
+                return Err(anyhow::anyhow!(
+                    "set! doesn't support input [{}]",
+                    executor
+                        .stack()
+                        .iter()
+                        .map(|sv| format!("{}", sv.borrow().resolve_into(ctx.interner.clone())))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ));
+            };
+
+            // Get name as symbol
+            let name = match *name.borrow() {
+                Value::Symbol(sym) => sym.0,
+                _ => return Err(anyhow::anyhow!("name must be a symbol")),
+            };
+
+            Ok(MacroReturn::Return(vec![
+                MacroInstruction::Evaluate(value, None),
+                MacroInstruction::SetBang { name },
+            ]))
+        }
+    }
+}
 
 fn all_numbers_typecheck(op: &'static str) -> Typecheck {
     Typecheck::new(move |sig| {
@@ -64,7 +140,7 @@ fn div_impl<'gc>(
 #[derive(Collect, Clone, Copy)]
 #[collect(no_drop)]
 pub struct SchemeBase<'gc> {
-    pub(crate) div_op: Gc<'gc, RefLock<Option<ValuePtr<'gc>>>>,
+    pub(crate) div_op: Gc<'gc, RefLock<Option<LambdaPtr<'gc>>>>,
 }
 
 impl<'gc> SchemeBase<'gc> {
@@ -74,20 +150,19 @@ impl<'gc> SchemeBase<'gc> {
         }
     }
 
-    pub fn op_div(&self, mc: &Mutation<'gc>) -> ValuePtr<'gc> {
+    pub fn op_div(&self, mc: &Mutation<'gc>) -> LambdaPtr<'gc> {
         let mut div = self.div_op.borrow_mut(mc);
         if let Some(div) = *div {
             div
         } else {
-            let ndiv = Value::Lambda(Gc::new(
+            let ndiv = Gc::new(
                 mc,
                 RefLock::new(Lambda::with_typecheck(
                     mc,
                     all_numbers_typecheck("divide"),
                     div_impl,
                 )),
-            ))
-            .into_ptr(mc);
+            );
             *div = Some(ndiv);
             ndiv
         }

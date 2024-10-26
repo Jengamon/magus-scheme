@@ -4,7 +4,7 @@ use gc_arena::{Gc, Mutation, RefLock};
 
 use crate::{environment::EnvironmentPtr, runtime::userstruct::UserStruct};
 
-use super::Value;
+use super::{lambda::LambdaPtr, Value};
 use crate::runtime::lambda::Lambda;
 
 pub trait FromValue<'gc> {
@@ -58,6 +58,11 @@ impl<'gc, T: IntoValue<'gc>> TryIntoValue<'gc> for T {
 pub trait IntoValue<'gc> {
     fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc>;
 }
+impl<'gc> IntoValue<'gc> for Value<'gc> {
+    fn into_value(self, _mc: &Mutation<'gc>) -> Value<'gc> {
+        self
+    }
+}
 macro_rules! impl_into_value {
     (simple $tp:ty => $lbl:ident) => {
         impl<'gc> IntoValue<'gc> for $tp {
@@ -96,6 +101,7 @@ impl_into_value!(simple f64 => Inexact);
 impl_into_value!(simple bool => Bool);
 impl_into_value!(simple char => Char);
 impl_into_value!(simple EnvironmentPtr<'gc> => Environment);
+impl_into_value!(simple LambdaPtr<'gc> => Lambda);
 impl<'gc> IntoValue<'gc> for String {
     fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {
         Value::String(Gc::new(mc, RefLock::new(self)))

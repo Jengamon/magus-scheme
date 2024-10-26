@@ -130,6 +130,20 @@ impl<'gc> Value<'gc> {
             resolver,
         }
     }
+
+    pub fn as_lambda(&self) -> Option<LambdaPtr<'gc>> {
+        match self {
+            Self::Lambda(lam) => Some(*lam),
+            _ => None,
+        }
+    }
+
+    pub fn as_symbol(&self) -> Option<Symbol> {
+        match self {
+            Self::Symbol(sym) => Some(*sym),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Collect)]
@@ -211,7 +225,7 @@ pub trait ValueVisitor<'gc> {
             Value::InputPort(inp) => self.visit_input_port(inp, value),
             Value::OutputPort(oup) => self.visit_output_port(oup, value),
             // Value::Procedure(_proc) => todo!(),
-            Value::Environment(_env) => todo!(),
+            Value::Environment(env) => self.visit_environment(env, value),
             Value::UserStruct(_uss) => todo!(),
             // Value::Error(_err) => todo!(),
             Value::Transformer(_trans) => todo!(),
@@ -282,7 +296,12 @@ pub trait ValueVisitor<'gc> {
         let _ = value;
         _ = vec;
     }
-    // TODO procedure, environment, userstruct, error, transformer
+
+    fn visit_environment(&mut self, env: EnvironmentPtr<'gc>, value: ValuePtr<'gc>) {
+        let _ = env;
+        let _ = value;
+    }
+    // TODO procedure,  userstruct, error, transformer
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -301,7 +320,7 @@ impl<'gc> core::fmt::Debug for RuntimeTransformer<'gc> {
     }
 }
 
-#[derive(Collect, Clone, Copy, Debug)]
+#[derive(Collect, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[collect(require_static)]
 pub struct Symbol(pub lasso::Spur);
 impl From<lasso::Spur> for Symbol {
@@ -343,7 +362,7 @@ impl<'gc> ConsCell<'gc> {
         }
     }
 
-    pub(super) fn from_iter<
+    pub fn from_iter<
         T: IntoIterator<
             Item = ValuePtr<'gc>,
             IntoIter = impl DoubleEndedIterator<Item = ValuePtr<'gc>>,

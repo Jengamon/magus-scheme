@@ -10,7 +10,7 @@ use magus::{
         lambda::{Lambda, LambdaCall, ProcedureError, ProcedureReturn, Typecheck},
         value::ValueType,
     },
-    treewalk::{Treewalk, TreewalkExecutor},
+    treewalk::{scheme, StackValue, Treewalk, TreewalkArena, TreewalkExecutor},
     user_type, Comment, ContainsDatum, ContainsTrivia, DatumVisitor, ExternalRepresentation, Fuel,
     GAstNode, MagusSyntaxElementRef, Module, Symbol,
 };
@@ -252,10 +252,27 @@ fn repl() -> anyhow::Result<()> {
         }
         user_type!(MyCoolType);
 
+        fn get_static_sym<'gc>(
+            arena: &TreewalkArena<'gc>,
+            mc: &Mutation<'gc>,
+            sym: &'static str,
+        ) -> magus::value::Symbol {
+            arena
+                .state
+                .interner
+                .borrow_mut(mc)
+                .get_or_intern_static(sym)
+                .into()
+        }
+
         // evaluate using treewalk
         let exec = interp.new_executor(module, |mc, arena, env| {
             let mut env = env.borrow_mut(mc);
-            env.define(mc, "x", 3i64, false).unwrap();
+            let x_sym = get_static_sym(arena, mc, "x");
+            env.define(mc, x_sym, StackValue::external(mc, 3i64), false)
+                .unwrap();
+
+            let _ = env.get(x_sym);
 
             // define a lambda for +
             let all_numbers_typecheck = |op: &'static str| {
@@ -353,11 +370,30 @@ fn repl() -> anyhow::Result<()> {
                     Ok(ProcedureReturn::Return)
                 },
             );
-            env.define(mc, "+", plus_lambda, false).unwrap();
-            env.define(mc, "-", sub_lambda, false).unwrap();
-            env.define_ptr(mc, "/", arena.scheme.base(mc).op_div(mc), false)
+
+            let add_sym = get_static_sym(arena, mc, "+");
+            let sub_sym = get_static_sym(arena, mc, "-");
+            let mul_sym = get_static_sym(arena, mc, "*");
+            let div_sym = get_static_sym(arena, mc, "/");
+            let define_sym = get_static_sym(arena, mc, "define");
+            let setbang_sym = get_static_sym(arena, mc, "set!");
+            env.define(mc, add_sym, StackValue::external(mc, plus_lambda), false)
                 .unwrap();
-            env.define(mc, "*", mul_lambda, false).unwrap();
+            env.define(mc, sub_sym, StackValue::external(mc, sub_lambda), false)
+                .unwrap();
+            env.define(
+                mc,
+                div_sym,
+                StackValue::external(mc, arena.scheme.base(mc).op_div(mc)),
+                false,
+            )
+            .unwrap();
+            env.define(mc, mul_sym, StackValue::external(mc, mul_lambda), false)
+                .unwrap();
+            env.define_macro(mc, define_sym, scheme::base::macros::Define)
+                .unwrap();
+            env.define_macro(mc, setbang_sym, scheme::base::macros::SetBang)
+                .unwrap();
         });
         let mut fuel = Fuel::with(1);
         let mut running = true;
@@ -382,16 +418,17 @@ fn repl() -> anyhow::Result<()> {
                         let resolved = ptr.borrow().resolve_into(ctx.interner.clone());
                         let idx_key = (idx != 0).then_some(idx);
                         if let Some(scope) = scope_info.get(&idx_key) {
-                            println!(
-                                "- {idx}: {resolved} (({}))",
-                                scope.label().unwrap_or("<<root>>")
-                            );
+                            println!("- {idx}: {resolved} (({}))", scope.label());
                         } else {
                             println!("- {idx}: {resolved}");
                         }
                     }
                     if let Some(call) = exec.scope().lambda_call() {
                         println!(">>>> SUSPENDED: {call}");
+                    }
+
+                    if let Some(err) = exec.scope().error() {
+                        println!(">>>> ERROR: {}", err.clone().display(src));
                     }
 
                     let metrics = ctx.mutation.metrics();

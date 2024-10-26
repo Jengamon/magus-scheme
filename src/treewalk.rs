@@ -17,6 +17,10 @@ use lasso::Rodeo;
 use rowan::TextRange;
 use scheme::SchemeStd;
 use slotmap::{new_key_type, HopSlotMap};
+use virtual_inst::{
+    convert_to_virtual, CodeChunkPtr, VirtualInstruction, VirtualInstructionDatum,
+    VirtualInstructionPayload,
+};
 
 use crate::{
     environment::{Environment, EnvironmentPtr},
@@ -26,12 +30,13 @@ use crate::{
         lambda::{LambdaCall, LambdaExecError, LambdaPtr, ProcedureError, ProcedureReturn},
         EnsureNullVisitor, FuelCosts,
     },
-    value::{self, ConsCell, Value, ValuePtr, ValueVisitor as _},
-    Boolean, Character, ContainsDatum, Datum, DatumKind, ExactReal, Fuel, GAstNode, List, Module,
-    Number, SchemeNumber, StringToken, Symbol,
+    transformer::{MacroInstruction, MacroPtr, MacroReturn},
+    value::{ConsCell, Value, ValuePtr, ValueType, ValueVisitor as _},
+    ContainsDatum, Fuel, GAstNode, Module,
 };
 
 pub mod scheme;
+mod virtual_inst;
 
 new_key_type! {struct InnerExecutorKey;}
 pub struct ExecutorKey(InnerExecutorKey, Sender<TreewalkMsg>);
@@ -75,9 +80,14 @@ unsafe impl<'gc> Collect for Executors<'gc> {
 pub struct TreewalkArena<'gc> {
     null_val: ValuePtr<'gc>,
     executors: Executors<'gc>,
-    state: TreewalkState<'gc>,
+    pub state: TreewalkState<'gc>,
 
     pub scheme: SchemeStd<'gc>,
+    // TODO look into DynamicRootSet, so that we can stash values into here
+    // The use case is for certain API lambda, like (< (power card) 3)??
+    // This might not be necessary (at these locations `<` would be overwritten with a lambda that pushes
+    // a value representing "check if in ascending order" to stack)
+    // NOTE we probably don't need this
 }
 
 impl<'gc> TreewalkArena<'gc> {
@@ -174,10 +184,15 @@ impl Treewalk {
         let inner = self.arena.mutate_root(|mc, arena| {
             let new_env = Gc::new(mc, RefLock::new(Environment::new(mc, None)));
             env_init(mc, arena, new_env);
-            arena
-                .executors
-                .0
-                .insert(TreewalkExecutor::new(mc, new_env, code))
+            let range = code.syntax().text_range();
+            let exec = TreewalkExecutor::new(
+                mc,
+                &mut arena.state.interner.borrow_mut(mc),
+                new_env,
+                code,
+                range,
+            );
+            arena.executors.0.insert(exec)
         });
 
         ExecutorKey(inner, self.sender.clone())
@@ -191,7 +206,7 @@ impl Treewalk {
 
         self.arena.mutate(move |mc, arena| {
             if let Some(executor) = arena.executors.0.get(key.0).copied() {
-                let context = arena.state.ctx(mc);
+                let context = arena.state.ctx(mc, arena.null_val);
                 let exec = executor.borrow_mut(mc);
                 Some(func(context, exec))
             } else {
@@ -203,8 +218,8 @@ impl Treewalk {
 
 #[derive(Debug, Collect, Clone)]
 #[collect(no_drop)]
-struct TreewalkState<'gc> {
-    interner: Gc<'gc, RefLock<Rodeo>>,
+pub struct TreewalkState<'gc> {
+    pub interner: Gc<'gc, RefLock<Rodeo>>,
 }
 
 impl<'gc> TreewalkState<'gc> {
@@ -214,69 +229,62 @@ impl<'gc> TreewalkState<'gc> {
         }
     }
 
-    fn ctx(&'gc self, mc: &'gc Mutation<'gc>) -> Context<'gc> {
+    fn ctx(&'gc self, mc: &'gc Mutation<'gc>, null_ptr: ValuePtr<'gc>) -> Context<'gc> {
         Context {
             mutation: mc,
+            null_ptr,
             interner: self.interner.borrow_mut(mc),
         }
     }
 }
 
-#[derive(Debug, Clone)]
-#[expect(dead_code)]
-enum VirtualInstructionPayload {
-    Number(i64),
-    Bool(bool),
-    String(String),
-    Bytevector(Vec<u8>),
-    Symbol(value::Symbol),
-    List {
-        head: Box<VirtualInstruction>,
-        body: Vec<VirtualInstruction>,
-        // when excuting a list, this an index into the body
-        body_index: usize,
-        // If the list has a dot, this is the element after the dot
-        dot: Option<Box<VirtualInstruction>>,
-    },
-    Labeled {
-        label: usize,
-        instruction: Box<VirtualInstruction>,
-        // we can cache if an instruction is circular
-        //
-        // this is so that we don't have to determine whether it is over and over again
-        // and can be a quick check to prevent the execution of circular lists
-        // (we don't want to stop the ~meh~ but technically correct #0=(... not even gonna use the label ....), but
-        // we *also* want to fully preserve circular structures b/c `quote` is a thing)
-        is_circular: bool,
-    },
-}
-
-// TODO this is what to evaluate, it preserves information about
-// where the instruction is from w/o using the GAst
-#[derive(Debug, Clone, Collect)]
-#[collect(require_static)]
-#[expect(dead_code)]
-struct VirtualInstruction {
-    payload: VirtualInstructionPayload,
-    // if this is directly from datum, store it.
-    // this can also be synthesized (generally copied) by macros
-    // TODO should we start storing this kind of information in values too?
-    range: TextRange,
-
-    /// when using this, we can track how many times this particular expression
-    /// has been executed (this is kept through even as a stack value)
-    touch_count: usize,
-}
-
 /// A value pointer enhanced with source tracking information
-#[derive(Debug, Clone, Collect)]
+#[derive(Debug, Clone, Collect, Copy)]
 #[collect(no_drop)]
 pub struct StackValue<'gc> {
-    value: ValuePtr<'gc>,
+    pub(crate) value: ValuePtr<'gc>,
     #[collect(require_static)]
-    range: TextRange,
-    /// preservation of touch_count when used as a virtual instruction
-    touch_count: usize,
+    pub(crate) range: Option<TextRange>,
+    /// preservation of touch_count when used as data
+    pub(crate) touch_count: usize,
+    /// If this value has been JIT'ed, what is the chunk
+    /// If it hasn't, store if it is possible to JIT (if we haven't tried already)
+    pub(crate) chunk: Result<CodeChunkPtr<'gc>, bool>,
+    // A macro may request code be run in a certain environment, this
+    // is the requested environment.
+    //
+    // None means to evaluate in the current environment
+    pub(crate) environment: Option<EnvironmentPtr<'gc>>,
+}
+
+impl<'gc> StackValue<'gc> {
+    /// This is for stack values generated externally, not from anywhere in the source
+    pub fn external<V>(mc: &Mutation<'gc>, v: V) -> Self
+    where
+        V: IntoValue<'gc>,
+    {
+        Self {
+            value: Gc::new(mc, RefLock::new(v.into_value(mc))),
+            range: None,
+            touch_count: 0,
+            chunk: Err(true),
+            environment: None,
+        }
+    }
+
+    /// This is for stack values generated externally, not from anywhere in the source
+    pub fn external_with_env<V>(mc: &Mutation<'gc>, v: V, env: EnvironmentPtr<'gc>) -> Self
+    where
+        V: IntoValue<'gc>,
+    {
+        Self {
+            value: Gc::new(mc, RefLock::new(v.into_value(mc))),
+            range: None,
+            touch_count: 0,
+            chunk: Err(true),
+            environment: Some(env),
+        }
+    }
 }
 
 /// Transparently access the value of this pointer
@@ -287,40 +295,52 @@ impl<'gc> std::ops::Deref for StackValue<'gc> {
     }
 }
 
-/// This is what the treewalk is to execute next
-#[derive(Clone, Debug, Collect)]
-#[collect(no_drop)]
-enum Instruction {
-    // eventually this will move to VirtualInstruction instead of Datum
-    // and an alternate instruction for executing a bytecode Chunk will be added
-    // (which is why no_drop instead of require_static)
-    // (the Chunk instruction will preserve the VirtualInstruction in case it is quoted)
-    Evaluate(#[collect(require_static)] Datum),
-
-    // Hopefully moved out once macro system is more generalized
-    CallFunction {
-        args: usize,
-    },
-    Define {
-        name: Box<str>,
-        fail_if_not_present: bool,
-    },
-}
-
 pub struct Context<'gc> {
     pub mutation: &'gc Mutation<'gc>,
     pub interner: RefMut<'gc, Rodeo>,
+    pub null_ptr: ValuePtr<'gc>,
 }
 
 #[derive(Debug, Collect)]
 #[collect(no_drop)]
 pub struct TreewalkExecutor<'gc> {
-    stack: Vec<ValuePtr<'gc>>,
-    execution: Option<Instruction>,
+    rewrite_queue: VecDeque<MacroInstruction<'gc>>,
+    stack: Vec<StackValue<'gc>>,
     root_scope: Scope<'gc>,
     scope_stack: Vec<Scope<'gc>>,
 }
 pub type TreewalkExecutorPtr<'gc> = Gc<'gc, RefLock<TreewalkExecutor<'gc>>>;
+
+#[derive(Collect, Clone, Debug)]
+#[collect(no_drop)]
+enum ScopeExecution<'gc> {
+    Instruction(VirtualInstruction<'gc>),
+    Rewrite(MacroInstruction<'gc>),
+    Empty,
+}
+
+impl<'gc> ScopeExecution<'gc> {
+    fn is_some(&self) -> bool {
+        !self.is_none()
+    }
+
+    fn is_none(&self) -> bool {
+        matches!(self, ScopeExecution::Empty)
+    }
+
+    fn take(&mut self) -> ScopeExecution<'gc> {
+        let ret = self.clone();
+        *self = ScopeExecution::Empty;
+        ret
+    }
+
+    fn environment(&self) -> Option<EnvironmentPtr<'gc>> {
+        match self {
+            Self::Instruction(vi) => vi.environment,
+            _ => None,
+        }
+    }
+}
 
 // A scope consists of an environment, next instructions (continuation)
 // and a "bottom", which is a marker for a sections of the stack the scope
@@ -329,12 +349,19 @@ pub type TreewalkExecutorPtr<'gc> = Gc<'gc, RefLock<TreewalkExecutor<'gc>>>;
 #[collect(no_drop)]
 pub struct Scope<'gc> {
     pub environment: EnvironmentPtr<'gc>,
+
+    execution: ScopeExecution<'gc>,
+    #[collect(require_static)]
+    range: TextRange,
+
+    current_macro: Option<MacroPtr<'gc>>,
     current_lambda: Option<(LambdaCall<'gc>, LambdaPtr<'gc>)>,
     error: Option<SchemeErrorPtr<'gc>>,
     processed: usize,
-    next_datum: VecDeque<Instruction>,
+    next_datum: VecDeque<VirtualInstruction<'gc>>,
     bottom: Option<usize>,
     label: Option<Box<str>>,
+    executable: Option<usize>,
 }
 
 impl<'gc> Scope<'gc> {
@@ -344,8 +371,11 @@ impl<'gc> Scope<'gc> {
     }
 
     #[inline]
-    pub fn label(&self) -> Option<&str> {
-        self.label.as_ref().map(|s| s.as_ref())
+    pub fn label(&self) -> &str {
+        self.label
+            .as_ref()
+            .map(|s| s.as_ref())
+            .unwrap_or("<<root>>")
     }
 
     /// Number of processed instructions
@@ -373,9 +403,9 @@ enum LambdaCallReturn<'gc> {
     /// Suspend the call to this lambda
     Suspend,
     /// Suspend the call to this lambda, executing the given code in a new frame
-    Call(ValuePtr<'gc>),
+    Call(StackValue<'gc>),
     /// Execute the given code on this frame
-    TailCall(ValuePtr<'gc>),
+    TailCall(StackValue<'gc>),
     /// Lambda error
     Error(LambdaExecError<'gc>),
 }
@@ -387,28 +417,38 @@ pub struct StepError;
 impl<'gc> TreewalkExecutor<'gc> {
     fn new(
         mc: &Mutation<'gc>,
+        interner: &mut Rodeo,
         environment: EnvironmentPtr<'gc>,
         code: Module,
+        range: TextRange,
     ) -> TreewalkExecutorPtr<'gc> {
         Gc::new(
             mc,
             RefLock::new(Self {
                 stack: Vec::new(),
                 root_scope: Scope {
+                    executable: None,
                     error: None,
                     label: None,
+                    range,
                     environment,
                     processed: 0,
-                    next_datum: code.datum().map(Instruction::Evaluate).collect(),
+                    next_datum: code
+                        .datum()
+                        .map(|d| convert_to_virtual(d, interner))
+                        .collect(),
                     bottom: None,
                     current_lambda: None,
+                    current_macro: None,
+                    execution: ScopeExecution::Empty,
                 },
-                execution: None,
+                rewrite_queue: VecDeque::new(),
                 scope_stack: Vec::new(),
             }),
         )
     }
 
+    /// root scope is always the first scope
     pub fn all_scopes(&self) -> impl Iterator<Item = &Scope<'gc>> {
         std::iter::once(&self.root_scope).chain(self.scope_stack.iter())
     }
@@ -421,11 +461,11 @@ impl<'gc> TreewalkExecutor<'gc> {
         self.scope_stack.last_mut().unwrap_or(&mut self.root_scope)
     }
 
-    pub fn full_stack(&self) -> &[ValuePtr<'gc>] {
+    pub fn full_stack(&self) -> &[StackValue<'gc>] {
         &self.stack
     }
 
-    pub fn stack(&self) -> &[ValuePtr<'gc>] {
+    pub fn stack(&self) -> &[StackValue<'gc>] {
         if let Some(bottom) = self.scope().bottom {
             &self.stack[bottom..]
         } else {
@@ -433,7 +473,7 @@ impl<'gc> TreewalkExecutor<'gc> {
         }
     }
 
-    pub fn stack_mut(&mut self) -> &mut [ValuePtr<'gc>] {
+    pub fn stack_mut(&mut self) -> &mut [StackValue<'gc>] {
         if let Some(bottom) = self.scope().bottom {
             &mut self.stack[bottom..]
         } else {
@@ -441,53 +481,105 @@ impl<'gc> TreewalkExecutor<'gc> {
         }
     }
 
+    /// A scope is executable if the first element on its stack is a lambda
+    fn scope_executable(&self, scope: &Scope) -> bool {
+        let loc = scope
+            .executable
+            .map(|ex| self.stack.len().saturating_sub(ex).saturating_sub(1))
+            .and_then(|l| {
+                if let Some(bot) = scope.bottom {
+                    (l >= bot).then_some(l)
+                } else {
+                    Some(l)
+                }
+            });
+        loc.is_some_and(|loc| {
+            self.stack
+                .get(loc)
+                .is_some_and(|v| v.borrow().value_type() == ValueType::Lambda)
+        })
+    }
+
     pub fn can_continue(&self) -> bool {
-        // do we have an instruction to execute
-        (self.execution.is_some()
-            // does any scope have a continuation or suspended lambda
-            || self
+        (
+            // does any scope have a continuation or suspended lambda, or an instruction to execute
+            self
                 .scope_stack
                 .iter()
-                .any(|scope| !scope.next_datum.is_empty() || scope.current_lambda.is_some())
-            // does the root scope have a continuation or suspended lambda
+                .any(|scope| !scope.next_datum.is_empty() || scope.current_lambda.is_some() || scope.execution.is_some()|| self.scope_executable(scope))
+            // does the root scope have a continuation or suspended lambda, or an instruction to execute
             || !self.root_scope.next_datum.is_empty()
-            || self.root_scope.current_lambda.is_some())
+            || self.root_scope.current_lambda.is_some()
+            || self.scope_executable(&self.root_scope)
+        || self.root_scope.execution.is_some() || !self.rewrite_queue.is_empty())
             // is the *root* scope not erroring (if it is, we "return" an error)
             && self.root_scope.error.is_none()
     }
 
     fn current_env(&self) -> EnvironmentPtr<'gc> {
-        self.scope().environment
+        // check the instruction for an environment
+        // then use the current scope's environment
+        let scope = self.scope();
+        scope.execution.environment().unwrap_or(scope.environment)
     }
 
-    fn next_inst(&mut self) {
-        let mut next_inst = self.scope_mut().next_datum.pop_front();
-        while next_inst.is_none() && !self.scope_stack.is_empty() {
-            let ret_val = self.stack().last().copied();
-            if let Some(bot) = self.scope().bottom {
-                self.stack.truncate(bot);
-            } else {
-                unreachable!()
-            }
+    fn next_inst(&mut self, ctx: &Context<'gc>, fuel: &mut Fuel) {
+        if let Some(rewrite) = self.rewrite_queue.pop_front() {
+            self.scope_mut().execution = ScopeExecution::Rewrite(rewrite);
+        } else if !self.scope().next_datum.is_empty() {
+            let mut next_inst = self.scope_mut().next_datum.pop_front();
+            while next_inst.is_none() && !self.scope_stack.is_empty() {
+                let ret_val = self.stack().last().copied();
+                if let Some(bot) = self.scope().bottom {
+                    self.stack.truncate(bot);
+                } else {
+                    unreachable!()
+                }
 
-            if let Some(v) = ret_val {
-                self.stack.push(v);
+                if let Some(v) = ret_val {
+                    self.stack.push(v);
+                }
+                // pop scope
+                self.scope_stack.pop();
+                next_inst = self.scope_mut().next_datum.pop_front();
             }
-            // pop scope
-            self.scope_stack.pop();
-            next_inst = self.scope_mut().next_datum.pop_front();
+            self.scope_mut().execution = if let Some(inst) = next_inst {
+                ScopeExecution::Instruction(inst)
+            } else {
+                ScopeExecution::Empty
+            };
+        } else if let Some(args) = self.scope().executable {
+            assert!(self.scope_executable(self.scope()));
+            // we have nothing else to execute, but this frame is a lambda call!
+            let stack_len = self.stack.len().saturating_sub(args);
+            let arg_stack = self.stack.split_off(stack_len);
+
+            let lambda = self
+                .stack
+                .pop()
+                .and_then(|sv| sv.borrow().as_lambda())
+                .expect("bottom of stack should be a lambda");
+            let lambda_access = lambda.borrow_mut(ctx.mutation);
+            let mut call = lambda_access.call(arg_stack, self.scope().range);
+            fuel.consume(FuelCosts::CALL_COST);
+            drop(lambda_access);
+
+            let ret = self.call_lambda(lambda, ctx.mutation, &mut call, fuel, self.scope().error);
+            self.handle_lambda_return(ret, ctx, lambda, call);
         }
-        self.execution = next_inst;
     }
 
     /// Push a new scope using a given parent environment
+    #[expect(clippy::too_many_arguments)]
     fn push_scope_with_env(
         &mut self,
         mc: &Mutation<'gc>,
         label: impl AsRef<str>,
         bottom: usize,
-        inst: impl IntoIterator<Item = Instruction>,
+        inst: impl IntoIterator<Item = VirtualInstruction<'gc>>,
         parent: EnvironmentPtr<'gc>,
+        range: TextRange,
+        executable: Option<usize>,
     ) {
         self.scope_stack.push(Scope {
             error: None,
@@ -496,7 +588,11 @@ impl<'gc> TreewalkExecutor<'gc> {
             label: Some(Box::from(label.as_ref())),
             bottom: Some(bottom),
             current_lambda: None,
+            current_macro: None,
+            execution: ScopeExecution::Empty,
             processed: 0,
+            executable,
+            range,
         })
     }
 
@@ -506,10 +602,12 @@ impl<'gc> TreewalkExecutor<'gc> {
         mc: &Mutation<'gc>,
         label: impl AsRef<str>,
         bottom: usize,
-        inst: impl IntoIterator<Item = Instruction>,
+        inst: impl IntoIterator<Item = VirtualInstruction<'gc>>,
+        range: TextRange,
+        executable: Option<usize>,
     ) {
         let parent = self.scope().environment;
-        self.push_scope_with_env(mc, label, bottom, inst, parent)
+        self.push_scope_with_env(mc, label, bottom, inst, parent, range, executable)
     }
 
     /// Pop the current scope.
@@ -520,134 +618,69 @@ impl<'gc> TreewalkExecutor<'gc> {
     }
 
     /// Push a value pointer to current scope
-    fn push(&mut self, value: ValuePtr<'gc>) {
+    fn push(&mut self, value: StackValue<'gc>) {
         // get the current scope and push to there
         self.stack.push(value);
     }
 
-    /// Push a value to current scope
-    fn push_val(&mut self, mc: &Mutation<'gc>, value: impl IntoValue<'gc>) {
-        // get the current scope and push to there
-        self.push(Gc::new(mc, RefLock::new(value.into_value(mc))));
+    /// Push a value pointer to current scope (copying information from a virtual instruction)
+    fn push_from_inst(
+        &mut self,
+        mc: &Mutation<'gc>,
+        value: impl IntoValue<'gc>,
+        vi: &VirtualInstruction<'gc>,
+    ) {
+        let sv = StackValue {
+            value: Gc::new(mc, RefLock::new(value.into_value(mc))),
+            range: vi.range,
+            touch_count: 0,
+            chunk: Err(true),
+            environment: vi.environment,
+        };
+        self.stack.push(sv);
     }
 
-    // Hardcoded-macro implementation
-    //
-    // returns if a macro was handled
-    fn macro_handlng(
-        &mut self,
-        _ctx: &Context<'gc>,
-        _fuel: &mut Fuel,
-        symbol: Symbol,
-        list: List,
-    ) -> bool {
-        let Some(ident) = symbol.identifier(false) else {
-            return false;
-        };
+    // Make a backtrace of frames until this one
+    fn build_error(
+        &self,
+        mc: &Mutation<'gc>,
+        error_type: SchemeErrorType<'gc>,
+    ) -> SchemeErrorPtr<'gc> {
+        let backtrace = std::iter::once(&self.root_scope)
+            .chain(self.scope_stack.iter())
+            .map(|scope| StackFrame {
+                range: scope.range,
+                scope_label: scope.label.clone(),
+            })
+            .collect();
 
-        match ident.as_ref() {
-            "define" => {
-                // define <name> <val>
-                // define (<name> <args>) <body>...
-                // set a variable in the environment
-                let mut args = list.tail();
-                let name = args.next();
-                match name.as_ref().and_then(Datum::kind) {
-                    Some(DatumKind::Symbol) => {
-                        // this is the define <name> <val> form
-                        let Some((val, name)) = args.next().zip(
-                            name.as_ref()
-                                .and_then(Datum::as_symbol)
-                                .and_then(|s| s.identifier(false)),
-                        ) else {
-                            let syntax = list.syntax();
-                            eprintln!(
-                                "Malformed define: {} [{:?}]",
-                                syntax
-                                    .text()
-                                    .to_string()
-                                    .replace('\n', " ")
-                                    .replace(['\t', '\r'], ""),
-                                syntax.text_range()
-                            );
-                            return false;
-                        };
-                        let datum = &mut self.scope_mut().next_datum;
-                        datum.push_front(Instruction::Define {
-                            name,
-                            fail_if_not_present: false,
-                        });
-                        datum.push_front(Instruction::Evaluate(val));
-                    }
-                    Some(DatumKind::List) => {
-                        // this is the define (<name> <args>...) <body>... form
-                        todo!()
-                    }
-                    _ => {
-                        let syntax = list.syntax();
-                        eprintln!(
-                            "Malformed define: {} [{:?}]",
-                            syntax
-                                .text()
-                                .to_string()
-                                .replace('\n', " ")
-                                .replace(['\t', '\r'], ""),
-                            syntax.text_range()
-                        );
-                        return false;
-                    }
+        Gc::new(
+            mc,
+            SchemeError {
+                backtrace,
+                error_type,
+            },
+        )
+    }
+
+    /// Returns true if the macro want to resuspend execution
+    fn call_macro(&mut self, mcr: MacroPtr<'gc>, ctx: &Context<'gc>, fuel: &mut Fuel) -> bool {
+        let mut macro_access = mcr.borrow_mut(ctx.mutation);
+        match macro_access.rewrite(ctx, self, fuel) {
+            Ok(res) => match res {
+                MacroReturn::Suspend => true,
+                MacroReturn::Return(inst) => {
+                    self.rewrite_queue.extend(inst);
+                    false
                 }
-
-                true
+            },
+            Err(e) => {
+                self.raise_error(
+                    self.build_error(ctx.mutation, SchemeErrorType::Macro(e)),
+                    ctx,
+                );
+                false
             }
-            "set!" => {
-                // set! <name> <val>
-                // set a variable in the env, error if it doesn't exist
-                let mut args = list.tail();
-                let Some(name) = args
-                    .next()
-                    .as_ref()
-                    .and_then(Datum::as_symbol)
-                    .and_then(|s| s.identifier(false))
-                else {
-                    eprintln!("malformed set! {}:{}", file!(), line!());
-                    return true;
-                };
-                let Some(val) = args.next() else {
-                    eprintln!("malformed set! {}:{}", file!(), line!());
-                    return true;
-                };
-                if args.next().is_some() {
-                    eprintln!("set! has too many args");
-                    return true;
-                }
-
-                let datum = &mut self.scope_mut().next_datum;
-                datum.push_front(Instruction::Define {
-                    name,
-                    fail_if_not_present: true,
-                });
-                datum.push_front(Instruction::Evaluate(val));
-                true
-            }
-            "let" => {
-                // let ((<name> <val>)...) <body>...
-                // bind variables temporarily using the current environment
-                true
-            }
-            "let*" => {
-                // let* ((<name> <val>)...) <body>...
-                // bind variables temporarily using sequential environments
-                true
-            }
-            "lambda" => {
-                // lambda <var> <body>...
-                // lambda (<arg>...) <body>...
-                // lambda (<arg>... . <rest>) <body>...
-                // create an unnamed function
-                true
-            }
-            _ => false,
         }
     }
 
@@ -684,6 +717,44 @@ impl<'gc> TreewalkExecutor<'gc> {
         }
     }
 
+    fn raise_error(&mut self, err_ptr: SchemeErrorPtr<'gc>, ctx: &Context<'gc>) {
+        let range = self.scope().range;
+
+        // combine the generated error pointer with any existing errors
+        let err_ptr = if let Some(err) = &self.scope().error {
+            let mut errors: Vec<_> = match &err.error_type {
+                SchemeErrorType::Compound(errors) => errors.to_vec(),
+                _ => Vec::new(),
+            };
+
+            if !errors.is_empty() {
+                errors.push(*err);
+            }
+
+            errors.push(err_ptr);
+
+            // TODO Create a new compound error, with this scope included in the backtrace,
+            // then pop this scope
+            Gc::new(
+                ctx.mutation,
+                SchemeError {
+                    backtrace: std::iter::once(StackFrame {
+                        scope_label: self.scope().label.clone(),
+                        // This would be the range from the current VirtualInstruction
+                        range,
+                    })
+                    .chain(err.backtrace.iter().cloned())
+                    .collect(),
+                    error_type: SchemeErrorType::Compound(errors),
+                },
+            )
+        } else {
+            err_ptr
+        };
+
+        self.scope_mut().error = Some(err_ptr);
+    }
+
     fn handle_lambda_return(
         &mut self,
         ret: LambdaCallReturn<'gc>,
@@ -696,17 +767,73 @@ impl<'gc> TreewalkExecutor<'gc> {
                 if let Some(val) = call.stack.pop() {
                     self.stack.push(val);
                 }
+
+                if self.scope_stack.is_empty() {
+                    self.scope_mut().executable = None;
+                } else {
+                    self.pop_scope();
+                }
             }
             LambdaCallReturn::Suspend => {
                 self.scope_mut().current_lambda = Some((call, lambda));
             }
-            LambdaCallReturn::Call(_) => {
+            LambdaCallReturn::Call(value) => {
                 // Create a new scope to execute the given code
-                todo!()
+                let code = match value.try_into() {
+                    Ok(code) => code,
+                    Err(_err) => {
+                        let err_ptr = self.build_error(ctx.mutation, SchemeErrorType::BadList);
+                        self.raise_error(err_ptr, ctx);
+                        return;
+                    }
+                };
+
+                self.push_scope(
+                    ctx.mutation,
+                    format!(
+                        "{} eval {}",
+                        self.scope().label(),
+                        value.borrow().resolve_into(ctx.interner.clone())
+                    ),
+                    self.stack.len(),
+                    std::iter::once(code),
+                    // if an instruction/value doesn't have a range, it is from outside
+                    // this source file, so we use the range of the scope to represent that
+                    value.range.unwrap_or(self.root_scope.range),
+                    None,
+                );
             }
-            LambdaCallReturn::TailCall(_) => {
+            LambdaCallReturn::TailCall(value) => {
                 // Bash the current scope, replacing it with the given code
-                todo!()
+                let code = match value.try_into() {
+                    Ok(code) => code,
+                    Err(_err) => {
+                        let err_ptr = self.build_error(ctx.mutation, SchemeErrorType::BadList);
+                        self.raise_error(err_ptr, ctx);
+                        return;
+                    }
+                };
+
+                // we "lazy", so use the code we have
+                self.push_scope(
+                    ctx.mutation,
+                    format!(
+                        "{} eval {}",
+                        self.scope().label(),
+                        value.borrow().resolve_into(ctx.interner.clone())
+                    ),
+                    self.stack.len(),
+                    std::iter::once(code),
+                    value.range.unwrap_or(self.root_scope.range),
+                    None,
+                );
+                let new_scope = self.pop_scope().unwrap();
+                if self.pop_scope().is_none() {
+                    // bash the root scope
+                    self.root_scope = new_scope;
+                } else {
+                    self.scope_stack.push(new_scope);
+                }
             }
             LambdaCallReturn::Error(le) => {
                 match le {
@@ -721,65 +848,126 @@ impl<'gc> TreewalkExecutor<'gc> {
 
                                 // Resolve the value to get more useful (and nicer) text in the error
                                 let val = val.borrow().resolve_into(ctx.interner.clone());
-                                let _err_type = SchemeErrorType::Raise(val);
+                                let err_type = SchemeErrorType::Raise(val);
                                 // make a Scheme error using the generating the current backtrace
                                 // and the currrent execution's range
-                                todo!("raised value")
+                                self.build_error(ctx.mutation, err_type)
                             }
                             ProcedureError::General(gen) => {
                                 // Any *non-propagated* errors become the error of the current scope
-                                let _err_type = SchemeErrorType::Rust(gen);
+                                let err_type = SchemeErrorType::Rust(gen);
                                 // make a Scheme error using the generating the current backtrace
                                 // and the currrent execution's range
-                                todo!("general error")
+                                self.build_error(ctx.mutation, err_type)
                             }
                         };
 
-                        // combine the generated error pointer with any existing errors
-                        let err_ptr = if let Some(err) = &self.scope().error {
-                            let mut errors: Vec<_> = match &err.error_type {
-                                SchemeErrorType::Compound(errors) => errors.to_vec(),
-                                _ => Vec::new(),
-                            };
-
-                            if !errors.is_empty() {
-                                errors.push(*err);
-                            }
-
-                            errors.push(err_ptr);
-
-                            // TODO Create a new compound error, with this scope included in the backtrace,
-                            // then pop this scope
-                            Gc::new(
-                                ctx.mutation,
-                                SchemeError {
-                                    backtrace: std::iter::once(StackFrame {
-                                        scope_label: self.scope().label.clone(),
-                                        // This would be the range from the current VirtualInstruction
-                                        range: todo!(),
-                                    })
-                                    .chain(err.backtrace.iter().cloned())
-                                    .collect(),
-                                    error_type: SchemeErrorType::Compound(errors),
-                                },
-                            )
-                        } else {
-                            err_ptr
-                        };
-
-                        // Pop the scope and assign the error to the upper scope
-                        if self.pop_scope().is_none() {
-                            unreachable!("root scope should not be popped")
-                        }
-
-                        self.scope_mut().error = Some(err_ptr);
+                        self.raise_error(err_ptr, ctx);
                     }
-                    LambdaExecError::TypecheckFailure(_err) => {
+                    LambdaExecError::TypecheckFailure(err) => {
                         // Create a new error on this frame using this error
+                        self.raise_error(
+                            self.build_error(ctx.mutation, SchemeErrorType::Typecheck(err)),
+                            ctx,
+                        )
                     }
                     LambdaExecError::LambdaMismatch { id, call_id } => {
                         panic!("ICE: mismatched lambda call {call_id:p} for lambda {id:p}")
                     }
+                }
+            }
+        }
+    }
+
+    /// Handle macro rewrite rules
+    fn handle_rewrite(&mut self, ctx: &Context<'gc>, rewrite: MacroInstruction<'gc>) {
+        match rewrite {
+            MacroInstruction::Evaluate(sv, env) => {
+                let asv = if let Some(env) = env {
+                    StackValue {
+                        environment: Some(env),
+                        ..sv
+                    }
+                } else {
+                    sv
+                };
+
+                match asv.try_into() {
+                    Ok(vi) => {
+                        let scope = self.scope_mut();
+                        scope.execution = ScopeExecution::Instruction(vi);
+                    }
+                    Err(()) => {
+                        let err_ptr = self.build_error(ctx.mutation, SchemeErrorType::BadList);
+                        self.raise_error(err_ptr, ctx);
+                        dbg!(self.scope());
+                    }
+                }
+            }
+            MacroInstruction::Define { name } => {
+                // define a name in the environment by popping the top of the stack
+                let Some(value) = self.stack.pop() else {
+                    let err_ptr = self.build_error(ctx.mutation, SchemeErrorType::NullDefine);
+                    self.raise_error(err_ptr, ctx);
+                    return;
+                };
+                if self
+                    .current_env()
+                    .borrow_mut(ctx.mutation)
+                    .define(ctx.mutation, name, value, false)
+                    .is_err()
+                {
+                    let err_ptr = self.build_error(ctx.mutation, SchemeErrorType::FrozenDefine);
+                    self.raise_error(err_ptr, ctx);
+                };
+            }
+            MacroInstruction::SetBang { name } => {
+                // define a name in the environment by popping the top of the stack
+                let Some(value) = self.stack.pop() else {
+                    let err_ptr = self.build_error(ctx.mutation, SchemeErrorType::NullDefine);
+                    self.raise_error(err_ptr, ctx);
+                    return;
+                };
+                if let Err(err) = self.current_env().borrow_mut(ctx.mutation).rebind(
+                    ctx.mutation,
+                    name,
+                    value,
+                    &ctx.interner,
+                ) {
+                    let err_ptr = self.build_error(ctx.mutation, SchemeErrorType::SetBang(err));
+                    self.raise_error(err_ptr, ctx);
+                };
+            }
+            MacroInstruction::CallFunction { args } => {
+                // call a function with at most `args` arguments
+                // TODO do we need an exact mode
+                let macro_label = format!("{} macro", self.scope().label());
+                let new_bottom = self.stack.len().saturating_sub(args);
+                if self.scope().executable.is_none() {
+                    // if this scope is not executable, just make it executable
+                    let scope = self.scope_mut();
+                    scope.executable = Some(args);
+                    scope.label = Some(Box::from(macro_label.as_str()));
+                    scope.bottom = if new_bottom > 0 {
+                        Some(new_bottom)
+                    } else {
+                        None
+                    };
+                    // push the current exec back as an instruction
+                    match self.scope().execution {
+                        ScopeExecution::Empty => {}
+                        _ => unreachable!("codepath assumed {:?} == Empty", self.scope().execution),
+                    }
+                } else {
+                    // push a *new* scope, and make that frame executable
+                    self.push_scope(
+                        ctx.mutation,
+                        macro_label,
+                        new_bottom,
+                        std::iter::empty(),
+                        self.scope().range,
+                        Some(args),
+                    );
                 }
             }
         }
@@ -793,6 +981,14 @@ impl<'gc> TreewalkExecutor<'gc> {
         }
 
         while fuel.should_continue() {
+            if let Some(mcr) = self.scope_mut().current_macro.take() {
+                if self.call_macro(mcr, ctx, fuel) {
+                    // resuspend execution
+                    self.scope_mut().current_macro = Some(mcr);
+                    continue;
+                }
+            }
+
             // If the scope is processing a lambda, continue to do so
             if let Some((mut call, lambda)) = self.scope_mut().current_lambda.take() {
                 let ret =
@@ -800,305 +996,186 @@ impl<'gc> TreewalkExecutor<'gc> {
                 self.handle_lambda_return(ret, ctx, lambda, call);
             }
 
-            // if there's nothing, but something remains, load it in
-            if self.execution.is_none() {
-                self.next_inst();
+            // If this scope is in an error state, pop it, and if it is the root scope
+            // stop execution
+            if let Some(err) = self.scope_mut().error.take() {
+                if self.pop_scope().is_none() {
+                    // put it back
+                    self.scope_mut().error = Some(err);
+                    break;
+                } else {
+                    self.scope_mut().error = Some(err);
+                }
             }
 
-            if let Some(exec) = self.execution.take() {
-                match exec {
-                    Instruction::Evaluate(exec) => {
-                        match exec.kind() {
-                            Some(DatumKind::Number) => {
-                                fuel.consume(FuelCosts::LOAD_COST);
-                                let Some(number) =
-                                    exec.as_number().as_ref().and_then(Number::number)
-                                else {
-                                    eprintln!(
-                                        "badly formatted number [{:?}]",
-                                        exec.syntax().text_range()
-                                    );
-                                    continue;
-                                };
-                                let number: Option<i64> =
-                                    if let SchemeNumber::Exact(ExactReal::Integer {
-                                        value,
-                                        is_neg,
-                                    }) = number
-                                    {
-                                        if is_neg {
-                                            value.try_into().ok().map(|i: i64| -i)
-                                        } else {
-                                            value.try_into().ok()
-                                        }
-                                    } else {
-                                        None
-                                    };
+            // if there's nothing in the instruction slot, but there is a continuation, load it in
+            if self.scope().execution.is_none() {
+                self.next_inst(ctx, fuel);
+            }
 
-                                let Some(number) = number else {
-                                    eprintln!(
-                                        "unsupported number [{:?}]",
-                                        exec.syntax().text_range()
-                                    );
-                                    continue;
-                                };
-                                self.push_val(ctx.mutation, number);
+            match self.scope_mut().execution.take() {
+                ScopeExecution::Empty => break,
+                ScopeExecution::Rewrite(rew) => self.handle_rewrite(ctx, rew),
+                ScopeExecution::Instruction(mut exec) => {
+                    exec.touch_count += 1;
+                    match &exec.payload {
+                        VirtualInstructionPayload::Jit { .. } => {
+                            unreachable!("jit isn't built yet")
+                        }
+                        VirtualInstructionPayload::Datum { datum, can_jit: _ } => match datum {
+                            VirtualInstructionDatum::EmptyList => {
+                                let err_ptr = self.build_error(ctx.mutation, SchemeErrorType::Null);
+                                self.raise_error(err_ptr, ctx);
                             }
-                            Some(DatumKind::String) => {
+                            VirtualInstructionDatum::Number(num) => {
                                 fuel.consume(FuelCosts::LOAD_COST);
-                                let Some(string) =
-                                    exec.as_string().as_ref().and_then(StringToken::string)
-                                else {
-                                    eprintln!(
-                                        "badly formatted string [{:?}]",
-                                        exec.syntax().text_range()
-                                    );
-                                    continue;
-                                };
-                                let string_value =
-                                    Gc::new(ctx.mutation, RefLock::new(string.to_string()));
-                                self.push(Gc::new(
+                                self.push_from_inst(ctx.mutation, *num, &exec);
+                            }
+                            VirtualInstructionDatum::Bool(b) => {
+                                fuel.consume(FuelCosts::LOAD_COST);
+                                self.push_from_inst(ctx.mutation, *b, &exec);
+                            }
+                            VirtualInstructionDatum::String(s) => {
+                                fuel.consume(FuelCosts::LOAD_COST);
+                                self.push_from_inst(ctx.mutation, s.clone(), &exec);
+                            }
+                            VirtualInstructionDatum::Character(c) => {
+                                fuel.consume(FuelCosts::LOAD_COST);
+                                self.push_from_inst(ctx.mutation, *c, &exec);
+                            }
+                            VirtualInstructionDatum::Bytevector(bv) => {
+                                fuel.consume(FuelCosts::LOAD_COST);
+                                self.push_from_inst(
                                     ctx.mutation,
-                                    RefLock::new(Value::String(string_value)),
-                                ));
+                                    Value::Bytevector(
+                                        Gc::new(ctx.mutation, RefLock::new(bv.clone())).into(),
+                                    ),
+                                    &exec,
+                                );
                             }
-                            Some(DatumKind::Boolean) => {
-                                fuel.consume(FuelCosts::LOAD_COST);
-                                let Some(bool) = exec.as_bool().as_ref().and_then(Boolean::bool)
-                                else {
-                                    eprintln!(
-                                        "badly formatted boolean [{:?}]",
-                                        exec.syntax().text_range()
-                                    );
-                                    continue;
-                                };
-                                self.push_val(ctx.mutation, bool);
-                            }
-                            Some(DatumKind::Character) => {
-                                fuel.consume(FuelCosts::LOAD_COST);
-                                let Some(char) = exec.as_char().as_ref().and_then(Character::char)
-                                else {
-                                    eprintln!(
-                                        "badly formatted character [{:?}]",
-                                        exec.syntax().text_range()
-                                    );
-                                    continue;
-                                };
-                                self.push_val(ctx.mutation, char);
-                            }
-                            Some(DatumKind::Symbol) => {
+                            VirtualInstructionDatum::Symbol(sym) => {
                                 fuel.consume(FuelCosts::ENV_COST);
-                                // this means to *evaluate* the symbol, not storing it
-                                // we always assume case-sensitivity (as the directives are handled at the GAst layer
-                                let Some(symbol) =
-                                    exec.as_symbol().as_ref().and_then(|s| s.identifier(false))
-                                else {
-                                    eprintln!(
-                                        "badly formatted symbol [{:?}]",
-                                        exec.syntax().text_range()
-                                    );
-                                    continue;
-                                };
                                 let current_env = self.current_env();
-                                let Some(binding) = current_env.borrow().get(&symbol) else {
-                                    eprintln!(
-                                        "no {} in env [{:?}]",
-                                        symbol,
-                                        exec.syntax().text_range()
+                                let Some(binding) = current_env.borrow().get(*sym) else {
+                                    let err_ptr = self.build_error(
+                                        ctx.mutation,
+                                        SchemeErrorType::EnvLoad(Box::from(
+                                            ctx.interner.resolve(&sym.0),
+                                        )),
                                     );
+                                    self.raise_error(err_ptr, ctx);
                                     continue;
                                 };
 
-                                self.push(binding.get());
+                                self.push(*binding.get().borrow());
                             }
-                            Some(DatumKind::Bytevector) => {
-                                fuel.consume(FuelCosts::LOAD_COST);
-                                let Some(bv): Option<Vec<_>> = exec
-                                    .as_bytevector()
-                                    .as_ref()
-                                    .and_then(|b| b.bytes().collect())
-                                else {
-                                    eprintln!(
-                                        "badly formatted bytevector [{:?}]",
-                                        exec.syntax().text_range()
-                                    );
-                                    continue;
-                                };
-
-                                let bv = Gc::new(ctx.mutation, RefLock::new(bv));
-                                self.push(Gc::new(
-                                    ctx.mutation,
-                                    RefLock::new(Value::Bytevector(bv.into())),
-                                ));
-                            }
-                            Some(DatumKind::List) => {
+                            VirtualInstructionDatum::List { head, body, dot } => {
+                                // Showtime
+                                //
                                 // Lists handle their first subdatum specially when executed
                                 // If the first item is:
                                 //   - a symbol
                                 //   - in the current env, refering to a macro
                                 // then it is a macro, otherwise it's just a normal symbol guys
-
-                                // for tail call optimization, if we have nothing else to execute, we
-                                // are in tail position
-                                let Some(list) = exec.as_list() else {
-                                    eprintln!(
-                                        "badly formatted list [{:?}]",
-                                        exec.syntax().text_range()
-                                    );
-                                    continue;
-                                };
-                                if list.has_dot() {
-                                    eprintln!(
-                                        "cannot execute dotted list [{:?}]",
-                                        exec.syntax().text_range()
+                                if dot.is_some() {
+                                    self.raise_error(
+                                        self.build_error(ctx.mutation, SchemeErrorType::BadList),
+                                        ctx,
                                     );
                                     continue;
                                 }
-                                let Some(head) = list.head() else {
-                                    eprintln!(
-                                        "can't execute empty list [{:?}]",
-                                        exec.syntax().text_range()
+
+                                let label = format!("{}", head.payload.display(&ctx.interner));
+
+                                if let Some(mcr) = head
+                                    .payload
+                                    .as_symbol()
+                                    .and_then(|sym| self.current_env().borrow().get_macro(sym))
+                                    .map(|mcrb| mcrb.get())
+                                {
+                                    // push values to stack *as-is*
+                                    self.stack.extend(
+                                        body.iter()
+                                            .cloned()
+                                            .map(|vi| vi.into_value(ctx.mutation, ctx.null_ptr)),
                                     );
-                                    continue;
-                                };
-
-                                let label = format!(
-                                    "{} <{:?}>",
-                                    head.syntax().text(),
-                                    list.syntax().text_range()
-                                );
-
-                                // If head is a macro, process it and push_front the resulting
-                                // lists to next_datum
-                                //
-                                // Otherwise, call it as a function
-
-                                // For now, we just hardcode all macros right here
-                                if let Some(symbol) = head.as_symbol() {
-                                    if self.macro_handlng(ctx, fuel, symbol, list.clone()) {
-                                        continue;
+                                    if self.call_macro(mcr, ctx, fuel) {
+                                        self.scope_mut().current_macro = Some(mcr);
                                     }
+                                    continue;
                                 }
 
-                                // This code assumes that `head` is *not* a macro
-                                if !self.scope().next_datum.is_empty() {
+                                if !self.scope().next_datum.is_empty()
+                                    || self.scope().executable.is_some()
+                                {
                                     // we aren't in tail position, so we have to keep the original scope around
                                     self.push_scope(
                                         ctx.mutation,
                                         label,
                                         self.stack.len(),
                                         // put all the arguments as datum instructions
-                                        list.datum().map(Instruction::Evaluate).chain(
-                                            std::iter::once(Instruction::CallFunction {
-                                                args: list.tail().count(),
-                                            }),
-                                        ),
+                                        std::iter::once(head.as_ref().clone())
+                                            .chain(body.iter().cloned()),
+                                        exec.range.unwrap_or(self.scope().range),
+                                        Some(body.len()),
                                     );
                                 } else {
-                                    // bash the current scope into executing our list
-                                    self.scope_mut().label = Some(Box::from(label.as_str()));
-                                    // we *know* next_datum is empty!
-                                    self.scope_mut().next_datum = list
-                                        .datum()
-                                        .map(Instruction::Evaluate)
-                                        .chain(std::iter::once(Instruction::CallFunction {
-                                            args: list.tail().count(),
-                                        }))
+                                    let cscope = self.scope_mut();
+                                    cscope.label = Some(Box::from(label.as_str()));
+                                    if let Some(range) = exec.range {
+                                        cscope.range = range;
+                                    }
+                                    cscope.executable = Some(body.len());
+                                    cscope.next_datum = std::iter::once(head.as_ref().clone())
+                                        .chain(body.iter().cloned())
                                         .collect();
                                 }
                             }
-                            Some(_) => todo!(),
-                            None => {
-                                let syntax = exec.syntax();
-                                eprintln!(
-                                    "erroneous datum {} [{:?}]",
-                                    syntax.text(),
-                                    syntax.text_range()
-                                );
+                            VirtualInstructionDatum::Labeled {
+                                is_circular: true, ..
+                            } => {
+                                todo!("label error")
                             }
-                        }
-                    }
-                    Instruction::CallFunction { args } => {
-                        let stack_len = self.stack.len();
-                        let stack_keep = stack_len.saturating_sub(args);
-                        if self.scope().bottom.is_some_and(|bot| stack_keep < bot) {
-                            panic!("function bashes stack! {self:#?}");
-                        }
-                        let arg_stack = self.stack.split_off(stack_keep);
+                            VirtualInstructionDatum::Labeled { .. } => todo!(),
+                        },
+                        // Instruction::CallFunction { args } => {
+                        //     let stack_len = self.stack.len();
+                        //     let stack_keep = stack_len.saturating_sub(args);
+                        //     if self.scope().bottom.is_some_and(|bot| stack_keep < bot) {
+                        //         panic!("function bashes stack! {self:#?}");
+                        //     }
+                        //     let arg_stack = self.stack.split_off(stack_keep);
 
-                        let Some(maybe_func) = self.stack.pop() else {
-                            let scope = self.scope();
-                            eprintln!(
-                                "cannot execute nothing! {} processed {}",
-                                scope.label().unwrap_or("<<root>>"),
-                                scope.processed
-                            );
-                            continue;
-                        };
-                        if let Value::Lambda(lambda) = *maybe_func.borrow() {
-                            let lambda_access = lambda.borrow_mut(ctx.mutation);
-                            let mut call = lambda_access.call(arg_stack);
-                            // drop the access so call_lambda can make a new one
-                            drop(lambda_access);
-                            fuel.consume(FuelCosts::CALL_COST);
-                            let ret = self.call_lambda(
-                                lambda,
-                                ctx.mutation,
-                                &mut call,
-                                fuel,
-                                self.scope().error,
-                            );
-                            self.handle_lambda_return(ret, ctx, lambda, call);
-                        } else {
-                            eprintln!("cannot call non-lambda {:?}", self.stack.last());
-                        }
-                    }
-                    Instruction::Define {
-                        name,
-                        fail_if_not_present,
-                    } => {
-                        // the top of the stack has the value for what we are defining
-                        let Some(value) = self.stack.pop() else {
-                            let scope = self.scope();
-                            eprintln!(
-                                "Cannot define nothing!: {} processed {}",
-                                scope.label().unwrap_or("<<root>>"),
-                                scope.processed
-                            );
-                            continue;
-                        };
-                        if fail_if_not_present {
-                            if let Err(e) = self
-                                .scope()
-                                .environment
-                                .borrow_mut(ctx.mutation)
-                                .rebind_ptr(ctx.mutation, &name, value)
-                            {
-                                eprintln!("cannot set {name}: {e}");
-                            }
-                        } else if self
-                            .scope()
-                            .environment
-                            .borrow_mut(ctx.mutation)
-                            .define_ptr(ctx.mutation, &name, value, false)
-                            .is_err()
-                        {
-                            let scope = self.scope();
-                            // The only error is if that binding is frozen
-                            eprintln!(
-                                "{name} in current scope is frozen: {} processed {}",
-                                scope.label().unwrap_or("<<root>>"),
-                                scope.processed
-                            );
-                        }
+                        //     let Some(maybe_func) = self.stack.pop() else {
+                        //         let scope = self.scope();
+                        //         eprintln!(
+                        //             "cannot execute nothing! {} processed {}",
+                        //             scope.label().unwrap_or("<<root>>"),
+                        //             scope.processed
+                        //         );
+                        //         continue;
+                        //     };
+                        //     if let Value::Lambda(lambda) = *maybe_func.borrow() {
+                        //         let lambda_access = lambda.borrow_mut(ctx.mutation);
+                        //         let mut call = lambda_access.call(arg_stack);
+                        //         // drop the access so call_lambda can make a new one
+                        //         drop(lambda_access);
+                        //         fuel.consume(FuelCosts::CALL_COST);
+                        //         let ret = self.call_lambda(
+                        //             lambda,
+                        //             ctx.mutation,
+                        //             &mut call,
+                        //             fuel,
+                        //             self.scope().error,
+                        //         );
+                        //         self.handle_lambda_return(ret, ctx, lambda, call);
+                        //     } else {
+                        //         eprintln!("cannot call non-lambda {:?}", self.stack.last());
+                        //     }
+                        // }
                     }
                 }
-            } else {
-                // nothing to execute...
-                break;
             }
-
-            self.scope_mut().processed += 1;
         }
 
         Ok(())

@@ -4,9 +4,10 @@ use std::{
 };
 
 use gc_arena::{Collect, Gc, Mutation, RefLock};
+use lasso::Rodeo;
 
-use crate::runtime::convert::IntoValue;
-use crate::value::{Value, ValuePtr};
+use crate::transformer::macro_to_ptr;
+use crate::{transformer::Macro, treewalk::StackValue, value::Symbol};
 
 // TODO make more involved, so that this can be the type stored in Value
 // for `environment`
@@ -28,12 +29,16 @@ pub struct Environment<'gc> {
 pub type EnvironmentPtr<'gc> = Gc<'gc, RefLock<Environment<'gc>>>;
 
 #[derive(thiserror::Error, Debug)]
-#[error("environment is frozen")]
-pub struct FrozenError;
+pub enum FrozenError {
+    #[error("environment is frozen")]
+    Environment,
+    #[error("binding is frozen")]
+    Binding,
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum RebindError {
-    #[error("`{0}` is not defined")]
+    #[error("{0} is not defined")]
     NameNotFound(Box<str>),
     #[error(transparent)]
     Frozen(#[from] FrozenError),
@@ -47,22 +52,47 @@ impl<'gc> Environment<'gc> {
                 mc,
                 RefLock::new(EnvironmentInner {
                     values: HashMap::default(),
+                    macros: HashMap::default(),
                 }),
             ),
             is_frozen: false,
         }
     }
 
-    /// Sets the frozen flag. This is not a reversible operation.
-    pub fn freeze(&mut self, mc: &Mutation<'gc>) {
+    /// Freezes this particular copy of the environment.
+    ///
+    /// Both `define` and `set!` are stopped by a shallow freeze, so it
+    /// requires intentional manipulation on the Rust side in order to get through
+    /// this freeze (to make constant, use [`Self::deep_freeze`]).
+    pub fn freeze(&mut self) {
+        self.is_frozen = true;
+    }
+
+    /// Sets the frozen flag for the environment and *all* its bindings.
+    pub fn deep_freeze(&mut self, mc: &Mutation<'gc>) {
         self.is_frozen = true;
         for binding in self.inner.borrow_mut(mc).values.values_mut() {
             binding.is_frozen = true;
         }
+        for binding in self.inner.borrow_mut(mc).macros.values_mut() {
+            binding.is_frozen = true;
+        }
     }
 
-    pub fn get(&self, name: impl AsRef<str>) -> Option<Binding<'gc>> {
-        if let Some(value) = self.inner.borrow().values.get(name.as_ref()) {
+    pub fn get_macro(&self, name: impl Into<Symbol>) -> Option<MacroBinding<'gc>> {
+        let name = name.into();
+        if let Some(value) = self.inner.borrow().macros.get(&name) {
+            Some(*value)
+        } else if let Some(parent) = self.parent {
+            parent.borrow().get_macro(name)
+        } else {
+            None
+        }
+    }
+
+    pub fn get(&self, name: impl Into<Symbol>) -> Option<Binding<'gc>> {
+        let name = name.into();
+        if let Some(value) = self.inner.borrow().values.get(&name) {
             Some(*value)
         } else if let Some(parent) = self.parent {
             parent.borrow().get(name)
@@ -71,53 +101,118 @@ impl<'gc> Environment<'gc> {
         }
     }
 
-    pub fn rebind_ptr(
+    pub fn rebind_binding(
         &mut self,
         mc: &Mutation<'gc>,
-        name: impl AsRef<str>,
-        value: ValuePtr<'gc>,
-    ) -> Result<ValuePtr<'gc>, RebindError> {
+        name: impl Into<Symbol>,
+        binding: Binding<'gc>,
+        interner: &Rodeo,
+    ) -> Result<StackValue<'gc>, RebindError> {
         if self.is_frozen {
-            return Err(FrozenError)?;
+            return Err(FrozenError::Environment)?;
         }
-        let name = Box::from(name.as_ref());
-        if let Some(binding) = self.inner.borrow_mut(mc).values.get_mut(&name) {
-            let old_value = binding.value;
-            binding.value = value;
+
+        let name = name.into();
+        if let Some(old_binding) = self.inner.borrow_mut(mc).values.get_mut(&name) {
+            if old_binding.is_frozen {
+                return Err(FrozenError::Binding)?;
+            }
+
+            let old_value = *old_binding.value.borrow();
+            *old_binding = binding;
             Ok(old_value)
         } else {
-            Err(RebindError::NameNotFound(name))
+            Err(RebindError::NameNotFound(Box::from(
+                interner.resolve(&name.0),
+            )))
         }
     }
 
     pub fn rebind(
         &mut self,
         mc: &Mutation<'gc>,
-        name: impl AsRef<str>,
-        value: impl IntoValue<'gc>,
-    ) -> Result<ValuePtr<'gc>, RebindError> {
-        self.rebind_ptr(mc, name, Gc::new(mc, RefLock::new(value.into_value(mc))))
+        name: impl Into<Symbol>,
+        value: StackValue<'gc>,
+        interner: &Rodeo,
+    ) -> Result<StackValue<'gc>, RebindError> {
+        if self.is_frozen {
+            return Err(FrozenError::Environment)?;
+        }
+
+        let name = name.into();
+        if let Some(binding) = self.inner.borrow_mut(mc).values.get_mut(&name) {
+            if binding.is_frozen {
+                return Err(FrozenError::Binding)?;
+            }
+
+            let old_value = *binding.value.borrow();
+            *binding.value.borrow_mut(mc) = value;
+            Ok(old_value)
+        } else {
+            Err(RebindError::NameNotFound(Box::from(
+                interner.resolve(&name.0),
+            )))
+        }
+    }
+
+    /// Creates a new macro binding in the current environment, replacing any binding that might already exist
+    /// which is returned is successful.
+    ///
+    /// Fails if the environment is frozen
+    pub fn define_macro<M: Macro<'gc> + 'gc>(
+        &mut self,
+        mc: &'gc Mutation<'gc>,
+        name: impl Into<Symbol>,
+        mcr: M,
+    ) -> Result<Option<MacroBinding<'gc>>, FrozenError> {
+        self.define_macro_binding(
+            mc,
+            name,
+            MacroBinding {
+                value: macro_to_ptr(mc, mcr),
+                is_frozen: false,
+            },
+        )
+    }
+
+    /// Creates a new macro binding in the current environment, replacing any binding that might already exist
+    /// which is returned is successful.
+    ///
+    /// Fails if the environment is frozen
+    pub fn define_macro_binding(
+        &mut self,
+        mc: &Mutation<'gc>,
+        name: impl Into<Symbol>,
+        binding: MacroBinding<'gc>,
+    ) -> Result<Option<MacroBinding<'gc>>, FrozenError> {
+        (!self.is_frozen)
+            .then(|| {
+                self.inner
+                    .borrow_mut(mc)
+                    .macros
+                    .insert(name.into(), binding)
+            })
+            .ok_or(FrozenError::Environment)
     }
 
     /// Creates a new binding in the current environment, replacing any binding that might already exist
     /// which is returned is successful.
     ///
     /// Fails if the environment is frozen
-    pub fn define_ptr(
+    pub fn define_binding(
         &mut self,
         mc: &Mutation<'gc>,
-        name: impl AsRef<str>,
-        value: ValuePtr<'gc>,
-        is_frozen: bool,
+        name: impl Into<Symbol>,
+        binding: Binding<'gc>,
     ) -> Result<Option<Binding<'gc>>, FrozenError> {
         (!self.is_frozen)
             .then(|| {
                 self.inner
                     .borrow_mut(mc)
                     .values
-                    .insert(Box::from(name.as_ref()), Binding { value, is_frozen })
+                    .insert(name.into(), binding)
             })
-            .ok_or(FrozenError)
+            .ok_or(FrozenError::Environment)
     }
 
     /// Creates a new binding in the current environment, replacing any binding that might already exist
@@ -127,15 +222,17 @@ impl<'gc> Environment<'gc> {
     pub fn define(
         &mut self,
         mc: &Mutation<'gc>,
-        name: impl AsRef<str>,
-        value: impl IntoValue<'gc>,
+        name: impl Into<Symbol>,
+        value: StackValue<'gc>,
         is_frozen: bool,
     ) -> Result<Option<Binding<'gc>>, FrozenError> {
-        self.define_ptr(
+        self.define_binding(
             mc,
             name,
-            Gc::new(mc, RefLock::new(value.into_value(mc))),
-            is_frozen,
+            Binding {
+                value: Gc::new(mc, RefLock::new(value)),
+                is_frozen,
+            },
         )
     }
 }
@@ -143,38 +240,58 @@ impl<'gc> Environment<'gc> {
 #[derive(Collect, Debug, Clone)]
 #[collect(no_drop)]
 struct EnvironmentInner<'gc> {
-    pub values: HashMap<Box<str>, Binding<'gc>>,
+    pub values: HashMap<Symbol, Binding<'gc>>,
+    pub macros: HashMap<Symbol, MacroBinding<'gc>>,
 }
+
+pub type Binding<'gc> = GeneralBinding<'gc, StackValue<'gc>>;
+pub type MacroBinding<'gc> = GeneralBinding<'gc, dyn Macro<'gc> + 'gc>;
+// TODO MacroBinding<'gc>
 
 /// Represents the value at a certain location in an environment.
 ///
 /// A particular binding can be frozen to make sure that no change of its held value
-/// is made through it.
-#[derive(Collect, Debug, Clone, Copy)]
+/// is made through it. (makes the value *constant*)
+#[derive(Collect, Debug)]
 #[collect(no_drop)]
-pub struct Binding<'gc> {
-    value: ValuePtr<'gc>,
+pub struct GeneralBinding<'gc, P: ?Sized> {
+    value: Gc<'gc, RefLock<P>>,
     is_frozen: bool,
 }
 
-impl<'gc> Binding<'gc> {
-    pub fn get(&self) -> ValuePtr<'gc> {
+impl<'gc, P: ?Sized> Clone for GeneralBinding<'gc, P> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<'gc, P: ?Sized> Copy for GeneralBinding<'gc, P> {}
+
+impl<'gc, P: ?Sized> GeneralBinding<'gc, P> {
+    pub fn get(&self) -> Gc<'gc, RefLock<P>> {
         self.value
     }
 
-    pub fn read<T>(&self, func: impl FnOnce(Ref<Value<'gc>>) -> T) -> T {
+    pub fn read<T>(&self, func: impl FnOnce(Ref<P>) -> T) -> T {
         func(self.value.borrow())
+    }
+
+    /// Freeze this copy of a binding
+    ///
+    /// Note: you have to rebind or define as this new binding
+    /// in order for other users to be frozen.
+    pub fn freeze(&mut self) {
+        self.is_frozen = true;
     }
 
     pub fn write<T>(
         &self,
         mc: &Mutation<'gc>,
-        func: impl FnOnce(RefMut<Value<'gc>>) -> T,
-    ) -> Option<T> {
+        func: impl FnOnce(RefMut<P>) -> T,
+    ) -> Result<T, FrozenError> {
         if self.is_frozen {
-            None
+            Err(FrozenError::Binding)
         } else {
-            Some(func(self.value.borrow_mut(mc)))
+            Ok(func(self.value.borrow_mut(mc)))
         }
     }
 }

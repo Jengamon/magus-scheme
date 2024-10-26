@@ -11,4 +11,4 @@ codesnake = "0.2.1"
 magus = { version = "0.1.0", path = ".." }
 rustyline = "14.0.0"
 yansi = { version = "1.0.1", features = ["detect-env", "detect-tty"] }
-gc-arena = { git = "https://github.com/kyren/gc-arena", rev = "3dbc6c4263700312ef63ceee3f02943b38828130" }
+gc-arena = { git = "https://github.com/kyren/gc-arena", rev = "5a7534b883b703f23cfb8c3cfdf033460aa77ea9" }

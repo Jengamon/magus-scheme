@@ -337,7 +337,7 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 [[package]]
 name = "gc-arena"
 version = "0.5.3"
-source = "git+https://github.com/kyren/gc-arena?rev=3dbc6c4263700312ef63ceee3f02943b38828130#3dbc6c4263700312ef63ceee3f02943b38828130"
+source = "git+https://github.com/kyren/gc-arena?rev=5a7534b883b703f23cfb8c3cfdf033460aa77ea9#5a7534b883b703f23cfb8c3cfdf033460aa77ea9"
 dependencies = [
  "gc-arena-derive",
  "sptr",
@@ -346,7 +346,7 @@ dependencies = [
 [[package]]
 name = "gc-arena-derive"
 version = "0.5.3"
-source = "git+https://github.com/kyren/gc-arena?rev=3dbc6c4263700312ef63ceee3f02943b38828130#3dbc6c4263700312ef63ceee3f02943b38828130"
+source = "git+https://github.com/kyren/gc-arena?rev=5a7534b883b703f23cfb8c3cfdf033460aa77ea9#5a7534b883b703f23cfb8c3cfdf033460aa77ea9"
 dependencies = [
  "proc-macro2",
  "quote",

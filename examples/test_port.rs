@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use magus::runtime::value::{OutputPort, PortType};
+use magus::runtime::port::{OutputPort, PortType};
 
 fn main() {
     let write_port = Arc::new(Mutex::new(stdout()));

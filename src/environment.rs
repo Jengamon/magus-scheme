@@ -5,7 +5,8 @@ use std::{
 
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 
-use crate::value::{IntoValue, Value, ValuePtr};
+use crate::runtime::convert::IntoValue;
+use crate::value::{Value, ValuePtr};
 
 // TODO make more involved, so that this can be the type stored in Value
 // for `environment`

@@ -1,34 +1,21 @@
 //! Representation of Scheme values
 use core::fmt;
+use std::rc::Rc;
 use std::string::String as StdString;
-use std::{collections::HashMap, rc::Rc};
 
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 use lasso::{IntoResolver, RodeoResolver};
 
-use crate::{
-    compiler::{environment::EnvironmentPtr, Transformer},
-    DatumVisitor, ExactReal, ExternalRepresentationVisitor, SchemeNumber,
+use crate::{environment::EnvironmentPtr, SchemeNumber};
+
+use super::{
+    error::SchemeErrorPtr,
+    lambda::LambdaPtr,
+    port::{InputPort, OutputPort},
+    userstruct::UserStruct,
 };
-
-pub use port::{InputPort, OutputPort, PortType};
-
-use super::{userstruct::UserStruct, RuntimeArena};
-
-pub use convert::{FromValue, IntoValue, TryIntoValue};
-mod convert;
-pub use error::{DisplaySchemeError, SchemeError, SchemeErrorPtr, SchemeErrorType, StackFrame};
-mod error;
-pub use lambda::{
-    Lambda, LambdaCall, LambdaPtr, Procedure, ProcedureError, ProcedureReturn, TypeFilter,
-    Typecheck,
-};
-
-mod lambda;
-mod port;
 
 pub type ValuePtr<'gc> = Gc<'gc, RefLock<Value<'gc>>>;
-pub type Integer = i64;
 
 #[derive(Collect, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[collect(require_static)]
@@ -64,7 +51,7 @@ pub enum Value<'gc> {
     Undefined,
     // the return value of set! and definitions (define, define-record-type, define-syntax)
     Void,
-    Number(Integer),
+    Number(i64),
     Inexact(f64),
     // Strings must be easily accessed/edited, so prefer to store a "String"
     // over slices or intered strings
@@ -93,6 +80,7 @@ pub enum Value<'gc> {
     // TODO records
     // I want to handle userdata the same way as we handle records
     // TODO syntax-rules (transformers)
+    // the return value of `syntax-rules`
     Transformer(RuntimeTransformer<'gc>),
     // Uniquely our lambda's are typed, it's just that (for now)
     // Scheme code simply marks all parameters as untyped
@@ -123,6 +111,10 @@ impl<'gc> Value<'gc> {
             Value::Lambda(_) => ValueType::Lambda,
             Value::Error(_) => ValueType::Error,
         }
+    }
+
+    pub fn into_ptr(self, mc: &Mutation<'gc>) -> ValuePtr<'gc> {
+        Gc::new(mc, RefLock::new(self))
     }
 
     pub fn resolve_into<K: lasso::Key>(
@@ -194,9 +186,9 @@ impl<'gc> fmt::Display for ResolvedValue<'gc, lasso::Spur> {
             // TODO this needs special handling, b/c a cons might recurse into itself
             Value::Cons(_) => todo!(),
             Value::Environment(_) => todo!(),
-            Value::UserStruct(_) => todo!(),
+            Value::UserStruct(_) => write!(f, "<user {:p}>", &self.value),
             Value::Transformer(_) => todo!(),
-            Value::Lambda(lambda) => write!(f, "<lambda {:p}>", lambda),
+            Value::Lambda(lambda) => write!(f, "<lambda {:p}>", *lambda.borrow()),
             Value::Error(_) => todo!(),
         }
     }
@@ -236,7 +228,7 @@ pub trait ValueVisitor<'gc> {
         let _ = value;
     }
 
-    fn visit_number(&mut self, integer: Integer, value: ValuePtr<'gc>) {
+    fn visit_number(&mut self, integer: i64, value: ValuePtr<'gc>) {
         let _ = value;
         _ = integer;
     }
@@ -293,29 +285,6 @@ pub trait ValueVisitor<'gc> {
     // TODO procedure, environment, userstruct, error, transformer
 }
 
-impl<'gc> Value<'gc> {
-    pub fn as_number(&self) -> Option<Integer> {
-        match self {
-            Self::Number(int) => Some(*int),
-            _ => None,
-        }
-    }
-
-    pub fn as_input_port(&self) -> Option<&InputPort> {
-        match self {
-            Self::InputPort(inp) => Some(inp.as_ref()),
-            _ => None,
-        }
-    }
-
-    pub fn as_output_port(&self) -> Option<&OutputPort> {
-        match self {
-            Self::OutputPort(outp) => Some(outp.as_ref()),
-            _ => None,
-        }
-    }
-}
-
 #[derive(thiserror::Error, Debug)]
 pub enum ValueConvertError {
     // currently only support exact integers
@@ -323,63 +292,9 @@ pub enum ValueConvertError {
     UnsupportedNumber(SchemeNumber),
 }
 
-#[expect(unused)]
-// TODO Use world instead, to allow for WorldRoot::null_val usage (more like Self::ensure_null)
-pub struct ValueConvert<'world, 'gc> {
-    mutation: &'world Mutation<'gc>,
-    interner: &'world mut lasso::Rodeo,
-    arena: &'world RuntimeArena<'gc>,
-    value_stack: Vec<Result<ValuePtr<'gc>, ValueConvertError>>,
-    labeled: HashMap<usize, ValuePtr<'gc>>,
-}
-
-impl<'w, 'gc> ValueConvert<'w, 'gc> {
-    pub fn new(
-        mutation: &'w Mutation<'gc>,
-        arena: &'w RuntimeArena<'gc>,
-        interner: &'gc mut lasso::Rodeo,
-    ) -> Self {
-        Self {
-            mutation,
-            interner,
-            arena,
-            value_stack: vec![],
-            labeled: HashMap::default(),
-        }
-    }
-}
-
-// RN this is tuned for Magicflute
-// Convert an external representation into a GC'd value
-impl<'w, 'gc> ExternalRepresentationVisitor for ValueConvert<'w, 'gc> {
-    fn visit_number(&mut self, value: crate::SchemeNumber) {
-        match value {
-            SchemeNumber::Exact(ExactReal::Integer { value, is_neg }) => {
-                // saturate at limits
-                self.value_stack.push(Ok(Gc::new(
-                    self.mutation,
-                    RefLock::new(Value::Number(
-                        i64::try_from(value)
-                            .unwrap_or(i64::MAX)
-                            .saturating_mul(if is_neg { -1 } else { 1 }),
-                    )),
-                )));
-            }
-            num => self
-                .value_stack
-                .push(Err(ValueConvertError::UnsupportedNumber(num))),
-        }
-    }
-}
-
 #[derive(Collect, Clone, Copy)]
 #[collect(no_drop)]
-pub struct RuntimeTransformer<'gc>(pub Gc<'gc, std::rc::Rc<dyn Transformer>>);
-impl<'gc> From<Gc<'gc, std::rc::Rc<dyn Transformer>>> for RuntimeTransformer<'gc> {
-    fn from(value: Gc<'gc, std::rc::Rc<dyn Transformer>>) -> Self {
-        Self(value)
-    }
-}
+pub struct RuntimeTransformer<'gc>(pub Gc<'gc, ()>);
 impl<'gc> core::fmt::Debug for RuntimeTransformer<'gc> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<transformer {:p}>", self.0)
@@ -440,7 +355,7 @@ impl<'gc> ConsCell<'gc> {
         let mut current = ConsCell::empty();
         for item in iter.into_iter().rev() {
             let new_cell = ConsCell {
-                cdr: Some(Gc::new(mc, RefLock::new(Value::Cons(current)))),
+                cdr: Some(Value::Cons(current).into_ptr(mc)),
                 car: Some(item),
             };
 

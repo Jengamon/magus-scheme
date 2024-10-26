@@ -2,9 +2,10 @@ use std::convert::Infallible;
 
 use gc_arena::{Gc, Mutation, RefLock};
 
-use crate::compiler::environment::EnvironmentPtr;
+use crate::{environment::EnvironmentPtr, runtime::userstruct::UserStruct};
 
-use super::{Lambda, Value};
+use super::Value;
+use crate::runtime::lambda::Lambda;
 
 pub trait FromValue<'gc> {
     fn from_value(value: Value<'gc>) -> Option<Self>
@@ -18,6 +19,26 @@ impl<'gc> FromValue<'gc> for i64 {
     {
         match value {
             Value::Number(n) => Some(n),
+            _ => None,
+        }
+    }
+}
+/// Marker trait for things that are used as UserStructs
+pub trait UserType {}
+/// Mark a type as a user type
+#[macro_export]
+macro_rules! user_type {
+    ($tp:ty) => {
+        impl $crate::runtime::convert::UserType for $tp {}
+    };
+}
+impl<'gc, T: UserType + 'static> FromValue<'gc> for &'gc T {
+    fn from_value(value: Value<'gc>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        match value {
+            Value::UserStruct(us) => us.downcast_static::<T>().ok(),
             _ => None,
         }
     }
@@ -45,17 +66,31 @@ macro_rules! impl_into_value {
             }
         }
     };
+
+    (number infallible $tp:ty) => {
+        impl<'gc> IntoValue<'gc> for $tp {
+            fn into_value(self, _mc: &Mutation<'gc>) -> Value<'gc> {
+                Value::Number(self as i64)
+            }
+        }
+    };
 }
 impl<'gc> IntoValue<'gc> for Lambda<'gc> {
     fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {
         Value::Lambda(Gc::new(mc, RefLock::new(self)))
     }
 }
-impl<'gc> IntoValue<'gc> for u8 {
-    fn into_value(self, _mc: &Mutation<'gc>) -> Value<'gc> {
-        Value::Number(self as i64)
+impl<'gc, T: UserType + 'static> IntoValue<'gc> for T {
+    fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {
+        Value::UserStruct(UserStruct::new_static(mc, self))
     }
 }
+impl_into_value!(number infallible u8);
+impl_into_value!(number infallible u16);
+impl_into_value!(number infallible u32);
+impl_into_value!(number infallible i8);
+impl_into_value!(number infallible i16);
+impl_into_value!(number infallible i32);
 impl_into_value!(simple i64 => Number);
 impl_into_value!(simple f64 => Inexact);
 impl_into_value!(simple bool => Bool);

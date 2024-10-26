@@ -1,17 +1,18 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Neg};
 
 use clap::Parser;
 use codesnake::{Block, CodeWidth, Label, LineIndex};
-use gc_arena::{Collect, Gc, Mutation, RefLock};
+use gc_arena::{Collect, Mutation};
 use magus::{
     lexer::Token,
-    treewalk::Treewalk,
-    value::{
-        IntoValue, Lambda, LambdaCall, ProcedureError, ProcedureReturn, Typecheck, ValuePtr,
-        ValueType,
+    runtime::{
+        convert::IntoValue,
+        lambda::{Lambda, LambdaCall, ProcedureError, ProcedureReturn, Typecheck},
+        value::ValueType,
     },
-    Comment, ContainsDatum, ContainsTrivia, DatumVisitor, ExternalRepresentation, Fuel, GAstNode,
-    MagusSyntaxElementRef, Module, Symbol,
+    treewalk::{Treewalk, TreewalkExecutor},
+    user_type, Comment, ContainsDatum, ContainsTrivia, DatumVisitor, ExternalRepresentation, Fuel,
+    GAstNode, MagusSyntaxElementRef, Module, Symbol,
 };
 use rustyline::{
     history::{History, MemHistory},
@@ -246,8 +247,13 @@ fn repl() -> anyhow::Result<()> {
             }
         }
 
+        struct MyCoolType {
+            x: i64,
+        }
+        user_type!(MyCoolType);
+
         // evaluate using treewalk
-        let exec = interp.new_executor(module, |mc, env| {
+        let exec = interp.new_executor(module, |mc, arena, env| {
             let mut env = env.borrow_mut(mc);
             env.define(mc, "x", 3i64, false).unwrap();
 
@@ -257,7 +263,11 @@ fn repl() -> anyhow::Result<()> {
                     if sig.iter().all(|ty| ty == &ValueType::Number) && !sig.is_empty() {
                         Ok(())
                     } else {
-                        Err(anyhow::anyhow!("cannot {op} nothing"))
+                        Err(if sig.is_empty() {
+                            anyhow::anyhow!("cannot {op} nothing")
+                        } else {
+                            anyhow::anyhow!("cant {op} on {sig:?}")
+                        })
                     }
                 })
             };
@@ -266,79 +276,34 @@ fn repl() -> anyhow::Result<()> {
                 _root: &mut TestRoot<'gc>,
                 mc: &Mutation<'gc>,
                 call: &mut LambdaCall<'gc>,
+                _interpreter: &mut TreewalkExecutor<'gc>,
                 _fuel: &mut Fuel,
             ) -> Result<ProcedureReturn<'gc>, ProcedureError<'gc>> {
+                match call.pop::<&MyCoolType>() {
+                    Ok(mct) => {
+                        call.push(mc, mct.x);
+                        return Ok(ProcedureReturn::Return);
+                    }
+                    Err(vp) => {
+                        if let Some(vp) = vp {
+                            call.stack.push(vp);
+                        }
+                    }
+                };
                 // TODO make this nicer...
                 let mut total = 0;
                 while !call.stack.is_empty() {
-                    let Some(v) = call.pop::<i64>() else {
+                    let Some(v) = call.pop::<i64>().ok() else {
                         unreachable!("typechecking");
                     };
+                    // TODO when implementing in standard library, make these checked operations
                     total += v;
                 }
-                call.push(mc, total);
-                Ok(ProcedureReturn::Return)
+                call.push(mc, MyCoolType { x: total });
+                Ok(ProcedureReturn::Suspend)
             }
 
-            fn mul_impl<'gc>(
-                _root: &mut (),
-                mc: &Mutation<'gc>,
-                call: &mut LambdaCall<'gc>,
-                _fuel: &mut Fuel,
-            ) -> Result<ProcedureReturn<'gc>, ProcedureError<'gc>> {
-                // TODO make this nicer...
-                let mut total = 1;
-                while !call.stack.is_empty() {
-                    let Some(v) = call.pop::<i64>() else {
-                        unreachable!("typechecking");
-                    };
-                    total *= v;
-                }
-                call.push(mc, total);
-                Ok(ProcedureReturn::Return)
-            }
-
-            fn sub_impl<'gc>(
-                _root: &mut (),
-                mc: &Mutation<'gc>,
-                call: &mut LambdaCall<'gc>,
-                _fuel: &mut Fuel,
-            ) -> Result<ProcedureReturn<'gc>, ProcedureError<'gc>> {
-                // TODO make this nicer...
-                let mut data = vec![];
-                while !call.stack.is_empty() {
-                    let Some(v) = call.pop::<i64>() else {
-                        unreachable!("typechecking");
-                    };
-                    data.push(v);
-                }
-                let init = data.pop().unwrap();
-                data.reverse();
-                call.push(mc, data.into_iter().fold(init, |acc, it| acc - it));
-                Ok(ProcedureReturn::Return)
-            }
-
-            fn div_impl<'gc>(
-                _root: &mut (),
-                mc: &Mutation<'gc>,
-                call: &mut LambdaCall<'gc>,
-                _fuel: &mut Fuel,
-            ) -> Result<ProcedureReturn<'gc>, ProcedureError<'gc>> {
-                // TODO make this nicer...
-                let mut data = vec![];
-                while !call.stack.is_empty() {
-                    let Some(v) = call.pop::<i64>() else {
-                        unreachable!("typechecking");
-                    };
-                    data.push(v);
-                }
-                let init = data.pop().unwrap();
-                data.reverse();
-                call.push(mc, data.into_iter().fold(init, |acc, it| acc / it));
-                Ok(ProcedureReturn::Return)
-            }
-
-            #[derive(Collect, Debug)]
+            #[derive(Collect, Debug, Clone, Copy)]
             #[collect(no_drop)]
             struct TestRoot<'gc> {
                 i: magus::value::Value<'gc>,
@@ -349,14 +314,49 @@ fn repl() -> anyhow::Result<()> {
             };
             let plus_lambda =
                 Lambda::with_root_typecheck(mc, all_numbers_typecheck("add"), troot, plus_impl);
-            let sub_lambda =
-                Lambda::with_typecheck(mc, all_numbers_typecheck("subtract"), sub_impl);
-            let mul_lambda =
-                Lambda::with_typecheck(mc, all_numbers_typecheck("multiply"), mul_impl);
-            let div_lambda = Lambda::with_typecheck(mc, all_numbers_typecheck("divide"), div_impl);
+            let sub_lambda = Lambda::with_typecheck(
+                mc,
+                all_numbers_typecheck("subtract"),
+                move |_, mc, call, _, _| {
+                    let mut data = vec![];
+                    while !call.stack.is_empty() {
+                        let Some(v) = call.pop::<i64>().ok() else {
+                            unreachable!("typechecking");
+                        };
+                        data.push(v);
+                    }
+                    let init = data.pop().unwrap();
+                    data.reverse();
+                    if !data.is_empty() {
+                        // TODO when implementing in standard library, make these checked operations
+                        call.push(mc, data.into_iter().fold(init, |acc, it| acc - it));
+                    } else {
+                        // TODO when implementing in standard library, make these checked operations
+                        call.push(mc, init.neg());
+                    }
+                    Ok(ProcedureReturn::Return)
+                },
+            );
+            let mul_lambda = Lambda::with_typecheck(
+                mc,
+                all_numbers_typecheck("multiply"),
+                move |_, mc, call, _, _| {
+                    let mut total = 1;
+                    while !call.stack.is_empty() {
+                        let Some(v) = call.pop::<i64>().ok() else {
+                            unreachable!("typechecking");
+                        };
+                        // TODO when implementing in standard library, make these checked operations
+                        total *= v;
+                    }
+                    call.push(mc, total);
+                    Ok(ProcedureReturn::Return)
+                },
+            );
             env.define(mc, "+", plus_lambda, false).unwrap();
             env.define(mc, "-", sub_lambda, false).unwrap();
-            env.define(mc, "/", div_lambda, false).unwrap();
+            env.define_ptr(mc, "/", arena.scheme.base(mc).op_div(mc), false)
+                .unwrap();
             env.define(mc, "*", mul_lambda, false).unwrap();
         });
         let mut fuel = Fuel::with(1);
@@ -371,7 +371,7 @@ fn repl() -> anyhow::Result<()> {
             fuel.refill(10, 1);
             running = interp
                 .run(exec.clone(), |ctx, mut exec| {
-                    exec.step(&ctx, &mut fuel);
+                    exec.step(&ctx, &mut fuel).unwrap();
                     let scope_info: HashMap<_, _> = exec
                         .all_scopes()
                         .cloned()
@@ -389,6 +389,9 @@ fn repl() -> anyhow::Result<()> {
                         } else {
                             println!("- {idx}: {resolved}");
                         }
+                    }
+                    if let Some(call) = exec.scope().lambda_call() {
+                        println!(">>>> SUSPENDED: {call}");
                     }
 
                     let metrics = ctx.mutation.metrics();

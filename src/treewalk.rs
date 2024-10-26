@@ -9,25 +9,29 @@ use core::fmt;
 use std::{
     cell::RefMut,
     collections::{HashMap, VecDeque},
-    num::NonZeroUsize,
     sync::mpsc::{channel, Receiver, Sender},
 };
 
-use gc_arena::{Arena, Collect, Gc, Mutation, RefLock, Rootable, Static};
+use gc_arena::{Arena, Collect, Gc, Mutation, RefLock, Rootable};
 use lasso::Rodeo;
-use rowan::{SyntaxText, TextRange};
+use rowan::TextRange;
+use scheme::SchemeStd;
 use slotmap::{new_key_type, HopSlotMap};
 
 use crate::{
-    compiler::environment::{Environment, EnvironmentPtr},
-    runtime::{EnsureNullVisitor, FuelCosts},
-    value::{
-        self, Bytevector as VBytevector, ConsCell, IntoValue, Lambda, LambdaCall, LambdaPtr,
-        ProcedureReturn, SchemeError, TryIntoValue, Value, ValuePtr, ValueType, ValueVisitor as _,
+    environment::{Environment, EnvironmentPtr},
+    runtime::{
+        convert::IntoValue,
+        error::{SchemeError, SchemeErrorPtr, SchemeErrorType, StackFrame},
+        lambda::{LambdaCall, LambdaExecError, LambdaPtr, ProcedureError, ProcedureReturn},
+        EnsureNullVisitor, FuelCosts,
     },
-    Boolean, Bytevector, Character, ContainsDatum, Datum, DatumKind, ExactReal, Fuel, GAstNode,
-    List, Module, Number, SchemeNumber, StringToken, Symbol,
+    value::{self, ConsCell, Value, ValuePtr, ValueVisitor as _},
+    Boolean, Character, ContainsDatum, Datum, DatumKind, ExactReal, Fuel, GAstNode, List, Module,
+    Number, SchemeNumber, StringToken, Symbol,
 };
+
+pub mod scheme;
 
 new_key_type! {struct InnerExecutorKey;}
 pub struct ExecutorKey(InnerExecutorKey, Sender<TreewalkMsg>);
@@ -72,6 +76,8 @@ pub struct TreewalkArena<'gc> {
     null_val: ValuePtr<'gc>,
     executors: Executors<'gc>,
     state: TreewalkState<'gc>,
+
+    pub scheme: SchemeStd<'gc>,
 }
 
 impl<'gc> TreewalkArena<'gc> {
@@ -108,6 +114,7 @@ impl Default for Treewalk {
                 ),
                 executors: Executors(HopSlotMap::with_key()),
                 state: TreewalkState::new(mc),
+                scheme: SchemeStd::new(mc),
             }),
             sender,
             receiver,
@@ -160,13 +167,13 @@ impl Treewalk {
 
     pub fn new_executor<F>(&mut self, code: Module, env_init: F) -> ExecutorKey
     where
-        F: for<'gc> FnOnce(&'gc Mutation<'gc>, EnvironmentPtr<'gc>),
+        F: for<'gc> FnOnce(&'gc Mutation<'gc>, &TreewalkArena<'gc>, EnvironmentPtr<'gc>),
     {
         self.collect_executors();
 
         let inner = self.arena.mutate_root(|mc, arena| {
             let new_env = Gc::new(mc, RefLock::new(Environment::new(mc, None)));
-            env_init(mc, new_env);
+            env_init(mc, arena, new_env);
             arena
                 .executors
                 .0
@@ -197,63 +204,100 @@ impl Treewalk {
 #[derive(Debug, Collect, Clone)]
 #[collect(no_drop)]
 struct TreewalkState<'gc> {
-    rodeo: Gc<'gc, RefLock<Rodeo>>,
+    interner: Gc<'gc, RefLock<Rodeo>>,
 }
 
 impl<'gc> TreewalkState<'gc> {
     fn new(mc: &Mutation<'gc>) -> Self {
         Self {
-            rodeo: Gc::new_static(mc, RefLock::new(Rodeo::new())),
+            interner: Gc::new_static(mc, RefLock::new(Rodeo::new())),
         }
     }
 
     fn ctx(&'gc self, mc: &'gc Mutation<'gc>) -> Context<'gc> {
         Context {
             mutation: mc,
-            interner: self.rodeo.borrow_mut(mc),
+            interner: self.interner.borrow_mut(mc),
         }
     }
 }
 
 #[derive(Debug, Clone)]
+#[expect(dead_code)]
 enum VirtualInstructionPayload {
     Number(i64),
     Bool(bool),
     String(String),
     Bytevector(Vec<u8>),
     Symbol(value::Symbol),
-    List(
-        Box<VirtualInstructionPayload>,
-        Vec<VirtualInstructionPayload>,
-    ),
+    List {
+        head: Box<VirtualInstruction>,
+        body: Vec<VirtualInstruction>,
+        // when excuting a list, this an index into the body
+        body_index: usize,
+        // If the list has a dot, this is the element after the dot
+        dot: Option<Box<VirtualInstruction>>,
+    },
+    Labeled {
+        label: usize,
+        instruction: Box<VirtualInstruction>,
+        // we can cache if an instruction is circular
+        //
+        // this is so that we don't have to determine whether it is over and over again
+        // and can be a quick check to prevent the execution of circular lists
+        // (we don't want to stop the ~meh~ but technically correct #0=(... not even gonna use the label ....), but
+        // we *also* want to fully preserve circular structures b/c `quote` is a thing)
+        is_circular: bool,
+    },
 }
 
 // TODO this is what to evaluate, it preserves information about
 // where the instruction is from w/o using the GAst
 #[derive(Debug, Clone, Collect)]
 #[collect(require_static)]
+#[expect(dead_code)]
 struct VirtualInstruction {
     payload: VirtualInstructionPayload,
     // if this is directly from datum, store it.
+    // this can also be synthesized (generally copied) by macros
     // TODO should we start storing this kind of information in values too?
-    source: SyntaxText,
     range: TextRange,
+
+    /// when using this, we can track how many times this particular expression
+    /// has been executed (this is kept through even as a stack value)
+    touch_count: usize,
 }
 
-/// A value point enhanced with source tracking information
+/// A value pointer enhanced with source tracking information
 #[derive(Debug, Clone, Collect)]
 #[collect(no_drop)]
-struct StackValue<'gc> {
+pub struct StackValue<'gc> {
     value: ValuePtr<'gc>,
-    source: Static<SyntaxText>,
-    range: Static<TextRange>,
+    #[collect(require_static)]
+    range: TextRange,
+    /// preservation of touch_count when used as a virtual instruction
+    touch_count: usize,
 }
 
-// this is our fake "bytecode"
+/// Transparently access the value of this pointer
+impl<'gc> std::ops::Deref for StackValue<'gc> {
+    type Target = ValuePtr<'gc>;
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+/// This is what the treewalk is to execute next
 #[derive(Clone, Debug, Collect)]
-#[collect(require_static)]
+#[collect(no_drop)]
 enum Instruction {
-    Evaluate(Datum),
+    // eventually this will move to VirtualInstruction instead of Datum
+    // and an alternate instruction for executing a bytecode Chunk will be added
+    // (which is why no_drop instead of require_static)
+    // (the Chunk instruction will preserve the VirtualInstruction in case it is quoted)
+    Evaluate(#[collect(require_static)] Datum),
+
+    // Hopefully moved out once macro system is more generalized
     CallFunction {
         args: usize,
     },
@@ -286,6 +330,7 @@ pub type TreewalkExecutorPtr<'gc> = Gc<'gc, RefLock<TreewalkExecutor<'gc>>>;
 pub struct Scope<'gc> {
     pub environment: EnvironmentPtr<'gc>,
     current_lambda: Option<(LambdaCall<'gc>, LambdaPtr<'gc>)>,
+    error: Option<SchemeErrorPtr<'gc>>,
     processed: usize,
     next_datum: VecDeque<Instruction>,
     bottom: Option<usize>,
@@ -308,7 +353,36 @@ impl<'gc> Scope<'gc> {
     pub fn processed(&self) -> usize {
         self.processed
     }
+
+    /// Error of the scope (if any)
+    #[inline]
+    pub fn error(&self) -> Option<SchemeErrorPtr<'gc>> {
+        self.error
+    }
+
+    /// Access to the current lambda call (if any)
+    #[inline]
+    pub fn lambda_call(&self) -> Option<&LambdaCall<'gc>> {
+        self.current_lambda.as_ref().map(|(call, _)| call)
+    }
 }
+
+enum LambdaCallReturn<'gc> {
+    /// Return the top of the stack
+    Result,
+    /// Suspend the call to this lambda
+    Suspend,
+    /// Suspend the call to this lambda, executing the given code in a new frame
+    Call(ValuePtr<'gc>),
+    /// Execute the given code on this frame
+    TailCall(ValuePtr<'gc>),
+    /// Lambda error
+    Error(LambdaExecError<'gc>),
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("cannot step while root scope has errored")]
+pub struct StepError;
 
 impl<'gc> TreewalkExecutor<'gc> {
     fn new(
@@ -321,6 +395,7 @@ impl<'gc> TreewalkExecutor<'gc> {
             RefLock::new(Self {
                 stack: Vec::new(),
                 root_scope: Scope {
+                    error: None,
                     label: None,
                     environment,
                     processed: 0,
@@ -338,7 +413,7 @@ impl<'gc> TreewalkExecutor<'gc> {
         std::iter::once(&self.root_scope).chain(self.scope_stack.iter())
     }
 
-    fn scope(&self) -> &Scope<'gc> {
+    pub fn scope(&self) -> &Scope<'gc> {
         self.scope_stack.last().unwrap_or(&self.root_scope)
     }
 
@@ -367,12 +442,18 @@ impl<'gc> TreewalkExecutor<'gc> {
     }
 
     pub fn can_continue(&self) -> bool {
-        self.execution.is_some()
+        // do we have an instruction to execute
+        (self.execution.is_some()
+            // does any scope have a continuation or suspended lambda
             || self
                 .scope_stack
                 .iter()
-                .any(|scope| !scope.next_datum.is_empty())
+                .any(|scope| !scope.next_datum.is_empty() || scope.current_lambda.is_some())
+            // does the root scope have a continuation or suspended lambda
             || !self.root_scope.next_datum.is_empty()
+            || self.root_scope.current_lambda.is_some())
+            // is the *root* scope not erroring (if it is, we "return" an error)
+            && self.root_scope.error.is_none()
     }
 
     fn current_env(&self) -> EnvironmentPtr<'gc> {
@@ -409,6 +490,7 @@ impl<'gc> TreewalkExecutor<'gc> {
         parent: EnvironmentPtr<'gc>,
     ) {
         self.scope_stack.push(Scope {
+            error: None,
             environment: Gc::new(mc, RefLock::new(Environment::new(mc, Some(parent)))),
             next_datum: inst.into_iter().collect(),
             label: Some(Box::from(label.as_ref())),
@@ -430,6 +512,13 @@ impl<'gc> TreewalkExecutor<'gc> {
         self.push_scope_with_env(mc, label, bottom, inst, parent)
     }
 
+    /// Pop the current scope.
+    ///
+    /// Returns the scope it popped (if any)
+    fn pop_scope(&mut self) -> Option<Scope<'gc>> {
+        self.scope_stack.pop()
+    }
+
     /// Push a value pointer to current scope
     fn push(&mut self, value: ValuePtr<'gc>) {
         // get the current scope and push to there
@@ -442,27 +531,17 @@ impl<'gc> TreewalkExecutor<'gc> {
         self.push(Gc::new(mc, RefLock::new(value.into_value(mc))));
     }
 
-    // TODO push a value to the current scope, and if it fails,
-    // mark the current scope as failed
-    fn try_push_val(
-        &mut self,
-        mc: &Mutation<'gc>,
-        value: impl TryIntoValue<'gc, Error = impl std::error::Error>,
-    ) {
-        todo!()
-    }
-
     // Hardcoded-macro implementation
     //
     // returns if a macro was handled
     fn macro_handlng(
         &mut self,
-        ctx: &Context<'gc>,
-        fuel: &mut Fuel,
+        _ctx: &Context<'gc>,
+        _fuel: &mut Fuel,
         symbol: Symbol,
         list: List,
     ) -> bool {
-        let Some(ident) = symbol.identifier(true) else {
+        let Some(ident) = symbol.identifier(false) else {
             return false;
         };
 
@@ -479,7 +558,7 @@ impl<'gc> TreewalkExecutor<'gc> {
                         let Some((val, name)) = args.next().zip(
                             name.as_ref()
                                 .and_then(Datum::as_symbol)
-                                .and_then(|s| s.identifier(true)),
+                                .and_then(|s| s.identifier(false)),
                         ) else {
                             let syntax = list.syntax();
                             eprintln!(
@@ -529,7 +608,7 @@ impl<'gc> TreewalkExecutor<'gc> {
                     .next()
                     .as_ref()
                     .and_then(Datum::as_symbol)
-                    .and_then(|s| s.identifier(true))
+                    .and_then(|s| s.identifier(false))
                 else {
                     eprintln!("malformed set! {}:{}", file!(), line!());
                     return true;
@@ -572,11 +651,153 @@ impl<'gc> TreewalkExecutor<'gc> {
         }
     }
 
-    pub fn step(&mut self, ctx: &Context<'gc>, fuel: &mut Fuel) {
+    /// Returns if the lambda should be suspended
+    fn call_lambda(
+        &mut self,
+        lambda: LambdaPtr<'gc>,
+        mc: &Mutation<'gc>,
+        call: &mut LambdaCall<'gc>,
+        fuel: &mut Fuel,
+        error: Option<SchemeErrorPtr<'gc>>,
+    ) -> LambdaCallReturn<'gc> {
+        let mut lambda_access = lambda.borrow_mut(mc);
+        let ret = if let Some(error) = error {
+            // Call the lambda in an erroring context
+            lambda_access.execute_erroring(error, mc, call, self, fuel)
+        } else {
+            lambda_access.execute(mc, call, self, fuel)
+        };
+
+        match ret {
+            Ok(ret) => match ret {
+                ProcedureReturn::Return => LambdaCallReturn::Result,
+                ProcedureReturn::Suspend => LambdaCallReturn::Suspend,
+                ProcedureReturn::Call { code, is_tail } => {
+                    if is_tail {
+                        LambdaCallReturn::TailCall(code)
+                    } else {
+                        LambdaCallReturn::Call(code)
+                    }
+                }
+            },
+            Err(e) => LambdaCallReturn::Error(e),
+        }
+    }
+
+    fn handle_lambda_return(
+        &mut self,
+        ret: LambdaCallReturn<'gc>,
+        ctx: &Context<'gc>,
+        lambda: LambdaPtr<'gc>,
+        mut call: LambdaCall<'gc>,
+    ) {
+        match ret {
+            LambdaCallReturn::Result => {
+                if let Some(val) = call.stack.pop() {
+                    self.stack.push(val);
+                }
+            }
+            LambdaCallReturn::Suspend => {
+                self.scope_mut().current_lambda = Some((call, lambda));
+            }
+            LambdaCallReturn::Call(_) => {
+                // Create a new scope to execute the given code
+                todo!()
+            }
+            LambdaCallReturn::TailCall(_) => {
+                // Bash the current scope, replacing it with the given code
+                todo!()
+            }
+            LambdaCallReturn::Error(le) => {
+                match le {
+                    LambdaExecError::ProcedureError(err) => {
+                        let err_ptr = match err {
+                            ProcedureError::Scheme(serr) => {
+                                // this error is to be propagated
+                                serr
+                            }
+                            ProcedureError::Value(val) => {
+                                // Any *non-propagated* errors become the error of the current scope
+
+                                // Resolve the value to get more useful (and nicer) text in the error
+                                let val = val.borrow().resolve_into(ctx.interner.clone());
+                                let _err_type = SchemeErrorType::Raise(val);
+                                // make a Scheme error using the generating the current backtrace
+                                // and the currrent execution's range
+                                todo!("raised value")
+                            }
+                            ProcedureError::General(gen) => {
+                                // Any *non-propagated* errors become the error of the current scope
+                                let _err_type = SchemeErrorType::Rust(gen);
+                                // make a Scheme error using the generating the current backtrace
+                                // and the currrent execution's range
+                                todo!("general error")
+                            }
+                        };
+
+                        // combine the generated error pointer with any existing errors
+                        let err_ptr = if let Some(err) = &self.scope().error {
+                            let mut errors: Vec<_> = match &err.error_type {
+                                SchemeErrorType::Compound(errors) => errors.to_vec(),
+                                _ => Vec::new(),
+                            };
+
+                            if !errors.is_empty() {
+                                errors.push(*err);
+                            }
+
+                            errors.push(err_ptr);
+
+                            // TODO Create a new compound error, with this scope included in the backtrace,
+                            // then pop this scope
+                            Gc::new(
+                                ctx.mutation,
+                                SchemeError {
+                                    backtrace: std::iter::once(StackFrame {
+                                        scope_label: self.scope().label.clone(),
+                                        // This would be the range from the current VirtualInstruction
+                                        range: todo!(),
+                                    })
+                                    .chain(err.backtrace.iter().cloned())
+                                    .collect(),
+                                    error_type: SchemeErrorType::Compound(errors),
+                                },
+                            )
+                        } else {
+                            err_ptr
+                        };
+
+                        // Pop the scope and assign the error to the upper scope
+                        if self.pop_scope().is_none() {
+                            unreachable!("root scope should not be popped")
+                        }
+
+                        self.scope_mut().error = Some(err_ptr);
+                    }
+                    LambdaExecError::TypecheckFailure(_err) => {
+                        // Create a new error on this frame using this error
+                    }
+                    LambdaExecError::LambdaMismatch { id, call_id } => {
+                        panic!("ICE: mismatched lambda call {call_id:p} for lambda {id:p}")
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn step(&mut self, ctx: &Context<'gc>, fuel: &mut Fuel) -> Result<(), StepError> {
+        // Don't step if we are at root
+        // TODO Make explicit with an error type?
+        if self.root_scope.error.is_some() {
+            return Err(StepError);
+        }
+
         while fuel.should_continue() {
             // If the scope is processing a lambda, continue to do so
-            if let Some((call, lambda)) = self.scope_mut().current_lambda.take() {
-                todo!()
+            if let Some((mut call, lambda)) = self.scope_mut().current_lambda.take() {
+                let ret =
+                    self.call_lambda(lambda, ctx.mutation, &mut call, fuel, self.scope().error);
+                self.handle_lambda_return(ret, ctx, lambda, call);
             }
 
             // if there's nothing, but something remains, load it in
@@ -670,7 +891,7 @@ impl<'gc> TreewalkExecutor<'gc> {
                                 // this means to *evaluate* the symbol, not storing it
                                 // we always assume case-sensitivity (as the directives are handled at the GAst layer
                                 let Some(symbol) =
-                                    exec.as_symbol().as_ref().and_then(|s| s.identifier(true))
+                                    exec.as_symbol().as_ref().and_then(|s| s.identifier(false))
                                 else {
                                     eprintln!(
                                         "badly formatted symbol [{:?}]",
@@ -815,36 +1036,19 @@ impl<'gc> TreewalkExecutor<'gc> {
                             continue;
                         };
                         if let Value::Lambda(lambda) = *maybe_func.borrow() {
-                            let mut lambda_access = lambda.borrow_mut(ctx.mutation);
+                            let lambda_access = lambda.borrow_mut(ctx.mutation);
                             let mut call = lambda_access.call(arg_stack);
+                            // drop the access so call_lambda can make a new one
+                            drop(lambda_access);
                             fuel.consume(FuelCosts::CALL_COST);
-                            match lambda_access.execute(ctx.mutation, &mut call, fuel) {
-                                Ok(ret) => match ret {
-                                    ProcedureReturn::Return => {
-                                        if let Some(val) = call.stack.pop() {
-                                            self.stack.push(val);
-                                        }
-                                    }
-                                    ProcedureReturn::Call { code, is_tail } => {
-                                        if is_tail {
-                                            // TODO code format which supports the information we want from
-                                            // datum while also being synthesizeable...
-
-                                            // we bash the current frame to evaluate code
-                                            todo!()
-                                        } else {
-                                            // we create a new scope to evaluate the code
-                                            // TODO Handle scopes properly with this in mind:
-                                            // if a scope ends, the return value of that scope should be pushed to
-                                            // the lambda stack
-                                            todo!()
-                                        }
-                                    }
-                                },
-                                Err(e) => {
-                                    eprintln!("lambda error: {e}");
-                                }
-                            }
+                            let ret = self.call_lambda(
+                                lambda,
+                                ctx.mutation,
+                                &mut call,
+                                fuel,
+                                self.scope().error,
+                            );
+                            self.handle_lambda_return(ret, ctx, lambda, call);
                         } else {
                             eprintln!("cannot call non-lambda {:?}", self.stack.last());
                         }
@@ -896,5 +1100,7 @@ impl<'gc> TreewalkExecutor<'gc> {
 
             self.scope_mut().processed += 1;
         }
+
+        Ok(())
     }
 }

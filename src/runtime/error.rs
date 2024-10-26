@@ -3,10 +3,10 @@ use core::fmt;
 use gc_arena::{Collect, Gc};
 use rowan::TextRange;
 
-use super::{ResolvedValue, ValuePtr};
+use crate::value::ResolvedValue;
 
 /// Errors store this to record where they're from
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StackFrame {
     // what range of text were we processing
     pub range: TextRange,

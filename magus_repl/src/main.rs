@@ -10,7 +10,7 @@ use magus::{
         lambda::{Lambda, LambdaCall, ProcedureError, ProcedureReturn, Typecheck},
         value::ValueType,
     },
-    treewalk::{scheme, StackValue, Treewalk, TreewalkArena, TreewalkExecutor},
+    treewalk::{scheme, Context, StackValue, Treewalk, TreewalkArena, TreewalkExecutor},
     user_type, Comment, ContainsDatum, ContainsTrivia, DatumVisitor, ExternalRepresentation, Fuel,
     GAstNode, MagusSyntaxElementRef, Module, Symbol,
 };
@@ -291,14 +291,14 @@ fn repl() -> anyhow::Result<()> {
 
             fn plus_impl<'gc>(
                 _root: &mut TestRoot<'gc>,
-                mc: &Mutation<'gc>,
+                ctx: &Context<'gc>,
                 call: &mut LambdaCall<'gc>,
                 _interpreter: &mut TreewalkExecutor<'gc>,
                 _fuel: &mut Fuel,
             ) -> Result<ProcedureReturn<'gc>, ProcedureError<'gc>> {
                 match call.pop::<&MyCoolType>() {
                     Ok(mct) => {
-                        call.push(mc, mct.x);
+                        call.push(ctx.mutation, mct.x);
                         return Ok(ProcedureReturn::Return);
                     }
                     Err(vp) => {
@@ -316,7 +316,7 @@ fn repl() -> anyhow::Result<()> {
                     // TODO when implementing in standard library, make these checked operations
                     total += v;
                 }
-                call.push(mc, MyCoolType { x: total });
+                call.push(ctx.mutation, MyCoolType { x: total });
                 Ok(ProcedureReturn::Suspend)
             }
 
@@ -334,7 +334,7 @@ fn repl() -> anyhow::Result<()> {
             let sub_lambda = Lambda::with_typecheck(
                 mc,
                 all_numbers_typecheck("subtract"),
-                move |_, mc, call, _, _| {
+                move |_, ctx, call, _, _| {
                     let mut data = vec![];
                     while !call.stack.is_empty() {
                         let Some(v) = call.pop::<i64>().ok() else {
@@ -346,10 +346,13 @@ fn repl() -> anyhow::Result<()> {
                     data.reverse();
                     if !data.is_empty() {
                         // TODO when implementing in standard library, make these checked operations
-                        call.push(mc, data.into_iter().fold(init, |acc, it| acc - it));
+                        call.push(
+                            ctx.mutation,
+                            data.into_iter().fold(init, |acc, it| acc - it),
+                        );
                     } else {
                         // TODO when implementing in standard library, make these checked operations
-                        call.push(mc, init.neg());
+                        call.push(ctx.mutation, init.neg());
                     }
                     Ok(ProcedureReturn::Return)
                 },
@@ -357,7 +360,7 @@ fn repl() -> anyhow::Result<()> {
             let mul_lambda = Lambda::with_typecheck(
                 mc,
                 all_numbers_typecheck("multiply"),
-                move |_, mc, call, _, _| {
+                move |_, ctx, call, _, _| {
                     let mut total = 1;
                     while !call.stack.is_empty() {
                         let Some(v) = call.pop::<i64>().ok() else {
@@ -366,7 +369,7 @@ fn repl() -> anyhow::Result<()> {
                         // TODO when implementing in standard library, make these checked operations
                         total *= v;
                     }
-                    call.push(mc, total);
+                    call.push(ctx.mutation, total);
                     Ok(ProcedureReturn::Return)
                 },
             );
@@ -377,6 +380,7 @@ fn repl() -> anyhow::Result<()> {
             let div_sym = get_static_sym(arena, mc, "/");
             let define_sym = get_static_sym(arena, mc, "define");
             let setbang_sym = get_static_sym(arena, mc, "set!");
+            let lambda_sym = get_static_sym(arena, mc, "lambda");
             env.define(mc, add_sym, StackValue::external(mc, plus_lambda), false)
                 .unwrap();
             env.define(mc, sub_sym, StackValue::external(mc, sub_lambda), false)
@@ -393,6 +397,8 @@ fn repl() -> anyhow::Result<()> {
             env.define_macro(mc, define_sym, scheme::base::macros::Define)
                 .unwrap();
             env.define_macro(mc, setbang_sym, scheme::base::macros::SetBang)
+                .unwrap();
+            env.define_macro(mc, lambda_sym, scheme::base::macros::Lambda)
                 .unwrap();
         });
         let mut fuel = Fuel::with(1);
@@ -436,8 +442,8 @@ fn repl() -> anyhow::Result<()> {
                     }
 
                     if let Some(err) = exec.scope().error() {
-                        // println!(">>>> ERROR: {}", err.clone().display(&[src]));
-                        println!(">>>> ERROR: {:?}", err);
+                        println!(">>>> ERROR: {}", err.clone().display(&[src]));
+                        // println!(">>>> ERROR: {:?}", err);
                     }
 
                     let metrics = ctx.mutation.metrics();

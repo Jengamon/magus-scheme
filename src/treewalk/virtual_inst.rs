@@ -6,9 +6,7 @@ use rowan::TextRange;
 
 use crate::{
     bytecode::ChunkPtr,
-    value::Bytevector,
-    value::Vector,
-    value::{ConsCell, Symbol, Value, ValuePtr},
+    value::{ConsCell, Symbol, Value, ValuePtr, ValueVisitor},
     ContainsDatum, Datum, DatumVisitor, ExactReal, GAstNode, GAstToken, SchemeNumber,
 };
 
@@ -77,6 +75,40 @@ impl<'gc> VirtualInstructionPayload<'gc> {
         match self {
             Self::Datum { datum, .. } => datum,
             Self::Jit { datum, .. } => datum,
+        }
+    }
+
+    fn executable(&self) -> bool {
+        matches!(
+            self,
+            Self::Datum {
+                datum: VirtualInstructionDatum::Symbol(_),
+                ..
+            } | Self::Jit {
+                datum: VirtualInstructionDatum::Symbol(_),
+                ..
+            } | Self::Datum {
+                datum: VirtualInstructionDatum::List { .. },
+                ..
+            } | Self::Jit {
+                datum: VirtualInstructionDatum::List { .. },
+                ..
+            }
+        )
+    }
+
+    /// A list is only executable if its head is a symbol or a (non-empty) list
+    pub fn list_executable(&self) -> bool {
+        match self {
+            Self::Datum {
+                datum: VirtualInstructionDatum::List { head, .. },
+                ..
+            }
+            | Self::Jit {
+                datum: VirtualInstructionDatum::List { head, .. },
+                ..
+            } => head.payload.executable(),
+            _ => false,
         }
     }
 
@@ -155,115 +187,26 @@ pub struct VirtualInstruction<'gc> {
     pub source_id: Option<usize>,
 }
 
-pub trait StackValueVisitor<'gc> {
-    fn visit_value(&mut self, value: StackValue<'gc>) {
-        match *value.borrow() {
-            Value::Undefined => self.visit_undefined(value),
-            Value::Void => self.visit_void(value),
-            Value::Vector(vec) => self.visit_vector(vec, value),
-            Value::Bytevector(vec) => self.visit_bytevector(vec, value),
-            Value::Cons(cons) => self.visit_cons(cons, value),
-            Value::Number(int) => self.visit_number(int, value),
-            Value::Inexact(iex) => self.visit_inexact(iex, value),
-            Value::String(str) => self.visit_string(str.as_ref().borrow().as_str(), value),
-            Value::Symbol(sym) => self.visit_symbol(sym, value),
-            Value::Bool(bool) => self.visit_bool(bool, value),
-            Value::Char(char) => self.visit_char(char, value),
-            _ => self.visit_no_external(value),
-        }
-    }
-
-    fn visit_no_external(&mut self, value: StackValue<'gc>) {
-        let _ = value;
-    }
-
-    fn visit_undefined(&mut self, value: StackValue<'gc>) {
-        let _ = value;
-    }
-
-    fn visit_void(&mut self, value: StackValue<'gc>) {
-        let _ = value;
-    }
-
-    fn visit_number(&mut self, integer: i64, value: StackValue<'gc>) {
-        let _ = value;
-        _ = integer;
-    }
-
-    fn visit_inexact(&mut self, integer: f64, value: StackValue<'gc>) {
-        let _ = value;
-        _ = integer;
-    }
-
-    fn visit_string(&mut self, string: &str, value: StackValue<'gc>) {
-        let _ = value;
-        _ = string;
-    }
-
-    fn visit_symbol(&mut self, symbol: Symbol, value: StackValue<'gc>) {
-        let _ = value;
-        _ = symbol;
-    }
-
-    fn visit_bool(&mut self, bool: bool, value: StackValue<'gc>) {
-        let _ = value;
-        _ = bool;
-    }
-
-    fn visit_char(&mut self, char: char, value: StackValue<'gc>) {
-        let _ = value;
-        _ = char;
-    }
-
-    fn visit_cons(&mut self, cons: ConsCell<'gc>, value: StackValue<'gc>) {
-        let _ = value;
-        _ = cons;
-    }
-
-    fn visit_vector(&mut self, vec: Vector<'gc>, value: StackValue<'gc>) {
-        let _ = value;
-        _ = vec;
-    }
-
-    fn visit_bytevector(&mut self, vec: Bytevector<'gc>, value: StackValue<'gc>) {
-        let _ = value;
-        _ = vec;
-    }
-}
-
 struct ValueToVirtualInstructionDatum<'a, 'gc> {
     instruction: Option<VirtualInstructionDatum<'gc>>,
-    found: Vec<StackValue<'gc>>,
+    found: Vec<ValuePtr<'gc>>,
     range: Option<TextRange>,
-    chunk: Result<CodeChunkPtr<'gc>, Gc<'gc, RefLock<bool>>>,
     circular_list: bool,
     source_id: Option<usize>,
     mc: &'a Mutation<'gc>,
 }
 
-impl<'a, 'gc> ValueToVirtualInstructionDatum<'a, 'gc> {
-    fn synthesize(&self, value: ValuePtr<'gc>) -> StackValue<'gc> {
-        StackValue {
-            value,
-            range: self.range,
-            touch_count: Gc::new(self.mc, RefLock::new(0)),
-            source_id: self.source_id,
-            chunk: self.chunk,
-        }
-    }
-}
-
-impl<'a, 'gc> StackValueVisitor<'gc> for ValueToVirtualInstructionDatum<'a, 'gc> {
-    fn visit_number(&mut self, integer: i64, _value: StackValue<'gc>) {
+impl<'a, 'gc> ValueVisitor<'gc> for ValueToVirtualInstructionDatum<'a, 'gc> {
+    fn visit_number(&mut self, integer: i64, _value: ValuePtr<'gc>) {
         self.instruction = Some(VirtualInstructionDatum::Number(integer));
     }
 
-    fn visit_symbol(&mut self, symbol: Symbol, _value: StackValue<'gc>) {
+    fn visit_symbol(&mut self, symbol: Symbol, _value: ValuePtr<'gc>) {
         self.instruction = Some(VirtualInstructionDatum::Symbol(symbol));
     }
 
-    fn visit_cons(&mut self, cons: ConsCell<'gc>, value: StackValue<'gc>) {
-        if self.found.iter().any(|ptr| Gc::ptr_eq(**ptr, *value))
+    fn visit_cons(&mut self, cons: ConsCell<'gc>, value: ValuePtr<'gc>) {
+        if self.found.iter().any(|ptr| Gc::ptr_eq(*ptr, value))
             && self
                 .instruction
                 .as_ref()
@@ -275,8 +218,7 @@ impl<'a, 'gc> StackValueVisitor<'gc> for ValueToVirtualInstructionDatum<'a, 'gc>
         self.found.push(value);
 
         let car = if let Some(car) = cons.car.as_ref() {
-            let fake_car = self.synthesize(*car);
-            self.visit_value(fake_car);
+            self.visit_value(*car);
             if self.circular_list {
                 return;
             }
@@ -289,8 +231,7 @@ impl<'a, 'gc> StackValueVisitor<'gc> for ValueToVirtualInstructionDatum<'a, 'gc>
         };
 
         let cdr = if let Some(cdr) = cons.cdr.as_ref() {
-            let fake_cdr = self.synthesize(*cdr);
-            self.visit_value(fake_cdr);
+            self.visit_value(*cdr);
             if self.circular_list {
                 return;
             }
@@ -356,10 +297,9 @@ impl<'gc> TryFrom<(&'gc Mutation<'gc>, StackValue<'gc>)> for VirtualInstruction<
             instruction: None,
             found: Vec::new(),
             circular_list: false,
-            chunk: value.chunk,
             mc,
         };
-        visitor.visit_value(value);
+        visitor.visit_value(*value);
         let datum = visitor.instruction.ok_or(())?;
         Ok(Self {
             payload: match value.chunk {

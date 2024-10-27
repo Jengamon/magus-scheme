@@ -2,7 +2,7 @@ use gc_arena::{unsize, Collect, Gc, Mutation, RefLock};
 
 use crate::{
     environment::EnvironmentPtr,
-    treewalk::{virtual_inst::VirtualInstruction, Context, StackValue, TreewalkExecutor},
+    treewalk::{virtual_inst::VirtualInstructionDatum, Context, StackValue, TreewalkExecutor},
     value::ValuePtr,
     Fuel,
 };
@@ -16,15 +16,11 @@ pub trait Macro<'gc>: Collect + core::fmt::Debug {
         false
     }
 
-    // TODO Add function that can look at a virtual instruction
-    // and either mark it as a "reserved form" and error if malformed
-    // or mark it to ignore and read it
-    fn is_form(
+    fn is_properly_formed(
         &self,
-        _exec: &TreewalkExecutor<'gc>,
-        _inst: &VirtualInstruction<'gc>,
-    ) -> Option<Result<(), anyhow::Error>> {
-        Some(Ok(()))
+        _args: &[VirtualInstructionDatum<'gc>],
+    ) -> Result<(), anyhow::Error> {
+        Ok(())
     }
 
     /// Produce the output of the macro
@@ -61,7 +57,7 @@ pub enum MacroReturn<'gc> {
 pub struct SyntaxRules {}
 
 // Have stuff to tell the Treewalk to do the things here
-// Fundamental forms: define, lambda, quote, if, define-syntax, let-syntax, letrec-syntax, syntax-rules, set!
+// Fundamental forms: (define), lambda, quote, if, define-syntax, let-syntax, letrec-syntax, syntax-rules, (set!)
 // and that's it.
 //
 // macros are kept in a separate namespace in environments, so they are *not* values. (however, the output of `syntax-rules`
@@ -87,6 +83,9 @@ pub enum MacroInstruction<'gc> {
     // *but* I'd want to see it work first before doing
     Evaluate(StackValue<'gc>),
     /// Sets the environment
+    // TODO don't use this, but instead see if we can simply have LetSyntax and LetRecSyntax
+    // use an alternate version of evaluate that specifies macro pointers and names
+    // along with the stack value to evaluate
     SetEnvironment(EnvironmentPtr<'gc>),
     /// Pops the top of the stack, and `define`s the given name as that value
     Define {
@@ -101,5 +100,5 @@ pub enum MacroInstruction<'gc> {
         name: lasso::Spur,
     },
     /// Will call the function at stack[len - args - 1] with stack[len-args..] as arguments
-    CallFunction { args: usize },
+    CallLambda { args: usize },
 }

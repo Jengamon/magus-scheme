@@ -1,7 +1,7 @@
 //! Representation of Scheme values
 use core::fmt;
-use std::rc::Rc;
 use std::string::String as StdString;
+use std::{cell::RefCell, rc::Rc};
 
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 use lasso::{IntoResolver, RodeoResolver};
@@ -92,8 +92,58 @@ pub enum Value<'gc> {
 // implements logic behind eqv?
 // where as ValuePtr::eq implements eq? logic
 impl<'gc> PartialEq for Value<'gc> {
-    fn eq(&self, _other: &Self) -> bool {
-        todo!()
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Value::Undefined => matches!(other, Value::Undefined),
+            Value::Void => matches!(other, Value::Void),
+            Value::Number(n) => matches!(other, Value::Number(on) if on == n),
+            Value::Inexact(i) => matches!(other, Value::Inexact(oi) if oi == i),
+            Value::String(s) => matches!(other, Value::String(os) if os == s),
+            Value::Symbol(sym) => matches!(other, Value::Symbol(osym) if osym == sym),
+            Value::Bool(b) => matches!(other, Value::Bool(ob) if ob == b),
+            Value::Char(c) => matches!(other, Value::Char(oc) if oc == c),
+            Value::Vector(Vector { vec: vp }) => {
+                matches!(other, Value::Vector(Vector { vec: ovp }) if Gc::ptr_eq(*vp, *ovp))
+            }
+            Value::Bytevector(_) => todo!(),
+            Value::InputPort(_) => todo!(),
+            Value::OutputPort(_) => todo!(),
+            Value::Cons(ConsCell {
+                car: Some(car),
+                cdr: Some(cdr),
+            }) => {
+                matches!(other, Value::Cons(ConsCell { car: Some(ocar), cdr: Some(ocdr)}) if Gc::ptr_eq(*car, *ocar) && Gc::ptr_eq(*cdr, *ocdr))
+            }
+            Value::Cons(ConsCell {
+                car: None,
+                cdr: Some(cdr),
+            }) => {
+                matches!(other, Value::Cons(ConsCell { car:None, cdr: Some(ocdr)}) if Gc::ptr_eq(*cdr, *ocdr))
+            }
+            Value::Cons(ConsCell {
+                car: Some(car),
+                cdr: None,
+            }) => {
+                matches!(other, Value::Cons(ConsCell { car: Some(ocar), cdr: None}) if Gc::ptr_eq(*car, *ocar) )
+            }
+            Value::Cons(ConsCell {
+                car: None,
+                cdr: None,
+            }) => {
+                matches!(
+                    other,
+                    Value::Cons(ConsCell {
+                        car: None,
+                        cdr: None
+                    })
+                )
+            }
+            Value::Environment(_) => todo!(),
+            Value::UserStruct(_) => todo!(),
+            Value::Transformer(_) => todo!(),
+            Value::Lambda(_) => todo!(),
+            Value::Error(_) => todo!(),
+        }
     }
 }
 
@@ -181,19 +231,38 @@ struct ConsPrinter<'a, 'gc, K: lasso::Key> {
     cons: &'a ConsCell<'gc>,
     resolver: Rc<RodeoResolver<K>>,
     null: ValuePtr<'gc>,
-    encountered: &'a mut Vec<Value<'gc>>,
+    encountered: Rc<RefCell<Vec<Value<'gc>>>>,
 }
 
 impl<'a, 'gc, K: lasso::Key> fmt::Display for ConsPrinter<'a, 'gc, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // recurse into the value, keeping track of encountered cons cells
         // so that we don't recurse into them
-        let _ = self.cons;
+        let cons_value = Value::Cons(*self.cons);
+
+        if *self.null.borrow() == cons_value {
+            if self.encountered.borrow().is_empty() {
+                // we are starting at the null cons, so close it out
+                write!(f, "()")?;
+            }
+            return Ok(());
+        }
+
+        write!(f, "(")?;
+
+        if self.encountered.borrow().contains(&cons_value) {
+            // write as self-recursive list
+            write!(f, "...)")?;
+            return Ok(());
+        }
+
+        // handle car and cdr, adding a dot if cdr is *not* a cons cell
+        self.encountered.borrow_mut().push(cons_value);
         let _ = self.resolver;
-        let _ = self.null;
-        let _ = self.encountered;
         let _ = f;
-        todo!()
+        // pop encountered and close the list
+        self.encountered.borrow_mut().pop();
+        write!(f, "<notnull>)")
     }
 }
 
@@ -238,7 +307,6 @@ impl<'gc> fmt::Display for ResolvedValue<'gc, lasso::Spur> {
             Value::OutputPort(_) => todo!(),
             // TODO this needs special handling, b/c a cons might recurse into itself
             Value::Cons(ref cons) => {
-                let mut stack = vec![];
                 write!(
                     f,
                     "{}",
@@ -246,7 +314,7 @@ impl<'gc> fmt::Display for ResolvedValue<'gc, lasso::Spur> {
                         cons,
                         resolver: self.resolver.clone(),
                         null: self.null_ptr,
-                        encountered: &mut stack,
+                        encountered: Rc::new(RefCell::new(Vec::new())),
                     }
                 )
             }
@@ -411,6 +479,64 @@ impl<'gc> ConsCell<'gc> {
             car: None,
             cdr: None,
         }
+    }
+
+    fn is_circular_impl(&self, self_ptr: ValuePtr<'gc>, stack: &mut Vec<ValuePtr<'gc>>) -> bool {
+        stack.push(self_ptr);
+        if let Some(val) = self.car {
+            if let Value::Cons(cell) = *val.borrow() {
+                if cell.is_circular_impl(val, stack) {
+                    return true;
+                }
+            }
+        }
+        if let Some(val) = self.cdr {
+            if let Value::Cons(cell) = *val.borrow() {
+                if cell.is_circular_impl(val, stack) {
+                    return true;
+                }
+            }
+        }
+        assert!(Gc::ptr_eq(stack.pop().unwrap(), self_ptr));
+        false
+    }
+
+    pub fn is_circular(&self, self_ptr: ValuePtr<'gc>) -> bool {
+        let mut stack = vec![];
+        self.is_circular_impl(self_ptr, &mut stack)
+    }
+
+    fn is_param_list_impl(&self, self_ptr: ValuePtr<'gc>, stack: &mut Vec<ValuePtr<'gc>>) -> bool {
+        stack.push(self_ptr);
+        if let Some(val) = self.car {
+            match *val.borrow() {
+                Value::Cons(cell) => {
+                    if !cell.is_param_list_impl(val, stack) {
+                        return false;
+                    }
+                }
+                Value::Symbol(_) => {}
+                _ => return false,
+            }
+        }
+        if let Some(val) = self.cdr {
+            match *val.borrow() {
+                Value::Cons(cell) => {
+                    if !cell.is_param_list_impl(val, stack) {
+                        return false;
+                    }
+                }
+                Value::Symbol(_) => {}
+                _ => return false,
+            }
+        }
+        assert!(Gc::ptr_eq(stack.pop().unwrap(), self_ptr));
+        true
+    }
+
+    pub fn is_param_list(&self, self_ptr: ValuePtr<'gc>) -> bool {
+        let mut stack = vec![];
+        self.is_param_list_impl(self_ptr, &mut stack)
     }
 
     pub fn from_iter<

@@ -6,7 +6,7 @@ use std::rc::Rc;
 use gc_arena::{unsize, Collect, Gc, Mutation, RefLock};
 use rowan::TextRange;
 
-use crate::treewalk::{StackValue, TreewalkExecutor};
+use crate::treewalk::{Context, StackValue, TreewalkExecutor};
 use crate::Fuel;
 
 use crate::runtime::{
@@ -90,11 +90,24 @@ pub struct LambdaCall<'gc> {
     #[collect(require_static)]
     range: Option<TextRange>,
     source_id: Option<usize>,
+
+    /// lambdas can store w/e they want for the duration of a call using this
+    data: Option<ValuePtr<'gc>>,
 }
 
 impl<'gc> LambdaCall<'gc> {
     pub fn stage(&self) -> LambdaStage {
         self.stage
+    }
+
+    /// Data assigned to this call (by this call)
+    pub fn data(&self) -> Option<ValuePtr<'gc>> {
+        self.data
+    }
+
+    /// Data assigned to this call (by this call)
+    pub fn data_mut(&mut self) -> &mut Option<ValuePtr<'gc>> {
+        &mut self.data
     }
 
     /// Get the number of arguments passed into this lambda call
@@ -164,9 +177,13 @@ pub enum ProcedureError<'gc> {
 
 pub type ProcedureResult<'gc> = Result<ProcedureReturn<'gc>, ProcedureError<'gc>>;
 pub trait Procedure<'gc>: Collect {
+    fn typecheck(&self, _call: &LambdaCall<'gc>) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     fn execute(
         &mut self,
-        mc: &Mutation<'gc>,
+        ctx: &Context<'gc>,
         call: &mut LambdaCall<'gc>,
         interpreter: &mut TreewalkExecutor<'gc>,
         fuel: &mut Fuel,
@@ -178,7 +195,7 @@ pub trait Procedure<'gc>: Collect {
     fn error(
         &mut self,
         error: SchemeErrorPtr<'gc>,
-        _mc: &Mutation<'gc>,
+        _ctx: &Context<'gc>,
         _call: &mut LambdaCall<'gc>,
         _interpreter: &mut TreewalkExecutor<'gc>,
         _fuel: &mut Fuel,
@@ -190,6 +207,7 @@ pub trait Procedure<'gc>: Collect {
 #[derive(Collect)]
 #[collect(no_drop)]
 struct Callback<R, F> {
+    typecheck: Option<Typecheck>,
     root: R,
     #[collect(require_static)]
     func: F,
@@ -201,20 +219,29 @@ where
     F: 'static
         + FnMut(
             &mut R,
-            &Mutation<'gc>,
+            &Context<'gc>,
             &mut LambdaCall<'gc>,
             &mut TreewalkExecutor<'gc>,
             &mut Fuel,
         ) -> ProcedureResult<'gc>,
 {
+    fn typecheck(&self, call: &LambdaCall<'gc>) -> anyhow::Result<()> {
+        let signature: Vec<_> = call.stack.iter().map(|v| v.borrow().value_type()).collect();
+        if let Some(check) = self.typecheck.as_ref() {
+            check.check(&signature)
+        } else {
+            Ok(())
+        }
+    }
+
     fn execute(
         &mut self,
-        mc: &Mutation<'gc>,
+        ctx: &Context<'gc>,
         call: &mut LambdaCall<'gc>,
         interpreter: &mut TreewalkExecutor<'gc>,
         fuel: &mut Fuel,
     ) -> ProcedureResult<'gc> {
-        (self.func)(&mut self.root, mc, call, interpreter, fuel)
+        (self.func)(&mut self.root, ctx, call, interpreter, fuel)
     }
 }
 
@@ -222,15 +249,26 @@ impl<F> Callback<(), F>
 where
     F: for<'gc> FnMut(
             &mut (),
-            &Mutation<'gc>,
+            &Context<'gc>,
             &mut LambdaCall<'gc>,
             &mut TreewalkExecutor<'gc>,
             &mut Fuel,
         ) -> ProcedureResult<'gc>
         + 'static,
 {
-    fn from_fn<'gc>(mc: &Mutation<'gc>, func: F) -> ProcedurePtr<'gc> {
-        let cb = Gc::new(mc, RefLock::new(Self { root: (), func }));
+    fn from_fn<'gc>(
+        mc: &Mutation<'gc>,
+        typecheck: Option<Typecheck>,
+        func: F,
+    ) -> ProcedurePtr<'gc> {
+        let cb = Gc::new(
+            mc,
+            RefLock::new(Self {
+                root: (),
+                typecheck,
+                func,
+            }),
+        );
         unsize!(cb => RefLock<dyn Procedure<'gc>>)
     }
 }
@@ -241,14 +279,26 @@ where
     F: 'static
         + FnMut(
             &mut R,
-            &Mutation<'gc>,
+            &Context<'gc>,
             &mut LambdaCall<'gc>,
             &mut TreewalkExecutor<'gc>,
             &mut Fuel,
         ) -> ProcedureResult<'gc>,
 {
-    fn from_fn_with(mc: &Mutation<'gc>, root: R, func: F) -> ProcedurePtr<'gc> {
-        let cb = Gc::new(mc, RefLock::new(Self { root, func }));
+    fn from_fn_with(
+        mc: &Mutation<'gc>,
+        typecheck: Option<Typecheck>,
+        root: R,
+        func: F,
+    ) -> ProcedurePtr<'gc> {
+        let cb = Gc::new(
+            mc,
+            RefLock::new(Self {
+                root,
+                typecheck,
+                func,
+            }),
+        );
         unsize!(cb => RefLock<dyn Procedure<'gc>>)
     }
 }
@@ -259,7 +309,6 @@ where
 #[derive(Clone, Collect)]
 #[collect(no_drop)]
 pub struct Lambda<'gc> {
-    typecheck: Option<Typecheck>,
     proc: ProcedurePtr<'gc>,
 
     // This identifes *this* lambda, as opposed to a different one
@@ -287,14 +336,14 @@ impl<'gc> Lambda<'gc> {
         mc: &Mutation<'gc>,
         proc: impl for<'gca> FnMut(
                 &mut (),
-                &Mutation<'gca>,
+                &Context<'gca>,
                 &mut LambdaCall<'gca>,
                 &mut TreewalkExecutor<'gca>,
                 &mut Fuel,
             ) -> ProcedureResult<'gca>
             + 'static,
     ) -> Self {
-        Self::with_procedure_ptr(mc, Callback::from_fn(mc, proc))
+        Self::with_procedure_ptr(mc, Callback::from_fn(mc, None, proc))
     }
 
     pub fn with_root<R: Collect + 'gc>(
@@ -302,14 +351,14 @@ impl<'gc> Lambda<'gc> {
         root: R,
         proc: impl FnMut(
                 &mut R,
-                &Mutation<'gc>,
+                &Context<'gc>,
                 &mut LambdaCall<'gc>,
                 &mut TreewalkExecutor<'gc>,
                 &mut Fuel,
             ) -> ProcedureResult<'gc>
             + 'static,
     ) -> Self {
-        Self::with_procedure_ptr(mc, Callback::from_fn_with(mc, root, proc))
+        Self::with_procedure_ptr(mc, Callback::from_fn_with(mc, None, root, proc))
     }
 
     pub fn with_typecheck(
@@ -317,30 +366,30 @@ impl<'gc> Lambda<'gc> {
         typecheck: Typecheck,
         proc: impl for<'gca> FnMut(
                 &mut (),
-                &Mutation<'gca>,
+                &Context<'gca>,
                 &mut LambdaCall<'gca>,
                 &mut TreewalkExecutor<'gca>,
                 &mut Fuel,
             ) -> ProcedureResult<'gca>
             + 'static,
     ) -> Self {
-        Self::with_typecheck_procedure_ptr(mc, typecheck, Callback::from_fn(mc, proc))
+        Self::with_procedure_ptr(mc, Callback::from_fn(mc, Some(typecheck), proc))
     }
 
     pub fn with_root_typecheck<R: Collect + 'gc>(
-        mc: &'gc Mutation<'gc>,
+        mc: &Mutation<'gc>,
         typecheck: Typecheck,
         root: R,
         proc: impl FnMut(
                 &mut R,
-                &Mutation<'gc>,
+                &Context<'gc>,
                 &mut LambdaCall<'gc>,
                 &mut TreewalkExecutor<'gc>,
                 &mut Fuel,
             ) -> ProcedureResult<'gc>
             + 'static,
     ) -> Lambda<'gc> {
-        Self::with_typecheck_procedure_ptr(mc, typecheck, Callback::from_fn_with(mc, root, proc))
+        Self::with_procedure_ptr(mc, Callback::from_fn_with(mc, Some(typecheck), root, proc))
     }
 
     pub fn with_procedure<P>(mc: &Mutation<'gc>, proc: P) -> Self
@@ -353,32 +402,8 @@ impl<'gc> Lambda<'gc> {
         )
     }
 
-    pub fn with_typecheck_procedure<P>(mc: &Mutation<'gc>, typecheck: Typecheck, proc: P) -> Self
-    where
-        P: Procedure<'gc> + 'gc,
-    {
-        Self::with_typecheck_procedure_ptr(
-            mc,
-            typecheck,
-            unsize!(Gc::new(mc, RefLock::new(proc)) => RefLock<dyn Procedure<'gc>>),
-        )
-    }
-
     pub fn with_procedure_ptr(mc: &Mutation<'gc>, proc: ProcedurePtr<'gc>) -> Self {
         Self {
-            typecheck: None,
-            proc,
-            id: Gc::new(mc, ()),
-        }
-    }
-
-    pub fn with_typecheck_procedure_ptr(
-        mc: &Mutation<'gc>,
-        typecheck: Typecheck,
-        proc: ProcedurePtr<'gc>,
-    ) -> Self {
-        Self {
-            typecheck: Some(typecheck),
             proc,
             id: Gc::new(mc, ()),
         }
@@ -395,6 +420,7 @@ impl<'gc> Lambda<'gc> {
         LambdaCall {
             args: stack.len(),
             stack,
+            data: None,
             stage: LambdaStage::Typecheck,
             lambda_id: self.id,
             source_id,
@@ -408,7 +434,7 @@ impl<'gc> Lambda<'gc> {
     /// this lambda
     pub fn execute(
         &mut self,
-        mc: &Mutation<'gc>,
+        ctx: &Context<'gc>,
         call: &mut LambdaCall<'gc>,
         interpreter: &mut TreewalkExecutor<'gc>,
         fuel: &mut Fuel,
@@ -425,21 +451,16 @@ impl<'gc> Lambda<'gc> {
         loop {
             match call.stage {
                 LambdaStage::Typecheck => {
-                    let signature: Vec<_> =
-                        call.stack.iter().map(|v| v.borrow().value_type()).collect();
-                    if let Some(check) = self.typecheck.as_ref() {
-                        if let Err(e) = check.check(&signature) {
-                            eprintln!("typecheck error: {e}");
-                            return Err(LambdaExecError::TypecheckFailure(e));
-                        }
+                    if let Err(e) = self.proc.borrow().typecheck(call) {
+                        return Err(LambdaExecError::TypecheckFailure(e));
                     }
                     call.stage = LambdaStage::Execution;
                 }
                 LambdaStage::Execution => {
                     break Ok(self
                         .proc
-                        .borrow_mut(mc)
-                        .execute(mc, call, interpreter, fuel)
+                        .borrow_mut(ctx.mutation)
+                        .execute(ctx, call, interpreter, fuel)
                         .map_err(LambdaExecError::ProcedureError)?)
                 }
                 LambdaStage::Erroring { is_typechecked } => {
@@ -463,7 +484,7 @@ impl<'gc> Lambda<'gc> {
     pub fn execute_erroring(
         &mut self,
         error: SchemeErrorPtr<'gc>,
-        mc: &Mutation<'gc>,
+        ctx: &Context<'gc>,
         call: &mut LambdaCall<'gc>,
         interpreter: &mut TreewalkExecutor<'gc>,
         fuel: &mut Fuel,
@@ -495,8 +516,8 @@ impl<'gc> Lambda<'gc> {
 
         // call into the error pathway
         self.proc
-            .borrow_mut(mc)
-            .error(error, mc, call, interpreter, fuel)
+            .borrow_mut(ctx.mutation)
+            .error(error, ctx, call, interpreter, fuel)
             .map_err(LambdaExecError::ProcedureError)
     }
 }
@@ -510,7 +531,6 @@ impl<'a> fmt::Debug for ProcDebug<'a> {
 impl<'gc> fmt::Debug for Lambda<'gc> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Lambda")
-            .field("typecheck", &self.typecheck)
             .field("proc", &ProcDebug(self.proc))
             .finish()
     }

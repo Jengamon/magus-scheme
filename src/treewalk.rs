@@ -283,7 +283,7 @@ pub struct Context<'gc> {
 #[collect(no_drop)]
 pub struct TreewalkExecutor<'gc> {
     rewrite_queue: VecDeque<MacroInstruction<'gc>>,
-    stack: Vec<StackValue<'gc>>,
+    pub stack: Vec<StackValue<'gc>>,
     root_scope: Scope<'gc>,
     scope_stack: Vec<Scope<'gc>>,
 }
@@ -480,6 +480,18 @@ impl<'gc> TreewalkExecutor<'gc> {
         )
     }
 
+    /// Add a new frame on top of the current one
+    /// evaluating a given source
+    pub fn add_source(
+        &mut self,
+        _ctx: &Context<'gc>,
+        _code: Module,
+        _source_id: usize,
+        _range: TextRange,
+    ) {
+        todo!()
+    }
+
     /// root scope is always the first scope
     pub fn all_scopes(&self) -> impl Iterator<Item = &Scope<'gc>> {
         std::iter::once(&self.root_scope).chain(self.scope_stack.iter())
@@ -517,8 +529,8 @@ impl<'gc> TreewalkExecutor<'gc> {
         }
     }
 
-    /// A scope is executable if the first element on its stack is a lambda
-    fn scope_executable(&self, scope: &Scope) -> bool {
+    /// Get the value a scope want to call, if any
+    fn get_scope_lambda(&self, scope: &Scope) -> Option<StackValue<'gc>> {
         let loc = scope
             .executable
             .callable()
@@ -530,11 +542,13 @@ impl<'gc> TreewalkExecutor<'gc> {
                     Some(l)
                 }
             });
-        loc.is_some_and(|loc| {
-            self.stack
-                .get(loc)
-                .is_some_and(|v| v.borrow().value_type() == ValueType::Lambda)
-        })
+        loc.and_then(|loc| self.stack.get(loc).copied())
+    }
+
+    /// A scope is executable if the first element on its stack is a lambda
+    fn scope_executable(&self, scope: &Scope) -> bool {
+        self.get_scope_lambda(scope)
+            .is_some_and(|v| v.borrow().value_type() == ValueType::Lambda)
     }
 
     pub fn can_continue(&self) -> bool {
@@ -557,12 +571,12 @@ impl<'gc> TreewalkExecutor<'gc> {
         self.scope().environment
     }
 
-    fn next_inst(&mut self, ctx: &Context<'gc>, fuel: &mut Fuel) {
+    fn next_inst(&mut self, ctx: &Context<'gc>, fuel: &mut Fuel) -> bool {
         // only attempt to pop the rewrite queue if we are *not* in a macro frame
         if !matches!(self.scope().executable, Executable::Macro { .. }) {
             if let Some(rewrite) = self.rewrite_queue.pop_front() {
                 self.scope_mut().execution = ScopeExecution::Rewrite(rewrite);
-                return;
+                return false;
             }
         }
 
@@ -589,9 +603,25 @@ impl<'gc> TreewalkExecutor<'gc> {
                 ScopeExecution::Empty
             };
         } else if let Some(args) = self.scope().executable.callable() {
-            assert!(self.scope_executable(self.scope()));
+            if !self.scope_executable(self.scope()) {
+                self.raise_error(
+                    self.build_error(
+                        ctx.mutation,
+                        SchemeErrorType::NonLambda(
+                            self.get_scope_lambda(self.scope())
+                                .map(|sv| *sv)
+                                .unwrap_or(Value::Void.into_ptr(ctx.mutation))
+                                .borrow()
+                                .resolve_into(ctx.interner.clone(), ctx.null_ptr),
+                        ),
+                    ),
+                    ctx,
+                );
+                return true;
+            }
             self.call_frame(ctx, fuel, args);
         }
+        false
     }
 
     /// Call the current frame
@@ -609,7 +639,7 @@ impl<'gc> TreewalkExecutor<'gc> {
         fuel.consume(FuelCosts::CALL_COST);
         drop(lambda_access);
 
-        let ret = self.call_lambda(lambda, ctx.mutation, &mut call, fuel, self.scope().error);
+        let ret = self.call_lambda(lambda, ctx, &mut call, fuel, self.scope().error);
         self.handle_lambda_return(ret, ctx, lambda, call);
     }
 
@@ -663,7 +693,7 @@ impl<'gc> TreewalkExecutor<'gc> {
     }
 
     /// Create a new stack value in the current scope
-    pub fn current_scope(&self, mc: &Mutation<'gc>, value: ValuePtr<'gc>) -> StackValue<'gc> {
+    pub fn current_scope_value(&self, mc: &Mutation<'gc>, value: ValuePtr<'gc>) -> StackValue<'gc> {
         StackValue {
             value,
             range: self.scope().range,
@@ -727,7 +757,7 @@ impl<'gc> TreewalkExecutor<'gc> {
             Ok(res) => match res {
                 MacroReturn::Suspend => true,
                 MacroReturn::Return { ret, inst } => {
-                    self.push(self.current_scope(ctx.mutation, ret));
+                    self.push(self.current_scope_value(ctx.mutation, ret));
                     self.rewrite_queue.extend(inst);
                     false
                 }
@@ -746,17 +776,17 @@ impl<'gc> TreewalkExecutor<'gc> {
     fn call_lambda(
         &mut self,
         lambda: LambdaPtr<'gc>,
-        mc: &Mutation<'gc>,
+        ctx: &Context<'gc>,
         call: &mut LambdaCall<'gc>,
         fuel: &mut Fuel,
         error: Option<SchemeErrorPtr<'gc>>,
     ) -> LambdaCallReturn<'gc> {
-        let mut lambda_access = lambda.borrow_mut(mc);
+        let mut lambda_access = lambda.borrow_mut(ctx.mutation);
         let ret = if let Some(error) = error {
             // Call the lambda in an erroring context
-            lambda_access.execute_erroring(error, mc, call, self, fuel)
+            lambda_access.execute_erroring(error, ctx, call, self, fuel)
         } else {
-            lambda_access.execute(mc, call, self, fuel)
+            lambda_access.execute(ctx, call, self, fuel)
         };
 
         match ret {
@@ -776,8 +806,6 @@ impl<'gc> TreewalkExecutor<'gc> {
     }
 
     fn raise_error(&mut self, err_ptr: SchemeErrorPtr<'gc>, ctx: &Context<'gc>) {
-        let range = self.scope().range;
-
         // combine the generated error pointer with any existing errors
         let err_ptr = if let Some(err) = &self.scope().error {
             let mut errors: Vec<_> = match &err.error_type {
@@ -785,25 +813,14 @@ impl<'gc> TreewalkExecutor<'gc> {
                 _ => Vec::new(),
             };
 
-            if !errors.is_empty() {
-                errors.push(*err);
+            if !errors.iter().any(|ep| Gc::ptr_eq(*ep, err_ptr)) {
+                errors.push(err_ptr);
             }
 
-            errors.push(err_ptr);
-
-            // TODO Create a new compound error, with this scope included in the backtrace,
-            // then pop this scope
             Gc::new(
                 ctx.mutation,
                 SchemeError {
-                    backtrace: std::iter::once(StackFrame {
-                        scope_label: self.scope().label.clone(),
-                        // This would be the range from the current VirtualInstruction
-                        range,
-                        source_id: self.scope().source_id,
-                    })
-                    .chain(err.backtrace.iter().cloned())
-                    .collect(),
+                    backtrace: err.backtrace.clone(),
                     error_type: SchemeErrorType::Compound(errors),
                 },
             )
@@ -848,7 +865,7 @@ impl<'gc> TreewalkExecutor<'gc> {
                 let code = match (ctx.mutation, value).try_into() {
                     Ok(code) => code,
                     Err(_err) => {
-                        let err_ptr = self.build_error(ctx.mutation, SchemeErrorType::Dot);
+                        let err_ptr = self.build_error(ctx.mutation, SchemeErrorType::BadList);
                         self.raise_error(err_ptr, ctx);
                         return;
                     }
@@ -879,7 +896,7 @@ impl<'gc> TreewalkExecutor<'gc> {
                 let code = match (ctx.mutation, value).try_into() {
                     Ok(code) => code,
                     Err(_err) => {
-                        let err_ptr = self.build_error(ctx.mutation, SchemeErrorType::Dot);
+                        let err_ptr = self.build_error(ctx.mutation, SchemeErrorType::BadList);
                         self.raise_error(err_ptr, ctx);
                         return;
                     }
@@ -1036,37 +1053,10 @@ impl<'gc> TreewalkExecutor<'gc> {
                 };
                 self.rewrite_queue.push_front(mi);
             }
-            MacroInstruction::CallFunction { args } => {
-                // call a function with at most `args` arguments
-                // TODO do we need an exact mode
-                let macro_label = format!("{} macro", self.scope().label());
-                let new_bottom = self.stack.len().saturating_sub(args);
-                if self.scope().executable == Executable::Not {
-                    // if this scope is not executable, just make it executable
-                    let scope = self.scope_mut();
-                    scope.executable = Executable::Callable(args);
-                    scope.label = Some(Box::from(macro_label.as_str()));
-                    scope.bottom = if new_bottom > 0 {
-                        Some(new_bottom)
-                    } else {
-                        None
-                    };
-                    // push the current exec back as an instruction
-                    match self.scope().execution {
-                        ScopeExecution::Empty => {}
-                        _ => unreachable!("codepath assumed {:?} == Empty", self.scope().execution),
-                    }
-                } else {
-                    // push a *new* scope, and make that frame executable
-                    self.push_scope(
-                        ctx.mutation,
-                        macro_label,
-                        new_bottom,
-                        std::iter::empty(),
-                        (self.scope().source_id, self.scope().range),
-                        Executable::Callable(args),
-                    );
-                }
+            MacroInstruction::CallLambda { args: _ } => {
+                // TODO This might be buggy...
+                // but I'll fix it when I need it
+                todo!("i think i just need to set scope executable to Callable(args)")
             }
         }
     }
@@ -1089,8 +1079,7 @@ impl<'gc> TreewalkExecutor<'gc> {
 
             // If the scope is processing a lambda, continue to do so
             if let Some((mut call, lambda)) = self.scope_mut().current_lambda.take() {
-                let ret =
-                    self.call_lambda(lambda, ctx.mutation, &mut call, fuel, self.scope().error);
+                let ret = self.call_lambda(lambda, ctx, &mut call, fuel, self.scope().error);
                 self.handle_lambda_return(ret, ctx, lambda, call);
             }
 
@@ -1108,7 +1097,10 @@ impl<'gc> TreewalkExecutor<'gc> {
 
             // if there's nothing in the instruction slot, but there is a continuation, load it in
             if self.scope().execution.is_none() {
-                self.next_inst(ctx, fuel);
+                // if we are erroring, continue the loop instead of just going on
+                if self.next_inst(ctx, fuel) {
+                    continue;
+                }
             }
 
             if self.scope().execution.is_none()
@@ -1226,9 +1218,12 @@ impl<'gc> TreewalkExecutor<'gc> {
                                 //   - a symbol
                                 //   - in the current env, refering to a macro
                                 // then it is a macro, otherwise it's just a normal symbol guys
-                                if dot.is_some() {
+
+                                // for lists, we only allow the head to be a symbol
+                                // or list. if it isn't either, this is not executable
+                                if dot.is_some() || !exec.payload.list_executable() {
                                     self.raise_error(
-                                        self.build_error(ctx.mutation, SchemeErrorType::Dot),
+                                        self.build_error(ctx.mutation, SchemeErrorType::BadList),
                                         ctx,
                                     );
                                     continue;
@@ -1242,32 +1237,34 @@ impl<'gc> TreewalkExecutor<'gc> {
                                     .and_then(|sym| self.current_env().borrow().get_macro(sym))
                                     .map(|mcrb| mcrb.get())
                                 {
-                                    let do_macro =
-                                        if let Some(fc) = mcr.borrow().is_form(self, &exec) {
-                                            if let Err(err) = fc {
-                                                self.build_error(
-                                                    ctx.mutation,
-                                                    SchemeErrorType::MacroForm(err),
-                                                );
-                                                continue;
-                                            }
-                                            true
-                                        } else {
-                                            false
-                                        };
+                                    let args: Vec<_> = body
+                                        .iter()
+                                        .cloned()
+                                        .map(|vi| vi.payload.datum().clone())
+                                        .collect();
 
-                                    if do_macro {
-                                        // push values to stack *as-is*
-                                        self.stack.extend(
-                                            body.iter().cloned().map(|vi| {
-                                                vi.into_value(ctx.mutation, ctx.null_ptr)
-                                            }),
+                                    if let Err(err) = mcr.borrow().is_properly_formed(&args) {
+                                        self.raise_error(
+                                            self.build_error(
+                                                ctx.mutation,
+                                                SchemeErrorType::MacroForm(err),
+                                            ),
+                                            ctx,
                                         );
-                                        if self.call_macro(mcr, ctx, fuel) {
-                                            self.scope_mut().current_macro = Some(mcr);
-                                        }
                                         continue;
                                     }
+
+                                    // push values to stack *as-is*
+                                    self.stack.extend(
+                                        body.iter()
+                                            .cloned()
+                                            .map(|vi| vi.into_value(ctx.mutation, ctx.null_ptr)),
+                                    );
+                                    if self.call_macro(mcr, ctx, fuel) {
+                                        self.scope_mut().current_macro = Some(mcr);
+                                    }
+
+                                    continue;
                                 }
 
                                 if !self.scope().next_datum.is_empty()

@@ -45,9 +45,9 @@ pub enum SchemeErrorType<'gc> {
     /// Attempted to read from environment a name that doesn't exist
     #[error("`{0}` does not exist in environment")]
     EnvLoad(Box<str>),
-    /// Attempted to execute a list with a dot
-    #[error("cannot execute dotted list")]
-    Dot,
+    /// Attempted to execute a list with a dot, or non-symbol, non-list head
+    #[error("cannot execute list")]
+    BadList,
     /// Define did not find a value to define
     #[error("define cannot define nothing")]
     NullDefine,
@@ -60,9 +60,12 @@ pub enum SchemeErrorType<'gc> {
     /// Attempted to evaluate a value with no external representation
     #[error("data has no external representation: {0}")]
     BadEval(ResolvedValue<'gc, lasso::Spur>),
-    // Lambda didn't return a value
+    /// Lambda didn't return a value
     #[error("lambda has no return value")]
     LambdaNoReturn,
+    /// Tried to execute a non-lambda
+    #[error("{0} is not a lambda")]
+    NonLambda(ResolvedValue<'gc, lasso::Spur>),
 }
 
 /// Scheme-side error

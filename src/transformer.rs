@@ -2,7 +2,8 @@ use gc_arena::{unsize, Collect, Gc, Mutation, RefLock};
 
 use crate::{
     environment::EnvironmentPtr,
-    treewalk::{Context, StackValue, TreewalkExecutor},
+    treewalk::{virtual_inst::VirtualInstruction, Context, StackValue, TreewalkExecutor},
+    value::ValuePtr,
     Fuel,
 };
 
@@ -13,6 +14,17 @@ pub trait Macro<'gc>: Collect + core::fmt::Debug {
     /// If this returns true, any call to this macro might be replaced with the call's output
     fn is_pure(&self, _args: &[StackValue<'gc>]) -> bool {
         false
+    }
+
+    // TODO Add function that can look at a virtual instruction
+    // and either mark it as a "reserved form" and error if malformed
+    // or mark it to ignore and read it
+    fn is_form(
+        &self,
+        _exec: &TreewalkExecutor<'gc>,
+        _inst: &VirtualInstruction<'gc>,
+    ) -> Option<Result<(), anyhow::Error>> {
+        Some(Ok(()))
     }
 
     /// Produce the output of the macro
@@ -37,7 +49,10 @@ where
 
 #[derive(Debug, Clone)]
 pub enum MacroReturn<'gc> {
-    Return(Vec<MacroInstruction<'gc>>),
+    Return {
+        inst: Vec<MacroInstruction<'gc>>,
+        ret: ValuePtr<'gc>,
+    },
     Suspend,
 }
 
@@ -65,7 +80,14 @@ pub enum MacroInstruction<'gc> {
     /// Execute code in the given environment, pushing the result to the top of stack
     // TODO Investigate if we need the separate environment ptr in-lieu of adding a "restore envirnment"
     // instruction (for let and friends)
-    Evaluate(StackValue<'gc>, Option<EnvironmentPtr<'gc>>),
+    // ANSWER to implement hygenic syntax-rules macros, this is might be necessary, as any code it evaluates
+    // has to be in the "original" environment
+    // but that would be the same as changing the environment, evaluating them all followed by as restore
+    // instruction, so we might be able to jure remove this
+    // *but* I'd want to see it work first before doing
+    Evaluate(StackValue<'gc>),
+    /// Sets the environment
+    SetEnvironment(EnvironmentPtr<'gc>),
     /// Pops the top of the stack, and `define`s the given name as that value
     Define {
         #[collect(require_static)]

@@ -1,8 +1,7 @@
-use gc_arena::{Collect, Gc, Mutation, RefLock};
-
+use crate::declare_lambdas;
 use crate::{
     runtime::lambda::{
-        Lambda, LambdaCall, LambdaPtr, ProcedureError, ProcedureResult, ProcedureReturn, Typecheck,
+        Lambda, LambdaCall, ProcedureError, ProcedureResult, ProcedureReturn, Typecheck,
     },
     treewalk::TreewalkExecutor,
     value::ValueType,
@@ -10,12 +9,12 @@ use crate::{
 };
 
 pub mod macros {
-
     use gc_arena::Collect;
 
     use crate::{
+        runtime::FuelCosts,
         transformer::{Macro, MacroInstruction, MacroReturn},
-        treewalk::{Context, StackValue, TreewalkExecutor},
+        treewalk::{Context, TreewalkExecutor},
         value::Value,
         Fuel,
     };
@@ -27,22 +26,33 @@ pub mod macros {
     impl<'gc> Macro<'gc> for Define {
         fn rewrite(
             &mut self,
-            _ctx: &Context<'gc>,
+            ctx: &Context<'gc>,
             executor: &mut TreewalkExecutor<'gc>,
-            _fuel: &mut Fuel,
+            fuel: &mut Fuel,
         ) -> anyhow::Result<MacroReturn<'gc>> {
             // RN only support <name> <val> input
             let Some(value) = executor.stack.pop() else {
                 return Err(anyhow::anyhow!("no define value"));
             };
-            let Some(name) = executor.stack.pop().and_then(|v| v.borrow().as_symbol()) else {
+            let Some(name) = executor
+                .stack
+                .pop()
+                .and_then(|v| v.borrow().as_symbol())
+                .map(|sym| sym.0)
+            else {
                 return Err(anyhow::anyhow!("no define name"));
             };
 
-            Ok(MacroReturn::Return(vec![
-                MacroInstruction::Evaluate(value, None),
-                MacroInstruction::Define { name: name.0 },
-            ]))
+            // this macro "returns" void
+            fuel.consume(FuelCosts::ENV_SET_COST);
+
+            Ok(MacroReturn::Return {
+                ret: Value::Void.into_ptr(ctx.mutation),
+                inst: vec![
+                    MacroInstruction::Evaluate(value),
+                    MacroInstruction::Define { name },
+                ],
+            })
         }
     }
 
@@ -55,32 +65,31 @@ pub mod macros {
             &mut self,
             ctx: &Context<'gc>,
             executor: &mut TreewalkExecutor<'gc>,
-            _fuel: &mut Fuel,
+            fuel: &mut Fuel,
         ) -> anyhow::Result<MacroReturn<'gc>> {
             // only support <name> <val> input
-            let Ok([name, value]): Result<[StackValue<'gc>; 2], _> = executor.stack().try_into()
+            let Some(value) = executor.stack.pop() else {
+                return Err(anyhow::anyhow!("no set! value"));
+            };
+            let Some(name) = executor
+                .stack
+                .pop()
+                .and_then(|v| v.borrow().as_symbol())
+                .map(|sym| sym.0)
             else {
-                return Err(anyhow::anyhow!(
-                    "set! doesn't support input [{}]",
-                    executor
-                        .stack()
-                        .iter()
-                        .map(|sv| format!("{}", sv.borrow().resolve_into(ctx.interner.clone())))
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                ));
+                return Err(anyhow::anyhow!("no set! name"));
             };
 
-            // Get name as symbol
-            let name = match *name.borrow() {
-                Value::Symbol(sym) => sym.0,
-                _ => return Err(anyhow::anyhow!("name must be a symbol")),
-            };
+            // this macro "returns" void
+            fuel.consume(FuelCosts::ENV_SET_COST);
 
-            Ok(MacroReturn::Return(vec![
-                MacroInstruction::Evaluate(value, None),
-                MacroInstruction::SetBang { name },
-            ]))
+            Ok(MacroReturn::Return {
+                ret: Value::Void.into_ptr(ctx.mutation),
+                inst: vec![
+                    MacroInstruction::Evaluate(value),
+                    MacroInstruction::SetBang { name },
+                ],
+            })
         }
     }
 }
@@ -99,6 +108,27 @@ fn all_numbers_typecheck(op: &'static str) -> Typecheck {
     })
 }
 
+fn add_impl<'gc>(
+    _root: &mut (),
+    mc: &Mutation<'gc>,
+    call: &mut LambdaCall<'gc>,
+    _interpreter: &mut TreewalkExecutor<'gc>,
+    _fuel: &mut Fuel,
+) -> Result<ProcedureReturn<'gc>, ProcedureError<'gc>> {
+    // TODO support inexacts too!
+    let mut total: i64 = 0;
+    while !call.stack.is_empty() {
+        let Some(v) = call.pop::<i64>().ok() else {
+            unreachable!("typechecking");
+        };
+        total = total
+            .checked_add(v)
+            .ok_or(anyhow::anyhow!("cannot add {v} to {total}"))?;
+    }
+    call.push(mc, total);
+    Ok(ProcedureReturn::Suspend)
+}
+
 fn div_impl<'gc>(
     _root: &mut (),
     mc: &Mutation<'gc>,
@@ -106,6 +136,7 @@ fn div_impl<'gc>(
     _interpreter: &mut TreewalkExecutor<'gc>,
     _fuel: &mut Fuel,
 ) -> ProcedureResult<'gc> {
+    // TODO support inexacts too!
     let mut data = vec![];
     while !call.stack.is_empty() {
         let Some(v) = call.pop::<i64>().ok() else {
@@ -136,35 +167,21 @@ fn div_impl<'gc>(
     }
 }
 
-// TODO Make a macro out of these
-#[derive(Collect, Clone, Copy)]
-#[collect(no_drop)]
-pub struct SchemeBase<'gc> {
-    pub(crate) div_op: Gc<'gc, RefLock<Option<LambdaPtr<'gc>>>>,
-}
-
-impl<'gc> SchemeBase<'gc> {
-    pub fn new(mc: &Mutation<'gc>) -> Self {
-        Self {
-            div_op: Gc::new(mc, RefLock::new(None)),
-        }
-    }
-
-    pub fn op_div(&self, mc: &Mutation<'gc>) -> LambdaPtr<'gc> {
-        let mut div = self.div_op.borrow_mut(mc);
-        if let Some(div) = *div {
-            div
-        } else {
-            let ndiv = Gc::new(
+declare_lambdas!(
+    SchemeBase => {
+        div_op as op_div => |mc| {
+            Lambda::with_typecheck(
                 mc,
-                RefLock::new(Lambda::with_typecheck(
-                    mc,
-                    all_numbers_typecheck("divide"),
-                    div_impl,
-                )),
-            );
-            *div = Some(ndiv);
-            ndiv
+                all_numbers_typecheck("divide"),
+                div_impl,
+            )
+        },
+        add_op as op_add => |mc| {
+            Lambda::with_typecheck(
+                mc,
+                all_numbers_typecheck("add"),
+                add_impl,
+            )
         }
     }
-}
+);

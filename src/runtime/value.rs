@@ -89,6 +89,14 @@ pub enum Value<'gc> {
     Error(SchemeErrorPtr<'gc>),
 }
 
+// implements logic behind eqv?
+// where as ValuePtr::eq implements eq? logic
+impl<'gc> PartialEq for Value<'gc> {
+    fn eq(&self, _other: &Self) -> bool {
+        todo!()
+    }
+}
+
 impl<'gc> Value<'gc> {
     pub fn value_type(&self) -> ValueType {
         match self {
@@ -120,13 +128,19 @@ impl<'gc> Value<'gc> {
     pub fn resolve_into<K: lasso::Key>(
         self,
         resolver: impl IntoResolver<Resolver = RodeoResolver<K>> + 'static,
+        null_ptr: ValuePtr<'gc>,
     ) -> ResolvedValue<'gc, K> {
-        self.resolve(Rc::new(resolver.into_resolver()))
+        self.resolve(Rc::new(resolver.into_resolver()), null_ptr)
     }
 
-    pub fn resolve<K: lasso::Key>(self, resolver: Rc<RodeoResolver<K>>) -> ResolvedValue<'gc, K> {
+    pub fn resolve<K: lasso::Key>(
+        self,
+        resolver: Rc<RodeoResolver<K>>,
+        null_ptr: ValuePtr<'gc>,
+    ) -> ResolvedValue<'gc, K> {
         ResolvedValue {
             value: self,
+            null_ptr,
             resolver,
         }
     }
@@ -150,6 +164,7 @@ impl<'gc> Value<'gc> {
 #[collect(no_drop)]
 pub struct ResolvedValue<'gc, K: lasso::Key> {
     value: Value<'gc>,
+    null_ptr: ValuePtr<'gc>,
     #[collect(require_static)]
     resolver: Rc<RodeoResolver<K>>,
 }
@@ -159,6 +174,26 @@ impl<'gc, K: lasso::Key> fmt::Debug for ResolvedValue<'gc, K> {
         f.debug_struct("ResolvedValue")
             .field("value", &self.value)
             .finish_non_exhaustive()
+    }
+}
+
+struct ConsPrinter<'a, 'gc, K: lasso::Key> {
+    cons: &'a ConsCell<'gc>,
+    resolver: Rc<RodeoResolver<K>>,
+    null: ValuePtr<'gc>,
+    encountered: &'a mut Vec<Value<'gc>>,
+}
+
+impl<'a, 'gc, K: lasso::Key> fmt::Display for ConsPrinter<'a, 'gc, K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // recurse into the value, keeping track of encountered cons cells
+        // so that we don't recurse into them
+        let _ = self.cons;
+        let _ = self.resolver;
+        let _ = self.null;
+        let _ = self.encountered;
+        let _ = f;
+        todo!()
     }
 }
 
@@ -179,7 +214,11 @@ impl<'gc> fmt::Display for ResolvedValue<'gc, lasso::Spur> {
                     if idx != 0 {
                         write!(f, " ")?;
                     }
-                    write!(f, "{}", elem.borrow().resolve(self.resolver.clone()))?;
+                    write!(
+                        f,
+                        "{}",
+                        elem.borrow().resolve(self.resolver.clone(), self.null_ptr)
+                    )?;
                 }
                 write!(f, ")")?;
                 Ok(())
@@ -198,7 +237,19 @@ impl<'gc> fmt::Display for ResolvedValue<'gc, lasso::Spur> {
             Value::InputPort(_) => todo!(),
             Value::OutputPort(_) => todo!(),
             // TODO this needs special handling, b/c a cons might recurse into itself
-            Value::Cons(_) => todo!(),
+            Value::Cons(ref cons) => {
+                let mut stack = vec![];
+                write!(
+                    f,
+                    "{}",
+                    ConsPrinter {
+                        cons,
+                        resolver: self.resolver.clone(),
+                        null: self.null_ptr,
+                        encountered: &mut stack,
+                    }
+                )
+            }
             Value::Environment(_) => todo!(),
             Value::UserStruct(_) => write!(f, "<user {:p}>", &self.value),
             Value::Transformer(_) => todo!(),
@@ -369,14 +420,16 @@ impl<'gc> ConsCell<'gc> {
         >,
     >(
         mc: &Mutation<'gc>,
+        null: ValuePtr<'gc>,
         iter: T,
-    ) -> Self {
-        let mut current = ConsCell::empty();
+    ) -> ValuePtr<'gc> {
+        let mut current = null;
         for item in iter.into_iter().rev() {
-            let new_cell = ConsCell {
-                cdr: Some(Value::Cons(current).into_ptr(mc)),
+            let new_cell = Value::Cons(ConsCell {
+                cdr: Some(current),
                 car: Some(item),
-            };
+            })
+            .into_ptr(mc);
 
             current = new_cell;
         }

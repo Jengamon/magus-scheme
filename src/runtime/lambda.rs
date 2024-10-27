@@ -16,6 +16,8 @@ use crate::runtime::{
 use crate::value::{ValuePtr, ValueType};
 
 /// A filter for types
+// TODO Make Typecheck design mirror Callback and Procedure, so that a
+// type check can hold Gc data
 #[derive(Clone, Collect)]
 #[collect(require_static)]
 pub struct Typecheck {
@@ -86,7 +88,8 @@ pub struct LambdaCall<'gc> {
     // TODO Hold source information about the lambda so that
     // stack values can be synthesized
     #[collect(require_static)]
-    range: TextRange,
+    range: Option<TextRange>,
+    source_id: Option<usize>,
 }
 
 impl<'gc> LambdaCall<'gc> {
@@ -103,10 +106,10 @@ impl<'gc> LambdaCall<'gc> {
         // self.range is the range of code from which this call was created
         let new_value = StackValue {
             value: Gc::new(mc, RefLock::new(value.into_value(mc))),
-            range: Some(self.range),
-            touch_count: 0,
-            chunk: Err(true),
-            environment: None,
+            range: self.range,
+            touch_count: Gc::new(mc, RefLock::new(0)),
+            chunk: Err(Gc::new(mc, RefLock::new(true))),
+            source_id: self.source_id,
         };
         self.stack.push(new_value)
     }
@@ -385,7 +388,8 @@ impl<'gc> Lambda<'gc> {
     pub fn call(
         &self,
         initial_stack: impl IntoIterator<Item = StackValue<'gc>>,
-        range: TextRange,
+        source_id: Option<usize>,
+        range: Option<TextRange>,
     ) -> LambdaCall<'gc> {
         let stack: Vec<_> = initial_stack.into_iter().collect();
         LambdaCall {
@@ -393,6 +397,7 @@ impl<'gc> Lambda<'gc> {
             stack,
             stage: LambdaStage::Typecheck,
             lambda_id: self.id,
+            source_id,
             range,
         }
     }

@@ -1,14 +1,14 @@
 use core::fmt;
 
-use gc_arena::{Collect, Gc, RefLock};
+use gc_arena::{Collect, Gc, Mutation, RefLock};
 use lasso::Rodeo;
 use rowan::TextRange;
 
 use crate::{
     bytecode::ChunkPtr,
-    environment::EnvironmentPtr,
-    runtime::EnsureNullVisitor,
-    value::{ConsCell, Symbol, Value, ValuePtr, ValueVisitor},
+    value::Bytevector,
+    value::Vector,
+    value::{ConsCell, Symbol, Value, ValuePtr},
     ContainsDatum, Datum, DatumVisitor, ExactReal, GAstNode, GAstToken, SchemeNumber,
 };
 
@@ -16,7 +16,6 @@ use super::StackValue;
 
 #[derive(Debug, Clone, Collect)]
 #[collect(no_drop)]
-#[expect(dead_code)]
 pub enum VirtualInstructionDatum<'gc> {
     Number(i64),
     Bool(bool),
@@ -45,7 +44,7 @@ pub enum VirtualInstructionDatum<'gc> {
 }
 
 /// This is the code chunk size used by the Treewalk.
-pub type CodeChunkPtr<'gc> = ChunkPtr<'gc, 256, 256>;
+pub type CodeChunkPtr<'gc> = ChunkPtr<'gc, 256, 256, 256>;
 #[derive(Debug, Clone, Collect)]
 #[collect(no_drop)]
 pub enum VirtualInstructionPayload<'gc> {
@@ -53,7 +52,7 @@ pub enum VirtualInstructionPayload<'gc> {
         datum: VirtualInstructionDatum<'gc>,
         // If we tried to JIT this already, but it failed, this is
         // false, so don't try again.
-        can_jit: bool,
+        can_jit: Gc<'gc, RefLock<bool>>,
     },
     // Eventually, virtual instructions can be JITed, while the value would
     // be preserved for macros who use it as data
@@ -150,24 +149,217 @@ pub struct VirtualInstruction<'gc> {
 
     /// when using this, we can track how many times this particular expression
     /// has been executed (this is kept through even as a stack value)
-    pub touch_count: usize,
+    pub touch_count: Gc<'gc, RefLock<usize>>,
 
-    // A macro may request code be run in a certain environment, this
-    // is the requested environment.
-    pub environment: Option<EnvironmentPtr<'gc>>,
+    /// Optional source id designated when this instruction was created
+    pub source_id: Option<usize>,
 }
 
-struct ValueToVirtualInstructionDatum<'gc> {
+pub trait StackValueVisitor<'gc> {
+    fn visit_value(&mut self, value: StackValue<'gc>) {
+        match *value.borrow() {
+            Value::Undefined => self.visit_undefined(value),
+            Value::Void => self.visit_void(value),
+            Value::Vector(vec) => self.visit_vector(vec, value),
+            Value::Bytevector(vec) => self.visit_bytevector(vec, value),
+            Value::Cons(cons) => self.visit_cons(cons, value),
+            Value::Number(int) => self.visit_number(int, value),
+            Value::Inexact(iex) => self.visit_inexact(iex, value),
+            Value::String(str) => self.visit_string(str.as_ref().borrow().as_str(), value),
+            Value::Symbol(sym) => self.visit_symbol(sym, value),
+            Value::Bool(bool) => self.visit_bool(bool, value),
+            Value::Char(char) => self.visit_char(char, value),
+            _ => self.visit_no_external(value),
+        }
+    }
+
+    fn visit_no_external(&mut self, value: StackValue<'gc>) {
+        let _ = value;
+    }
+
+    fn visit_undefined(&mut self, value: StackValue<'gc>) {
+        let _ = value;
+    }
+
+    fn visit_void(&mut self, value: StackValue<'gc>) {
+        let _ = value;
+    }
+
+    fn visit_number(&mut self, integer: i64, value: StackValue<'gc>) {
+        let _ = value;
+        _ = integer;
+    }
+
+    fn visit_inexact(&mut self, integer: f64, value: StackValue<'gc>) {
+        let _ = value;
+        _ = integer;
+    }
+
+    fn visit_string(&mut self, string: &str, value: StackValue<'gc>) {
+        let _ = value;
+        _ = string;
+    }
+
+    fn visit_symbol(&mut self, symbol: Symbol, value: StackValue<'gc>) {
+        let _ = value;
+        _ = symbol;
+    }
+
+    fn visit_bool(&mut self, bool: bool, value: StackValue<'gc>) {
+        let _ = value;
+        _ = bool;
+    }
+
+    fn visit_char(&mut self, char: char, value: StackValue<'gc>) {
+        let _ = value;
+        _ = char;
+    }
+
+    fn visit_cons(&mut self, cons: ConsCell<'gc>, value: StackValue<'gc>) {
+        let _ = value;
+        _ = cons;
+    }
+
+    fn visit_vector(&mut self, vec: Vector<'gc>, value: StackValue<'gc>) {
+        let _ = value;
+        _ = vec;
+    }
+
+    fn visit_bytevector(&mut self, vec: Bytevector<'gc>, value: StackValue<'gc>) {
+        let _ = value;
+        _ = vec;
+    }
+}
+
+struct ValueToVirtualInstructionDatum<'a, 'gc> {
     instruction: Option<VirtualInstructionDatum<'gc>>,
+    found: Vec<StackValue<'gc>>,
+    range: Option<TextRange>,
+    chunk: Result<CodeChunkPtr<'gc>, Gc<'gc, RefLock<bool>>>,
+    circular_list: bool,
+    source_id: Option<usize>,
+    mc: &'a Mutation<'gc>,
 }
 
-impl<'gc> ValueVisitor<'gc> for ValueToVirtualInstructionDatum<'gc> {}
+impl<'a, 'gc> ValueToVirtualInstructionDatum<'a, 'gc> {
+    fn synthesize(&self, value: ValuePtr<'gc>) -> StackValue<'gc> {
+        StackValue {
+            value,
+            range: self.range,
+            touch_count: Gc::new(self.mc, RefLock::new(0)),
+            source_id: self.source_id,
+            chunk: self.chunk,
+        }
+    }
+}
 
-impl<'gc> TryFrom<StackValue<'gc>> for VirtualInstruction<'gc> {
+impl<'a, 'gc> StackValueVisitor<'gc> for ValueToVirtualInstructionDatum<'a, 'gc> {
+    fn visit_number(&mut self, integer: i64, _value: StackValue<'gc>) {
+        self.instruction = Some(VirtualInstructionDatum::Number(integer));
+    }
+
+    fn visit_symbol(&mut self, symbol: Symbol, _value: StackValue<'gc>) {
+        self.instruction = Some(VirtualInstructionDatum::Symbol(symbol));
+    }
+
+    fn visit_cons(&mut self, cons: ConsCell<'gc>, value: StackValue<'gc>) {
+        if self.found.iter().any(|ptr| Gc::ptr_eq(**ptr, *value))
+            && self
+                .instruction
+                .as_ref()
+                .is_some_and(|i| !matches!(i, VirtualInstructionDatum::EmptyList))
+        {
+            self.circular_list = true;
+            return;
+        }
+        self.found.push(value);
+
+        let car = if let Some(car) = cons.car.as_ref() {
+            let fake_car = self.synthesize(*car);
+            self.visit_value(fake_car);
+            if self.circular_list {
+                return;
+            }
+            let Some(inst) = self.instruction.take() else {
+                return;
+            };
+            inst
+        } else {
+            VirtualInstructionDatum::EmptyList
+        };
+
+        let cdr = if let Some(cdr) = cons.cdr.as_ref() {
+            let fake_cdr = self.synthesize(*cdr);
+            self.visit_value(fake_cdr);
+            if self.circular_list {
+                return;
+            }
+            let Some(
+                inst @ (VirtualInstructionDatum::List { dot: None, .. }
+                | VirtualInstructionDatum::EmptyList),
+            ) = self.instruction.take()
+            else {
+                return;
+            };
+            inst
+        } else {
+            VirtualInstructionDatum::EmptyList
+        };
+
+        if let (VirtualInstructionDatum::EmptyList, VirtualInstructionDatum::EmptyList) =
+            (&car, &cdr)
+        {
+            self.instruction = Some(VirtualInstructionDatum::EmptyList);
+        } else if let (car, VirtualInstructionDatum::EmptyList) = (&car, &cdr) {
+            self.instruction = Some(VirtualInstructionDatum::List {
+                head: Box::new(VirtualInstruction {
+                    payload: VirtualInstructionPayload::Datum {
+                        datum: car.clone(),
+                        can_jit: Gc::new(self.mc, RefLock::new(true)),
+                    },
+                    range: self.range,
+                    touch_count: Gc::new(self.mc, RefLock::new(0)),
+                    source_id: self.source_id,
+                }),
+                body: Vec::new(),
+                dot: None,
+            });
+        } else {
+            // cdr has to be a list with no dot, so
+            let VirtualInstructionDatum::List { head, body, .. } = cdr else {
+                unreachable!("{cdr:?}")
+            };
+
+            self.instruction = Some(VirtualInstructionDatum::List {
+                head: Box::new(VirtualInstruction {
+                    payload: VirtualInstructionPayload::Datum {
+                        datum: car,
+                        can_jit: Gc::new(self.mc, RefLock::new(true)),
+                    },
+                    range: self.range,
+                    touch_count: Gc::new(self.mc, RefLock::new(0)),
+                    source_id: self.source_id,
+                }),
+                body: std::iter::once(*head).chain(body).collect(),
+                dot: None,
+            });
+        }
+    }
+}
+
+impl<'gc> TryFrom<(&'gc Mutation<'gc>, StackValue<'gc>)> for VirtualInstruction<'gc> {
     type Error = ();
-    fn try_from(value: StackValue<'gc>) -> Result<Self, Self::Error> {
-        let mut visitor = ValueToVirtualInstructionDatum { instruction: None };
-        visitor.visit_value(*value);
+    fn try_from((mc, value): (&'gc Mutation<'gc>, StackValue<'gc>)) -> Result<Self, Self::Error> {
+        let mut visitor = ValueToVirtualInstructionDatum {
+            source_id: value.source_id,
+            range: value.range,
+            instruction: None,
+            found: Vec::new(),
+            circular_list: false,
+            chunk: value.chunk,
+            mc,
+        };
+        visitor.visit_value(value);
         let datum = visitor.instruction.ok_or(())?;
         Ok(Self {
             payload: match value.chunk {
@@ -180,9 +372,7 @@ impl<'gc> TryFrom<StackValue<'gc>> for VirtualInstruction<'gc> {
             },
             range: value.range,
             touch_count: value.touch_count,
-            // ASK check if the results from this match up with expectactions,
-            // we can also wipe the environment if necessary
-            environment: value.environment,
+            source_id: value.source_id,
         })
     }
 }
@@ -205,8 +395,9 @@ fn convert_vidatum_to_value<'gc>(
         VirtualInstructionDatum::Symbol(s) => Value::Symbol(s).into_ptr(mc),
         VirtualInstructionDatum::EmptyList => null,
         VirtualInstructionDatum::List { head, body, dot } => {
-            let cons = Value::Cons(ConsCell::from_iter(
+            let cons = ConsCell::from_iter(
                 mc,
+                null,
                 std::iter::once(convert_vidatum_to_value(
                     mc,
                     null,
@@ -220,14 +411,8 @@ fn convert_vidatum_to_value<'gc>(
                     dot.iter()
                         .map(|b| convert_vidatum_to_value(mc, null, b.payload.datum().clone())),
                 ),
-            ))
-            .into_ptr(mc);
+            );
 
-            let mut ensure_null = EnsureNullVisitor {
-                mutation: mc,
-                null: &null.borrow(),
-            };
-            ensure_null.visit_value(cons);
             cons
         }
         VirtualInstructionDatum::Labeled { .. } => todo!(),
@@ -241,16 +426,16 @@ impl<'gc> VirtualInstruction<'gc> {
             VirtualInstructionPayload::Jit { chunk, datum, .. } => StackValue {
                 value: convert_vidatum_to_value(mc, null, datum),
                 range: self.range,
+                source_id: self.source_id,
                 touch_count: self.touch_count,
                 chunk: Ok(chunk),
-                environment: self.environment,
             },
             VirtualInstructionPayload::Datum { datum, can_jit } => StackValue {
                 value: convert_vidatum_to_value(mc, null, datum),
                 range: self.range,
+                source_id: self.source_id,
                 touch_count: self.touch_count,
                 chunk: Err(can_jit),
-                environment: self.environment,
             },
         }
     }
@@ -261,6 +446,8 @@ impl<'gc> VirtualInstruction<'gc> {
 // Convert Datum into a VirtualInstruction
 struct DatumToVirtualInstruction<'a, 'gc> {
     interner: &'a mut Rodeo,
+    mc: &'a Mutation<'gc>,
+    source_id: Option<usize>,
     instruction: Option<VirtualInstruction<'gc>>,
 }
 
@@ -269,11 +456,11 @@ impl<'a, 'gc> DatumToVirtualInstruction<'a, 'gc> {
         self.instruction = Some(VirtualInstruction {
             payload: VirtualInstructionPayload::Datum {
                 datum,
-                can_jit: true,
+                can_jit: Gc::new(self.mc, RefLock::new(true)),
             },
             range: Some(node.syntax().text_range()),
-            touch_count: 0,
-            environment: None,
+            touch_count: Gc::new(self.mc, RefLock::new(0)),
+            source_id: self.source_id,
         });
     }
 
@@ -285,11 +472,11 @@ impl<'a, 'gc> DatumToVirtualInstruction<'a, 'gc> {
         self.instruction = Some(VirtualInstruction {
             payload: VirtualInstructionPayload::Datum {
                 datum,
-                can_jit: true,
+                can_jit: Gc::new(self.mc, RefLock::new(true)),
             },
             range: Some(token.syntax().text_range()),
-            touch_count: 0,
-            environment: None,
+            touch_count: Gc::new(self.mc, RefLock::new(0)),
+            source_id: self.source_id,
         });
     }
 }
@@ -311,30 +498,14 @@ impl<'a, 'gc> DatumVisitor for DatumToVirtualInstruction<'a, 'gc> {
                 return;
             };
 
-            self.instruction = Some(VirtualInstruction {
-                payload: VirtualInstructionPayload::Datum {
-                    datum: VirtualInstructionDatum::Number(num),
-                    can_jit: true,
-                },
-                range: Some(number.syntax().text_range()),
-                touch_count: 0,
-                environment: None,
-            });
+            self.set_instuction_token(number, VirtualInstructionDatum::Number(num));
         }
     }
 
     fn visit_symbol(&mut self, symbol: &crate::Symbol) {
         if let Some(sym) = symbol.identifier(false) {
             let sym = self.interner.get_or_intern(sym);
-            self.instruction = Some(VirtualInstruction {
-                payload: VirtualInstructionPayload::Datum {
-                    datum: VirtualInstructionDatum::Symbol(Symbol(sym)),
-                    can_jit: true,
-                },
-                range: Some(symbol.syntax().text_range()),
-                touch_count: 0,
-                environment: None,
-            });
+            self.set_instuction_token(symbol, VirtualInstructionDatum::Symbol(Symbol(sym)));
         }
     }
 
@@ -387,9 +558,16 @@ impl<'a, 'gc> DatumVisitor for DatumToVirtualInstruction<'a, 'gc> {
 
 // we don't need the Mutation because this *never* allocates Gc pointers
 // (this is not responsible for producing JIT'ed chunks)
-pub fn convert_to_virtual<'gc>(datum: Datum, interner: &mut Rodeo) -> VirtualInstruction<'gc> {
+pub fn convert_to_virtual<'gc>(
+    datum: Datum,
+    interner: &mut Rodeo,
+    mc: &Mutation<'gc>,
+    source_id: Option<usize>,
+) -> VirtualInstruction<'gc> {
     let mut converter = DatumToVirtualInstruction {
         interner,
+        mc,
+        source_id,
         instruction: None,
     };
     converter.visit_datum(&datum);

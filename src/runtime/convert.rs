@@ -4,7 +4,7 @@ use gc_arena::{Gc, Mutation, RefLock};
 
 use crate::{environment::EnvironmentPtr, runtime::userstruct::UserStruct};
 
-use super::{lambda::LambdaPtr, Value};
+use super::{lambda::LambdaPtr, value::Value};
 use crate::runtime::lambda::Lambda;
 
 pub trait FromValue<'gc> {

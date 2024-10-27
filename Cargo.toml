@@ -20,6 +20,7 @@ harness = false
 [dependencies]
 anyhow = "1.0.91"
 arbitrary = { version = "1", features = ["derive"] }
+either = "1.13.0"
 gc-arena = { git = "https://github.com/kyren/gc-arena", rev = "5a7534b883b703f23cfb8c3cfdf033460aa77ea9" }
 icu_casemap = "1.5.1"
 lasso = { version = "0.7.2" }

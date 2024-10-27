@@ -36,3 +36,45 @@ impl<'gc> SchemeStd<'gc> {
         }
     }
 }
+
+#[macro_export(local_inner_macros)]
+macro_rules! declare_lambdas {
+    ($lib_name:ident => { $($lam_ident:ident as $lazy_access:ident => $lam_value:expr),* }) => {
+        use gc_arena::{Collect, Gc, RefLock, Mutation};
+        use $crate::runtime::lambda::LambdaPtr;
+
+        #[derive(Collect, Clone, Copy)]
+        #[collect(no_drop)]
+        pub struct $lib_name<'gc> {
+            $(
+                pub(crate) $lam_ident: Gc<'gc, RefLock<Option<LambdaPtr<'gc>>>>
+            ),*
+        }
+
+        impl<'gc> $lib_name<'gc> {
+            pub fn new(mc: &Mutation<'gc>) -> Self {
+                Self {
+                    $(
+                        $lam_ident: Gc::new(mc, RefLock::new(None))
+                    ),*
+                }
+            }
+
+            $(
+                pub fn $lazy_access(&self, mc: &Mutation<'gc>) -> LambdaPtr<'gc> {
+                    let mut lam = self.$lam_ident.borrow_mut(mc);
+                    if let Some(lam) = *lam {
+                        lam
+                    } else {
+                        let new_lam = Gc::new(
+                            mc,
+                            RefLock::new($lam_value(mc)),
+                        );
+                        *lam = Some(new_lam);
+                        new_lam
+                    }
+                }
+            )*
+        }
+    };
+}

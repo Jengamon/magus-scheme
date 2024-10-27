@@ -64,13 +64,14 @@ impl<'gc> Environment<'gc> {
     /// Both `define` and `set!` are stopped by a shallow freeze, so it
     /// requires intentional manipulation on the Rust side in order to get through
     /// this freeze (to make constant, use [`Self::deep_freeze`]).
+    #[inline]
     pub fn freeze(&mut self) {
         self.is_frozen = true;
     }
 
-    /// Sets the frozen flag for the environment and *all* its bindings.
-    pub fn deep_freeze(&mut self, mc: &Mutation<'gc>) {
-        self.is_frozen = true;
+    /// Sets the frozen flag for all bindings in this environment.
+    #[inline]
+    pub fn inner_freeze(&mut self, mc: &Mutation<'gc>) {
         for binding in self.inner.borrow_mut(mc).values.values_mut() {
             binding.is_frozen = true;
         }

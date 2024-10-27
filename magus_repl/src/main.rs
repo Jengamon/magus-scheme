@@ -266,7 +266,7 @@ fn repl() -> anyhow::Result<()> {
         }
 
         // evaluate using treewalk
-        let exec = interp.new_executor(module, |mc, arena, env| {
+        let exec = interp.new_executor(module, 0, |mc, arena, env| {
             let mut env = env.borrow_mut(mc);
             let x_sym = get_static_sym(arena, mc, "x");
             env.define(mc, x_sym, StackValue::external(mc, 3i64), false)
@@ -415,20 +415,29 @@ fn repl() -> anyhow::Result<()> {
                         .collect();
                     println!("== STACK CHECK fuel: {} ==", fuel.remaining());
                     for (idx, ptr) in exec.full_stack().iter().enumerate() {
-                        let resolved = ptr.borrow().resolve_into(ctx.interner.clone());
+                        let tc = ptr.touch_count();
+                        let resolved = ptr
+                            .borrow()
+                            .resolve_into(ctx.interner.clone(), ctx.null_ptr);
                         let idx_key = (idx != 0).then_some(idx);
                         if let Some(scope) = scope_info.get(&idx_key) {
-                            println!("- {idx}: {resolved} (({}))", scope.label());
+                            println!("- [{tc}] {idx}: {resolved} (({}))", scope.label());
                         } else {
-                            println!("- {idx}: {resolved}");
+                            println!("- [{tc}] {idx}: {resolved}");
                         }
                     }
+
+                    for rewrite in exec.rewrite_queue() {
+                        println!(">>> REWRITE {rewrite:?}")
+                    }
+
                     if let Some(call) = exec.scope().lambda_call() {
                         println!(">>>> SUSPENDED: {call}");
                     }
 
                     if let Some(err) = exec.scope().error() {
-                        println!(">>>> ERROR: {}", err.clone().display(src));
+                        // println!(">>>> ERROR: {}", err.clone().display(&[src]));
+                        println!(">>>> ERROR: {:?}", err);
                     }
 
                     let metrics = ctx.mutation.metrics();

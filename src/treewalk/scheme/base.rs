@@ -15,6 +15,7 @@ pub mod macros {
     use gc_arena::{Collect, Gc, RefLock, Rootable};
 
     use crate::{
+        environment::Environment,
         runtime::{
             lambda::{
                 Lambda as LambdaProc, LambdaCall, Procedure, ProcedureResult, ProcedureReturn,
@@ -242,29 +243,27 @@ pub mod macros {
 
             // we know that args is either a symbol or a param list,
             // so use those assumptions to bind our variables!
+            let mut new_env = Environment::new(ctx.mutation, Some(interpreter.current_env()));
             let (named, rest_name) = self.get_symbols();
             let (named_args, rest) = call.stack.split_at(named.len());
             for (name, arg) in named.into_iter().zip(named_args) {
-                interpreter
-                    .current_env()
-                    .borrow_mut(ctx.mutation)
-                    .define(ctx.mutation, name, *arg, false)
-                    .expect("lambda shouldn't operate in frozen env");
+                new_env.define(ctx.mutation, name, *arg, false).unwrap();
             }
 
             if let Some(rest_sym) = rest_name {
                 let rest_cons =
                     ConsCell::from_iter(ctx.mutation, ctx.null_ptr, rest.iter().map(|sv| **sv));
                 let rest_sv = interpreter.current_scope_value(ctx.mutation, rest_cons);
-                interpreter
-                    .current_env()
-                    .borrow_mut(ctx.mutation)
+                new_env
                     .define(ctx.mutation, rest_sym, rest_sv, false)
-                    .expect("lambda shouldn't operate in frozen env");
+                    .unwrap();
             }
 
+            // Set the execution environment to this new environment
+            interpreter.scope_mut().environment = Gc::new(ctx.mutation, RefLock::new(new_env));
+
             let body_call = self.ops.first().unwrap();
-            let rest: VecDeque<_> = self.ops.iter().copied().collect();
+            let rest: VecDeque<_> = self.ops.iter().skip(1).copied().collect();
             let is_tail = rest.is_empty();
             let ls = LambdaState { unexecuted: rest };
             *call.data_mut() = Some(
@@ -292,7 +291,7 @@ pub mod macros {
             args: &[VirtualInstructionDatum<'gc>],
         ) -> Result<(), anyhow::Error> {
             if args.len() >= 2 {
-                (match &args[0] {
+                (match dbg!(&args[0]) {
                     VirtualInstructionDatum::Symbol(_) => true,
                     VirtualInstructionDatum::EmptyList => true,
                     VirtualInstructionDatum::List { head, body, dot } => {

@@ -324,7 +324,7 @@ pub struct Scope<'gc> {
     range: Option<TextRange>,
     source_id: Option<usize>,
 
-    current_macro: Option<MacroPtr<'gc>>,
+    current_macro: Option<(MacroPtr<'gc>, Option<usize>)>,
     current_lambda: Option<(LambdaCall<'gc>, LambdaPtr<'gc>)>,
     error: Option<SchemeErrorPtr<'gc>>,
     processed: usize,
@@ -369,13 +369,8 @@ impl<'gc> Scope<'gc> {
 
     /// Access to the current macro (if any)
     #[inline]
-    pub fn macro_call(&self) -> Option<MacroPtr<'gc>> {
+    pub fn macro_call(&self) -> Option<(MacroPtr<'gc>, Option<usize>)> {
         self.current_macro
-    }
-
-    #[inline]
-    fn code_loc(&self) -> (Option<usize>, Option<TextRange>) {
-        (self.source_id, self.range)
     }
 }
 
@@ -861,7 +856,7 @@ impl<'gc> TreewalkExecutor<'gc> {
                 self.scope_mut().current_lambda = Some((call, lambda));
             }
             LambdaCallReturn::Call(value) => {
-                // Create a new scope to execute the given code
+                // Suspend the lambda and create new scope
                 let code = match (ctx.mutation, value).try_into() {
                     Ok(code) => code,
                     Err(_err) => {
@@ -871,25 +866,11 @@ impl<'gc> TreewalkExecutor<'gc> {
                     }
                 };
 
-                self.push_scope(
-                    ctx.mutation,
-                    format!(
-                        "{} eval {}",
-                        self.scope().label(),
-                        value
-                            .borrow()
-                            .resolve_into(ctx.interner.clone(), ctx.null_ptr)
-                    ),
-                    self.stack.len(),
-                    std::iter::once(code),
-                    // if an instruction/value doesn't have a range, it is from outside
-                    // this source file, so we use the range of the scope to represent that
-                    (
-                        value.source_id.or(self.scope().source_id),
-                        value.range.or(self.scope().range),
-                    ),
-                    Executable::default(),
-                );
+                // suspend the lambda too
+                self.scope_mut().current_lambda = Some((call, lambda));
+
+                self.scope_mut().execution = ScopeExecution::Instruction(code);
+                self.scope_mut().executable = Executable::default();
             }
             LambdaCallReturn::TailCall(value) => {
                 // Bash the current scope, replacing it with the given code
@@ -902,30 +883,13 @@ impl<'gc> TreewalkExecutor<'gc> {
                     }
                 };
 
-                // we "lazy", so use the code we have
-                self.push_scope(
-                    ctx.mutation,
-                    format!(
-                        "{} eval {}",
-                        self.scope().label(),
-                        value
-                            .borrow()
-                            .resolve_into(ctx.interner.clone(), ctx.null_ptr)
-                    ),
-                    self.stack.len(),
-                    std::iter::once(code),
-                    (
-                        value.source_id.or(self.scope().source_id),
-                        value.range.or(self.scope().range),
-                    ),
-                    Executable::default(),
-                );
-                let new_scope = self.pop_scope().unwrap();
-                if self.pop_scope().is_none() {
-                    // bash the root scope
-                    self.root_scope = new_scope;
+                self.scope_mut().executable = Executable::default();
+                // If there are rewrites, make this the next datum, otherwise,
+                // do it now
+                if self.rewrite_queue.is_empty() {
+                    self.scope_mut().execution = ScopeExecution::Instruction(code);
                 } else {
-                    self.scope_stack.push(new_scope);
+                    self.scope_mut().next_datum.push_front(code);
                 }
             }
             LambdaCallReturn::Error(le) => {
@@ -979,16 +943,8 @@ impl<'gc> TreewalkExecutor<'gc> {
         match rewrite {
             MacroInstruction::Evaluate(sv) => match (ctx.mutation, sv).try_into() {
                 Ok(vi) => {
-                    self.push_scope(
-                        ctx.mutation,
-                        format!("{} macro eval", self.scope().label()),
-                        self.stack.len(),
-                        [vi],
-                        self.scope().code_loc(),
-                        Executable::Macro {
-                            sub: Box::new(Executable::default()),
-                        },
-                    );
+                    assert!(matches!(self.scope().execution, ScopeExecution::Empty));
+                    self.scope_mut().execution = ScopeExecution::Instruction(vi);
                 }
                 Err(()) => {
                     let err_ptr = self.build_error(
@@ -1069,34 +1025,37 @@ impl<'gc> TreewalkExecutor<'gc> {
         }
 
         while fuel.should_continue() {
-            if let Some(mcr) = self.scope_mut().current_macro.take() {
+            if let Some((mcr, bottom)) = self.scope_mut().current_macro.take() {
+                let old_bottom = std::mem::replace(&mut self.scope_mut().bottom, bottom);
                 if self.call_macro(mcr, ctx, fuel) {
                     // resuspend execution
-                    self.scope_mut().current_macro = Some(mcr);
+                    self.scope_mut().current_macro = Some((mcr, old_bottom));
+                    self.scope_mut().bottom = old_bottom;
                     continue;
                 }
+                self.scope_mut().bottom = old_bottom;
             }
 
-            // If the scope is processing a lambda, continue to do so
-            if let Some((mut call, lambda)) = self.scope_mut().current_lambda.take() {
-                let ret = self.call_lambda(lambda, ctx, &mut call, fuel, self.scope().error);
-                self.handle_lambda_return(ret, ctx, lambda, call);
-            }
-
-            // If this scope is in an error state, pop it, and if it is the root scope
-            // stop execution
-            if let Some(err) = self.scope_mut().error.take() {
-                if self.pop_scope().is_none() {
-                    // put it back
-                    self.scope_mut().error = Some(err);
-                    break;
-                } else {
-                    self.scope_mut().error = Some(err);
-                }
-            }
-
-            // if there's nothing in the instruction slot, but there is a continuation, load it in
+            // if we aren't doing anything, figure out what to do
             if self.scope().execution.is_none() {
+                // If the scope is processing a lambda, continue to do so
+                if let Some((mut call, lambda)) = self.scope_mut().current_lambda.take() {
+                    let ret = self.call_lambda(lambda, ctx, &mut call, fuel, self.scope().error);
+                    self.handle_lambda_return(ret, ctx, lambda, call);
+                }
+
+                // If this scope is in an error state, pop it, and if it is the root scope
+                // stop execution
+                if let Some(err) = self.scope_mut().error.take() {
+                    if self.pop_scope().is_none() {
+                        // put it back
+                        self.scope_mut().error = Some(err);
+                        break;
+                    } else {
+                        self.scope_mut().error = Some(err);
+                    }
+                }
+
                 // if we are erroring, continue the loop instead of just going on
                 if self.next_inst(ctx, fuel) {
                     continue;
@@ -1142,7 +1101,26 @@ impl<'gc> TreewalkExecutor<'gc> {
             }
 
             match self.scope_mut().execution.take() {
-                ScopeExecution::Empty => break,
+                ScopeExecution::Empty if self.scope_stack.is_empty() => break,
+                ScopeExecution::Empty => {
+                    // pop the scope, propagating any errors
+                    let Some(done) = self.pop_scope() else {
+                        unreachable!()
+                    };
+
+                    // raise any errors encountered in the done scope
+                    if let Some(err_ptr) = done.error {
+                        self.raise_error(err_ptr, ctx);
+                    }
+
+                    assert!(matches!(
+                        self.scope().executable,
+                        Executable::Callable(_) | Executable::Not
+                    ));
+                    self.scope_mut().executable = Executable::Not;
+                    assert!(matches!(self.scope().execution, ScopeExecution::Empty));
+                    self.next_inst(ctx, fuel);
+                }
                 ScopeExecution::Rewrite(rew) => self.handle_rewrite(ctx, rew),
                 ScopeExecution::Instruction(exec) => {
                     *exec.touch_count.borrow_mut(ctx.mutation) += 1;
@@ -1254,16 +1232,25 @@ impl<'gc> TreewalkExecutor<'gc> {
                                         continue;
                                     }
 
+                                    // move the frame's bottom during macro evaluation
+                                    // so it can tell how many arguments it was given
+                                    let macro_bottom = Some(self.stack.len());
+                                    let old_bottom = std::mem::replace(
+                                        &mut self.scope_mut().bottom,
+                                        macro_bottom,
+                                    );
+                                    self.scope_mut().bottom = macro_bottom;
                                     // push values to stack *as-is*
                                     self.stack.extend(
                                         body.iter()
                                             .cloned()
                                             .map(|vi| vi.into_value(ctx.mutation, ctx.null_ptr)),
                                     );
-                                    if self.call_macro(mcr, ctx, fuel) {
-                                        self.scope_mut().current_macro = Some(mcr);
-                                    }
 
+                                    if self.call_macro(mcr, ctx, fuel) {
+                                        self.scope_mut().current_macro = Some((mcr, macro_bottom));
+                                    }
+                                    self.scope_mut().bottom = old_bottom;
                                     continue;
                                 }
 

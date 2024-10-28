@@ -170,7 +170,7 @@ impl<'s, 'gc> fmt::Display for DisplaySchemeError<'s, 'gc> {
 
         // write the backtrace
         write!(f, "\n\nBacktrace:")?;
-        for frame in &self.error.backtrace {
+        for frame in self.error.backtrace.iter().rev() {
             if let Some((range, source_id)) = frame.range.zip(frame.source_id) {
                 write!(
                     f,

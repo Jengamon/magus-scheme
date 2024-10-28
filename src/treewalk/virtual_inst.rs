@@ -10,7 +10,7 @@ use crate::{
     ContainsDatum, Datum, DatumVisitor, ExactReal, GAstNode, GAstToken, SchemeNumber,
 };
 
-use super::StackValue;
+use super::{Context, StackValue};
 
 #[derive(Debug, Clone, Collect)]
 #[collect(no_drop)]
@@ -139,6 +139,7 @@ impl<'a, 'gc> fmt::Display for VIPDisplay<'a, 'gc> {
             VirtualInstructionDatum::Bool(b) => write!(f, "{b}"),
             VirtualInstructionDatum::String(s) => write!(f, "{s}"),
             VirtualInstructionDatum::Character(c) => write!(f, "{c}"),
+            // TODO add other virtual instructions for quasiquote, unquote, and unquote-splicing forms
             VirtualInstructionDatum::Bytevector(bv) => write!(
                 f,
                 "#u8({})",
@@ -318,10 +319,10 @@ impl<'gc> TryFrom<(&'gc Mutation<'gc>, StackValue<'gc>)> for VirtualInstruction<
 }
 
 fn convert_vidatum_to_value<'gc>(
-    mc: &gc_arena::Mutation<'gc>,
-    null: ValuePtr<'gc>,
+    ctx: &Context<'gc>,
     datum: VirtualInstructionDatum,
 ) -> ValuePtr<'gc> {
+    let mc = ctx.mutation;
     match datum {
         VirtualInstructionDatum::Number(num) => Value::Number(num).into_ptr(mc),
         VirtualInstructionDatum::Bool(b) => Value::Bool(b).into_ptr(mc),
@@ -333,24 +334,20 @@ fn convert_vidatum_to_value<'gc>(
             Value::Bytevector(Gc::new(mc, RefLock::new(bv)).into()).into_ptr(mc)
         }
         VirtualInstructionDatum::Symbol(s) => Value::Symbol(s).into_ptr(mc),
-        VirtualInstructionDatum::EmptyList => null,
+        VirtualInstructionDatum::EmptyList => ctx.null_ptr,
         VirtualInstructionDatum::List { head, body, dot } => {
             let cons = ConsCell::from_iter(
                 mc,
-                null,
-                std::iter::once(convert_vidatum_to_value(
-                    mc,
-                    null,
-                    head.payload.datum().clone(),
-                ))
-                .chain(
-                    body.iter()
-                        .map(|b| convert_vidatum_to_value(mc, null, b.payload.datum().clone())),
-                )
-                .chain(
-                    dot.iter()
-                        .map(|b| convert_vidatum_to_value(mc, null, b.payload.datum().clone())),
-                ),
+                ctx.null_ptr,
+                std::iter::once(convert_vidatum_to_value(ctx, head.payload.datum().clone()))
+                    .chain(
+                        body.iter()
+                            .map(|b| convert_vidatum_to_value(ctx, b.payload.datum().clone())),
+                    )
+                    .chain(
+                        dot.iter()
+                            .map(|b| convert_vidatum_to_value(ctx, b.payload.datum().clone())),
+                    ),
             );
 
             cons
@@ -361,17 +358,17 @@ fn convert_vidatum_to_value<'gc>(
 
 impl<'gc> VirtualInstruction<'gc> {
     /// Convert a virtual instruction into data (stack value)
-    pub fn into_value(self, mc: &gc_arena::Mutation<'gc>, null: ValuePtr<'gc>) -> StackValue<'gc> {
+    pub fn into_value(self, ctx: &Context<'gc>) -> StackValue<'gc> {
         match self.payload {
             VirtualInstructionPayload::Jit { chunk, datum, .. } => StackValue {
-                value: convert_vidatum_to_value(mc, null, datum),
+                value: convert_vidatum_to_value(ctx, datum),
                 range: self.range,
                 source_id: self.source_id,
                 touch_count: self.touch_count,
                 chunk: Ok(chunk),
             },
             VirtualInstructionPayload::Datum { datum, can_jit } => StackValue {
-                value: convert_vidatum_to_value(mc, null, datum),
+                value: convert_vidatum_to_value(ctx, datum),
                 range: self.range,
                 source_id: self.source_id,
                 touch_count: self.touch_count,

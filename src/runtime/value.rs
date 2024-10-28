@@ -319,7 +319,10 @@ impl<'gc> fmt::Display for ResolvedValue<'gc, lasso::Spur> {
                 )
             }
             Value::Environment(_) => todo!(),
-            Value::UserStruct(_) => write!(f, "<user {:p}>", &self.value),
+            Value::UserStruct(user) => {
+                let label = user.label().unwrap_or("userdata");
+                write!(f, "<{label} {:p}>", &self.value)
+            }
             Value::Transformer(_) => todo!(),
             Value::Lambda(lambda) => write!(f, "<lambda {:p}>", *lambda.borrow()),
             Value::Error(_) => todo!(),

@@ -7,7 +7,7 @@ use gc_arena::{arena::Root, barrier, Collect, Gc, Mutation, Rootable, Static};
 
 use super::any::{Any, AnyInner};
 
-pub type UserStructInner<'gc> = AnyInner<()>;
+pub type UserStructInner<'gc> = AnyInner<Option<Box<str>>>;
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 #[error("UserStruct type mismatch")]
@@ -18,7 +18,9 @@ pub struct BadUserStructType;
 #[collect(no_drop)]
 // Do we need associated data with this type?
 // ASK Do we need this type?
-pub struct UserStruct<'gc>(Any<'gc, ()>);
+// FIXME yes, we want to store a custom label, so that
+// not every single one is a "userstruct"
+pub struct UserStruct<'gc>(Any<'gc, Option<Box<str>>>);
 
 impl<'gc> PartialEq for UserStruct<'gc> {
     fn eq(&self, other: &Self) -> bool {
@@ -53,6 +55,18 @@ impl<'gc> UserStruct<'gc> {
         UserStruct(Any::new::<R>(mc, val))
     }
 
+    pub fn new_labeled<R>(mc: &Mutation<'gc>, val: Root<'gc, R>, label: impl AsRef<str>) -> Self
+    where
+        R: for<'a> Rootable<'a> + 'static,
+        Root<'gc, R>: Sized + Collect,
+    {
+        UserStruct(Any::with_metadata::<R>(
+            mc,
+            Some(Box::from(label.as_ref())),
+            val,
+        ))
+    }
+
     /// Create a new `UserData` type from a non-GC value.
     ///
     /// This equivalent to calling [`UserData::new`] with the given value wrapped in the [`Static`]
@@ -63,6 +77,18 @@ impl<'gc> UserStruct<'gc> {
     /// variants of `UserData` methods as a further convenience, like [`UserData::downcast_static`].
     pub fn new_static<T: 'static>(mc: &Mutation<'gc>, val: T) -> Self {
         Self::new::<Static<T>>(mc, Static(val))
+    }
+
+    pub fn new_static_labeled<T: 'static>(
+        mc: &Mutation<'gc>,
+        val: T,
+        label: impl AsRef<str>,
+    ) -> Self {
+        Self::new_labeled::<Static<T>>(mc, Static(val), label)
+    }
+
+    pub(crate) fn label(&self) -> Option<&str> {
+        self.0.metadata().as_ref().map(Box::as_ref)
     }
 
     pub fn from_inner(inner: Gc<'gc, UserStructInner<'gc>>) -> Self {

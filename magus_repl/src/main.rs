@@ -298,8 +298,9 @@ fn repl() -> anyhow::Result<()> {
             ) -> Result<ProcedureReturn<'gc>, ProcedureError<'gc>> {
                 match call.pop::<&MyCoolType>() {
                     Ok(mct) => {
-                        call.push(ctx.mutation, mct.x);
-                        return Ok(ProcedureReturn::Return);
+                        return Ok(ProcedureReturn::Return(
+                            _interpreter.current_scope_value(ctx.mutation, mct.x),
+                        ));
                     }
                     Err(vp) => {
                         if let Some(vp) = vp {
@@ -316,7 +317,8 @@ fn repl() -> anyhow::Result<()> {
                     // TODO when implementing in standard library, make these checked operations
                     total += v;
                 }
-                call.push(ctx.mutation, MyCoolType { x: total });
+                call.stack
+                    .push(_interpreter.current_scope_value(ctx.mutation, MyCoolType { x: total }));
                 Ok(ProcedureReturn::Suspend)
             }
 
@@ -334,7 +336,7 @@ fn repl() -> anyhow::Result<()> {
             let sub_lambda = Lambda::with_typecheck(
                 mc,
                 all_numbers_typecheck("subtract"),
-                move |_, ctx, call, _, _| {
+                move |_, ctx, call, _interpreter, _| {
                     let mut data = vec![];
                     while !call.stack.is_empty() {
                         let Some(v) = call.pop::<i64>().ok() else {
@@ -344,23 +346,23 @@ fn repl() -> anyhow::Result<()> {
                     }
                     let init = data.pop().unwrap();
                     data.reverse();
-                    if !data.is_empty() {
+
+                    Ok(ProcedureReturn::Return(if !data.is_empty() {
                         // TODO when implementing in standard library, make these checked operations
-                        call.push(
+                        _interpreter.current_scope_value(
                             ctx.mutation,
                             data.into_iter().fold(init, |acc, it| acc - it),
-                        );
+                        )
                     } else {
                         // TODO when implementing in standard library, make these checked operations
-                        call.push(ctx.mutation, init.neg());
-                    }
-                    Ok(ProcedureReturn::Return)
+                        _interpreter.current_scope_value(ctx.mutation, init.neg())
+                    }))
                 },
             );
             let mul_lambda = Lambda::with_typecheck(
                 mc,
                 all_numbers_typecheck("multiply"),
-                move |_, ctx, call, _, _| {
+                move |_, ctx, call, _interpreter, _| {
                     let mut total = 1;
                     while !call.stack.is_empty() {
                         let Some(v) = call.pop::<i64>().ok() else {
@@ -369,8 +371,9 @@ fn repl() -> anyhow::Result<()> {
                         // TODO when implementing in standard library, make these checked operations
                         total *= v;
                     }
-                    call.push(ctx.mutation, total);
-                    Ok(ProcedureReturn::Return)
+                    Ok(ProcedureReturn::Return(
+                        _interpreter.current_scope_value(ctx.mutation, total),
+                    ))
                 },
             );
 
@@ -441,10 +444,22 @@ fn repl() -> anyhow::Result<()> {
                         println!(">>>> SUSPENDED: {call}");
                     }
 
+                    let source_data = &[(src, Some(Box::from("repl.scm")))];
                     if let Some(err) = exec.scope().error() {
-                        println!(">>>> ERROR: {}", err.clone().display(&[src]));
+                        println!(">>>> ERROR: {}", err.clone().display(source_data));
                         // println!(">>>> ERROR: {:?}", err);
                     }
+                    println!(
+                        "{}",
+                        exec.all_scopes()
+                            .map(|sc| format!(
+                                "{:?}",
+                                sc.error()
+                                    .map(|err| err.clone().display(source_data).to_string())
+                            ))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    );
 
                     let metrics = ctx.mutation.metrics();
                     println!(

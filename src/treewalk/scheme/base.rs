@@ -1,4 +1,5 @@
 use crate::declare_lambdas;
+use crate::environment::EnvironmentPtr;
 use crate::treewalk::Context;
 use crate::{
     runtime::lambda::{
@@ -39,7 +40,7 @@ pub mod macros {
     impl<'gc> Macro<'gc> for Define {
         fn rewrite(
             &mut self,
-            ctx: &Context<'gc>,
+            _ctx: &Context<'gc>,
             executor: &mut TreewalkExecutor<'gc>,
             fuel: &mut Fuel,
         ) -> anyhow::Result<MacroReturn<'gc>> {
@@ -60,7 +61,6 @@ pub mod macros {
             fuel.consume(FuelCosts::ENV_SET_COST);
 
             Ok(MacroReturn::Return {
-                ret: Value::Void.into_ptr(ctx.mutation),
                 inst: vec![
                     MacroInstruction::Evaluate(value),
                     MacroInstruction::Define { name },
@@ -76,7 +76,7 @@ pub mod macros {
     impl<'gc> Macro<'gc> for SetBang {
         fn rewrite(
             &mut self,
-            ctx: &Context<'gc>,
+            _ctx: &Context<'gc>,
             executor: &mut TreewalkExecutor<'gc>,
             fuel: &mut Fuel,
         ) -> anyhow::Result<MacroReturn<'gc>> {
@@ -97,7 +97,6 @@ pub mod macros {
             fuel.consume(FuelCosts::ENV_SET_COST);
 
             Ok(MacroReturn::Return {
-                ret: Value::Void.into_ptr(ctx.mutation),
                 inst: vec![
                     MacroInstruction::Evaluate(value),
                     MacroInstruction::SetBang { name },
@@ -217,6 +216,12 @@ pub mod macros {
             interpreter: &mut TreewalkExecutor<'gc>,
             _fuel: &mut Fuel,
         ) -> ProcedureResult<'gc> {
+            eprintln!(
+                ">> ARGSU {}",
+                self.args
+                    .borrow()
+                    .resolve_into(ctx.interner.clone(), ctx.null_ptr)
+            );
             // we store the body members we've yet to execute
             #[derive(Collect)]
             #[collect(no_drop)]
@@ -253,7 +258,7 @@ pub mod macros {
             if let Some(rest_sym) = rest_name {
                 let rest_cons =
                     ConsCell::from_iter(ctx.mutation, ctx.null_ptr, rest.iter().map(|sv| **sv));
-                let rest_sv = interpreter.current_scope_value(ctx.mutation, rest_cons);
+                let rest_sv = interpreter.current_scope_value_ptr(ctx.mutation, rest_cons);
                 new_env
                     .define(ctx.mutation, rest_sym, rest_sv, false)
                     .unwrap();
@@ -291,7 +296,7 @@ pub mod macros {
             args: &[VirtualInstructionDatum<'gc>],
         ) -> Result<(), anyhow::Error> {
             if args.len() >= 2 {
-                (match dbg!(&args[0]) {
+                (match &args[0] {
                     VirtualInstructionDatum::Symbol(_) => true,
                     VirtualInstructionDatum::EmptyList => true,
                     VirtualInstructionDatum::List { head, body, dot } => {
@@ -342,24 +347,33 @@ pub mod macros {
             executor: &mut TreewalkExecutor<'gc>,
             fuel: &mut Fuel,
         ) -> anyhow::Result<MacroReturn<'gc>> {
+            // FIXME figure out testing situation before moving this to core
+            // because doing this every time is nasty
+            //
+            // (basically gets the difference in size of the full stack compared to
+            // the stuff that is in this scope's stack to get the number of arguments
+            // that were pushed to the stack for this macro's execution)
             let split_point = executor.stack.len().saturating_sub(executor.stack().len());
             let args = executor.stack.split_off(split_point);
             fuel.consume(FuelCosts::NEW_LAMBDA);
             let (args, ops) = args.split_at(1);
-            Ok(MacroReturn::Return {
-                inst: Vec::new(),
-                ret: Value::Lambda(Gc::new(
+            executor.stack.push(
+                executor.current_scope_value_ptr(
                     ctx.mutation,
-                    RefLock::new(LambdaProc::with_procedure(
+                    Value::Lambda(Gc::new(
                         ctx.mutation,
-                        RuntimeLambda {
-                            args: args[0],
-                            ops: ops.to_vec(),
-                        },
-                    )),
-                ))
-                .into_ptr(ctx.mutation),
-            })
+                        RefLock::new(LambdaProc::with_procedure(
+                            ctx.mutation,
+                            RuntimeLambda {
+                                args: args[0],
+                                ops: ops.to_vec(),
+                            },
+                        )),
+                    ))
+                    .into_ptr(ctx.mutation),
+                ),
+            );
+            Ok(MacroReturn::Return { inst: Vec::new() })
             // todo!(
             //     "{}",
             //     args.into_iter()
@@ -392,7 +406,7 @@ fn add_impl<'gc>(
     _root: &mut (),
     ctx: &Context<'gc>,
     call: &mut LambdaCall<'gc>,
-    _interpreter: &mut TreewalkExecutor<'gc>,
+    interpreter: &mut TreewalkExecutor<'gc>,
     _fuel: &mut Fuel,
 ) -> Result<ProcedureReturn<'gc>, ProcedureError<'gc>> {
     // TODO support inexacts too!
@@ -405,15 +419,16 @@ fn add_impl<'gc>(
             .checked_add(v)
             .ok_or(anyhow::anyhow!("cannot add {v} to {total}"))?;
     }
-    call.push(ctx.mutation, total);
-    Ok(ProcedureReturn::Suspend)
+    Ok(ProcedureReturn::Return(
+        interpreter.current_scope_value(ctx.mutation, total),
+    ))
 }
 
 fn div_impl<'gc>(
     _root: &mut (),
     ctx: &Context<'gc>,
     call: &mut LambdaCall<'gc>,
-    _interpreter: &mut TreewalkExecutor<'gc>,
+    interpreter: &mut TreewalkExecutor<'gc>,
     _fuel: &mut Fuel,
 ) -> ProcedureResult<'gc> {
     // TODO support inexacts too!
@@ -435,15 +450,15 @@ fn div_impl<'gc>(
             })
         });
         match res {
-            Ok(val) => {
-                call.push(ctx.mutation, val);
-                Ok(ProcedureReturn::Return)
-            }
+            Ok(val) => Ok(ProcedureReturn::Return(
+                interpreter.current_scope_value(ctx.mutation, val),
+            )),
             Err(e) => Err(ProcedureError::General(e)),
         }
     } else {
-        call.push(ctx.mutation, (init as f64).recip());
-        Ok(ProcedureReturn::Return)
+        Ok(ProcedureReturn::Return(
+            interpreter.current_scope_value(ctx.mutation, (init as f64).recip()),
+        ))
     }
 }
 
@@ -465,3 +480,12 @@ declare_lambdas!(
         }
     }
 );
+
+impl<'gc> SchemeBase<'gc> {
+    /// Import all names defined in this module into the given environment
+    pub fn import_all(&self, mc: &Mutation<'gc>, env: EnvironmentPtr<'gc>) {
+        let _ = mc;
+        let _ = env;
+        todo!()
+    }
+}

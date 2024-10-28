@@ -3,7 +3,6 @@ use gc_arena::{unsize, Collect, Gc, Mutation, RefLock};
 use crate::{
     environment::EnvironmentPtr,
     treewalk::{virtual_inst::VirtualInstructionDatum, Context, StackValue, TreewalkExecutor},
-    value::ValuePtr,
     Fuel,
 };
 
@@ -45,11 +44,8 @@ where
 
 #[derive(Debug, Clone)]
 pub enum MacroReturn<'gc> {
-    Return {
-        inst: Vec<MacroInstruction<'gc>>,
-        ret: ValuePtr<'gc>,
-    },
-    Suspend,
+    Return { inst: Vec<MacroInstruction<'gc>> },
+    Waiting,
 }
 
 /// The value type of `syntax-rules`
@@ -73,6 +69,8 @@ pub struct SyntaxRules {}
 #[derive(Debug, Clone, Collect)]
 #[collect(no_drop)]
 pub enum MacroInstruction<'gc> {
+    /// Push a value to stack
+    Quote(StackValue<'gc>),
     /// Execute code in the given environment, pushing the result to the top of stack
     // TODO Investigate if we need the separate environment ptr in-lieu of adding a "restore envirnment"
     // instruction (for let and friends)

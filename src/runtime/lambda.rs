@@ -115,18 +115,6 @@ impl<'gc> LambdaCall<'gc> {
         self.args
     }
 
-    pub fn push(&mut self, mc: &Mutation<'gc>, value: impl IntoValue<'gc>) {
-        // self.range is the range of code from which this call was created
-        let new_value = StackValue {
-            value: Gc::new(mc, RefLock::new(value.into_value(mc))),
-            range: self.range,
-            touch_count: Gc::new(mc, RefLock::new(0)),
-            chunk: Err(Gc::new(mc, RefLock::new(true))),
-            source_id: self.source_id,
-        };
-        self.stack.push(new_value)
-    }
-
     /// TODO Work with StackValues
     pub fn pop<V: FromValue<'gc>>(&mut self) -> Result<V, Option<StackValue<'gc>>> {
         let ptr = self.stack.pop();
@@ -158,8 +146,8 @@ pub enum ProcedureReturn<'gc> {
 
     /// This procedure has ended.
     ///
-    /// Return the last value on the stack to the caller (or void if there is nothing)
-    Return,
+    /// Return this value
+    Return(StackValue<'gc>),
 
     /// The procedure is in progress, so return to it
     Suspend,

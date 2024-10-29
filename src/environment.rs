@@ -59,6 +59,11 @@ impl<'gc> Environment<'gc> {
         }
     }
 
+    #[inline]
+    pub fn parent(&self) -> Option<EnvironmentPtr<'gc>> {
+        self.parent
+    }
+
     /// Freezes this particular copy of the environment.
     ///
     /// Both `define` and `set!` are stopped by a shallow freeze, so it

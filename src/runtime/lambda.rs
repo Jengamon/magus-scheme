@@ -4,15 +4,11 @@ use core::fmt;
 use std::rc::Rc;
 
 use gc_arena::{unsize, Collect, Gc, Mutation, RefLock};
-use rowan::TextRange;
 
 use crate::treewalk::{Context, StackValue, TreewalkExecutor};
 use crate::Fuel;
 
-use crate::runtime::{
-    convert::{FromValue, IntoValue},
-    error::SchemeErrorPtr,
-};
+use crate::runtime::{convert::FromValue, error::SchemeErrorPtr};
 use crate::value::{ValuePtr, ValueType};
 
 /// A filter for types
@@ -85,11 +81,6 @@ pub struct LambdaCall<'gc> {
     stage: LambdaStage,
 
     lambda_id: Gc<'gc, ()>,
-    // TODO Hold source information about the lambda so that
-    // stack values can be synthesized
-    #[collect(require_static)]
-    range: Option<TextRange>,
-    source_id: Option<usize>,
 
     /// lambdas can store w/e they want for the duration of a call using this
     data: Option<ValuePtr<'gc>>,
@@ -401,8 +392,6 @@ impl<'gc> Lambda<'gc> {
     pub fn call(
         &self,
         initial_stack: impl IntoIterator<Item = StackValue<'gc>>,
-        source_id: Option<usize>,
-        range: Option<TextRange>,
     ) -> LambdaCall<'gc> {
         let stack: Vec<_> = initial_stack.into_iter().collect();
         LambdaCall {
@@ -411,8 +400,6 @@ impl<'gc> Lambda<'gc> {
             data: None,
             stage: LambdaStage::Typecheck,
             lambda_id: self.id,
-            source_id,
-            range,
         }
     }
 

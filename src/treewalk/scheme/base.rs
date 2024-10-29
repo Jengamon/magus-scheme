@@ -16,7 +16,7 @@ pub mod macros {
     use gc_arena::{Collect, Gc, RefLock, Rootable};
 
     use crate::{
-        environment::Environment,
+        environment::{Environment, EnvironmentPtr},
         runtime::{
             lambda::{
                 Lambda as LambdaProc, LambdaCall, Procedure, ProcedureResult, ProcedureReturn,
@@ -110,6 +110,7 @@ pub mod macros {
     #[derive(Debug, Collect)]
     #[collect(no_drop)]
     struct RuntimeLambda<'gc> {
+        env: EnvironmentPtr<'gc>,
         args: StackValue<'gc>,
         ops: Vec<StackValue<'gc>>,
     }
@@ -125,6 +126,7 @@ pub mod macros {
         }
 
         fn get_arities(&self) -> (Option<usize>, Option<usize>) {
+            dbg!(&self.args);
             assert!(self.is_valid());
 
             // check the stack for a set number of params
@@ -216,12 +218,6 @@ pub mod macros {
             interpreter: &mut TreewalkExecutor<'gc>,
             _fuel: &mut Fuel,
         ) -> ProcedureResult<'gc> {
-            eprintln!(
-                ">> ARGSU {}",
-                self.args
-                    .borrow()
-                    .resolve_into(ctx.interner.clone(), ctx.null_ptr)
-            );
             // we store the body members we've yet to execute
             #[derive(Collect)]
             #[collect(no_drop)]
@@ -236,7 +232,8 @@ pub mod macros {
                 let (next, is_tail) = {
                     let mut lambda_state = lambda_state.unlock().borrow_mut();
                     let next = lambda_state.unexecuted.pop_front();
-                    (next, lambda_state.unexecuted.is_empty())
+                    let is_tail = lambda_state.unexecuted.is_empty();
+                    (next, is_tail)
                 };
 
                 if let Some(code) = next {
@@ -248,7 +245,7 @@ pub mod macros {
 
             // we know that args is either a symbol or a param list,
             // so use those assumptions to bind our variables!
-            let mut new_env = Environment::new(ctx.mutation, Some(interpreter.current_env()));
+            let mut new_env = Environment::new(ctx.mutation, Some(self.env));
             let (named, rest_name) = self.get_symbols();
             let (named_args, rest) = call.stack.split_at(named.len());
             for (name, arg) in named.into_iter().zip(named_args) {
@@ -279,6 +276,7 @@ pub mod macros {
                 .into_ptr(ctx.mutation),
             );
 
+            // panic!("{is_tail}");
             Ok(ProcedureReturn::Call {
                 code: *body_call,
                 is_tail,
@@ -353,8 +351,10 @@ pub mod macros {
             // (basically gets the difference in size of the full stack compared to
             // the stuff that is in this scope's stack to get the number of arguments
             // that were pushed to the stack for this macro's execution)
-            let split_point = executor.stack.len().saturating_sub(executor.stack().len());
-            let args = executor.stack.split_off(split_point);
+            let Some(args) = executor.get_macro_args() else {
+                unreachable!("{:?}", executor.stack);
+            };
+
             fuel.consume(FuelCosts::NEW_LAMBDA);
             let (args, ops) = args.split_at(1);
             executor.stack.push(
@@ -365,6 +365,7 @@ pub mod macros {
                         RefLock::new(LambdaProc::with_procedure(
                             ctx.mutation,
                             RuntimeLambda {
+                                env: executor.current_env(),
                                 args: args[0],
                                 ops: ops.to_vec(),
                             },

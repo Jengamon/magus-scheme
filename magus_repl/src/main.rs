@@ -1,8 +1,8 @@
-use std::{collections::HashMap, ops::Neg};
+use std::ops::Neg;
 
 use clap::Parser;
 use codesnake::{Block, CodeWidth, Label, LineIndex};
-use gc_arena::{Collect, Mutation};
+use gc_arena::{Collect, Gc, Mutation};
 use magus::{
     lexer::Token,
     runtime::{
@@ -165,6 +165,7 @@ fn repl() -> anyhow::Result<()> {
         }
 
         if !gast.errors().is_empty() {
+            readline.add_history_entry(input)?;
             continue;
         }
 
@@ -417,30 +418,38 @@ fn repl() -> anyhow::Result<()> {
             running = interp
                 .run(exec.clone(), |ctx, mut exec| {
                     exec.step(&ctx, &mut fuel).unwrap();
-                    let scope_info: HashMap<_, _> = exec
-                        .all_scopes()
-                        .cloned()
-                        .map(|s| (s.bottom(), s))
-                        .collect();
                     println!("== STACK CHECK fuel: {} ==", fuel.remaining());
                     for (idx, ptr) in exec.full_stack().iter().enumerate() {
                         let tc = ptr.touch_count();
                         let resolved = ptr
                             .borrow()
                             .resolve_into(ctx.interner.clone(), ctx.null_ptr);
-                        let idx_key = (idx != 0).then_some(idx);
-                        if let Some(scope) = scope_info.get(&idx_key) {
-                            println!("- [{tc}] {idx}: {resolved} (({}))", scope.label());
-                        } else {
-                            println!("- [{tc}] {idx}: {resolved}");
-                        }
+                        println!("- [{tc}] {idx}: {resolved}");
                     }
 
-                    for rewrite in exec.rewrite_queue() {
-                        println!(">>> REWRITE {rewrite:?}")
+                    println!("== SCOPES ==");
+                    let scopes: Vec<_> = exec.all_scopes().map(|sc| (sc.environment, sc)).collect();
+                    for (_, scope) in &scopes {
+                        println!(
+                            "--> {} parent {}",
+                            scope.label(),
+                            scope
+                                .environment
+                                .borrow()
+                                .parent()
+                                .and_then(|penv| scopes
+                                    .iter()
+                                    .find(|sc| Gc::ptr_eq(sc.0, penv))
+                                    .and_then(|sc| sc.1.maybe_label()))
+                                .unwrap_or("<<none>>")
+                        )
                     }
 
-                    if let Some(call) = exec.scope().lambda_call() {
+                    for cont in exec.continuation() {
+                        println!(">>> REWRITE {cont:?}")
+                    }
+
+                    if let Some(call) = exec.lambda_call() {
                         println!(">>>> SUSPENDED: {call}");
                     }
 

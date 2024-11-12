@@ -255,7 +255,7 @@ fn read_number(
         || contains_flag('d') && radix != 10
     {
         // Radix mismatch
-        Err(LexerError::MalformedNumber)?
+        unreachable!("ICE lexer error: mismatched radix {flags:?} radix {radix}");
     }
 
     fn read_number_part(

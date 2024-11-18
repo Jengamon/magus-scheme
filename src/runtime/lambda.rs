@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use gc_arena::{unsize, Collect, Gc, Mutation, RefLock};
 
+use crate::environment::StackEnvironmentPtr;
 use crate::treewalk::{Context, StackValue, TreewalkExecutor};
 use crate::Fuel;
 
@@ -132,6 +133,7 @@ pub enum ProcedureReturn<'gc> {
     /// If not, the result of the call will be pushed to the top of the stack
     Call {
         code: StackValue<'gc>,
+        env: Option<StackEnvironmentPtr<'gc>>,
         is_tail: bool,
     },
 

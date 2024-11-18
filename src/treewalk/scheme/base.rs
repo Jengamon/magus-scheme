@@ -1,5 +1,5 @@
 use crate::declare_lambdas;
-use crate::environment::EnvironmentPtr;
+use crate::environment::StackEnvironmentPtr;
 use crate::treewalk::Context;
 use crate::{
     runtime::lambda::{
@@ -11,6 +11,11 @@ use crate::{
 };
 
 pub mod macros {
+    use crate::{
+        environment::StackEnvironmentPtr,
+        treewalk::transformer::{Macro, MacroInstruction, MacroReturn},
+    };
+
     use std::collections::{HashSet, VecDeque};
 
     use gc_arena::{Collect, Gc, RefLock, Rootable};
@@ -24,7 +29,6 @@ pub mod macros {
             userstruct::UserStruct,
             FuelCosts,
         },
-        transformer::{Macro, MacroInstruction, MacroReturn},
         treewalk::{
             virtual_inst::{VirtualInstruction, VirtualInstructionDatum},
             Context, StackValue, TreewalkExecutor,
@@ -40,6 +44,7 @@ pub mod macros {
     impl<'gc> Macro<'gc> for Define {
         fn rewrite(
             &mut self,
+            _this: StackValue<'gc>,
             _ctx: &Context<'gc>,
             executor: &mut TreewalkExecutor<'gc>,
             fuel: &mut Fuel,
@@ -76,6 +81,7 @@ pub mod macros {
     impl<'gc> Macro<'gc> for SetBang {
         fn rewrite(
             &mut self,
+            _this: StackValue<'gc>,
             _ctx: &Context<'gc>,
             executor: &mut TreewalkExecutor<'gc>,
             fuel: &mut Fuel,
@@ -110,7 +116,8 @@ pub mod macros {
     #[derive(Debug, Collect)]
     #[collect(no_drop)]
     struct RuntimeLambda<'gc> {
-        env: EnvironmentPtr<'gc>,
+        this: StackValue<'gc>,
+        env: StackEnvironmentPtr<'gc>,
         args: StackValue<'gc>,
         ops: Vec<StackValue<'gc>>,
     }
@@ -223,21 +230,22 @@ pub mod macros {
             #[collect(no_drop)]
             struct LambdaState<'gc> {
                 unexecuted: VecDeque<StackValue<'gc>>,
+                call_env: StackEnvironmentPtr<'gc>,
             }
 
             if let Some(Value::UserStruct(lambda_state)) = call.data().map(|vp| *vp.borrow()) {
                 let lambda_state = lambda_state
                     .downcast_write::<Rootable![RefLock<LambdaState<'_>>]>(ctx.mutation)
                     .unwrap();
-                let (next, is_tail) = {
+                let (next, is_tail, env) = {
                     let mut lambda_state = lambda_state.unlock().borrow_mut();
                     let next = lambda_state.unexecuted.pop_front();
                     let is_tail = lambda_state.unexecuted.is_empty();
-                    (next, is_tail)
+                    (next, is_tail, Some(lambda_state.call_env))
                 };
 
                 if let Some(code) = next {
-                    return Ok(ProcedureReturn::Call { code, is_tail });
+                    return Ok(ProcedureReturn::Call { code, is_tail, env });
                 } else {
                     unreachable!("tail call optimized out")
                 }
@@ -262,12 +270,15 @@ pub mod macros {
             }
 
             // Set the execution environment to this new environment
-            interpreter.scope_mut().environment = Gc::new(ctx.mutation, RefLock::new(new_env));
+            let call_env = Gc::new(ctx.mutation, RefLock::new(new_env));
 
             let body_call = self.ops.first().unwrap();
             let rest: VecDeque<_> = self.ops.iter().skip(1).copied().collect();
             let is_tail = rest.is_empty();
-            let ls = LambdaState { unexecuted: rest };
+            let ls = LambdaState {
+                unexecuted: rest,
+                call_env,
+            };
             *call.data_mut() = Some(
                 Value::UserStruct(UserStruct::new::<Rootable![RefLock<LambdaState<'_>>]>(
                     ctx.mutation,
@@ -279,6 +290,7 @@ pub mod macros {
             // panic!("{is_tail}");
             Ok(ProcedureReturn::Call {
                 code: *body_call,
+                env: Some(call_env),
                 is_tail,
             })
         }
@@ -341,6 +353,7 @@ pub mod macros {
 
         fn rewrite(
             &mut self,
+            this: StackValue<'gc>,
             ctx: &Context<'gc>,
             executor: &mut TreewalkExecutor<'gc>,
             fuel: &mut Fuel,
@@ -365,6 +378,7 @@ pub mod macros {
                         RefLock::new(LambdaProc::with_procedure(
                             ctx.mutation,
                             RuntimeLambda {
+                                this,
                                 env: executor.current_env(),
                                 args: args[0],
                                 ops: ops.to_vec(),
@@ -484,7 +498,7 @@ declare_lambdas!(
 
 impl<'gc> SchemeBase<'gc> {
     /// Import all names defined in this module into the given environment
-    pub fn import_all(&self, mc: &Mutation<'gc>, env: EnvironmentPtr<'gc>) {
+    pub fn import_all(&self, mc: &Mutation<'gc>, env: StackEnvironmentPtr<'gc>) {
         let _ = mc;
         let _ = env;
         todo!()

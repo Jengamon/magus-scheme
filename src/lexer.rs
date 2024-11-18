@@ -1106,6 +1106,7 @@ mod tests {
         test_number_arbtest_nondecimal(8);
     }
 
+    #[inline(always)]
     #[track_caller]
     fn test_number_arbtest_nondecimal(
         radix: u32,

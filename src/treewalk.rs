@@ -12,30 +12,39 @@ use std::{
     sync::mpsc::{channel, Receiver, Sender},
 };
 
+pub use context::Context;
 use gc_arena::{Arena, Collect, Gc, Mutation, RefLock, Rootable};
 use lasso::Rodeo;
 use rowan::TextRange;
 use scheme::SchemeStd;
 use slotmap::{new_key_type, HopSlotMap};
+pub use stack_value::StackValue;
+use transformer::{MacroInstruction, MacroPtr, MacroReturn};
 use virtual_inst::{
-    convert_to_virtual, CodeChunkPtr, VirtualInstruction, VirtualInstructionDatum,
-    VirtualInstructionPayload,
+    convert_to_virtual, VirtualInstruction, VirtualInstructionDatum, VirtualInstructionPayload,
 };
 
 use crate::{
-    environment::{Environment, EnvironmentPtr},
+    environment::{Environment as GEnvironment, EnvironmentPtr as GEnvironmentPtr},
     runtime::{
         convert::IntoValue,
         error::{SchemeError, SchemeErrorPtr, SchemeErrorType, StackFrame},
         lambda::{LambdaCall, LambdaExecError, LambdaPtr, ProcedureError, ProcedureReturn},
         FuelCosts,
     },
-    transformer::{MacroInstruction, MacroPtr, MacroReturn},
     value::{self, ConsCell, Value, ValuePtr},
     ContainsDatum, Fuel, GAstNode, Module,
 };
 
+pub type Environment<'gc> = GEnvironment<'gc, StackValue<'gc>>;
+pub type EnvironmentPtr<'gc> = GEnvironmentPtr<'gc, StackValue<'gc>>;
+pub type MacroEnvironment<'gc> = GEnvironment<'gc, MacroPtr<'gc>>;
+pub type MacroEnvironmentPtr<'gc> = GEnvironmentPtr<'gc, MacroPtr<'gc>>;
+
+pub mod context;
 pub mod scheme;
+pub mod stack_value;
+pub mod transformer;
 pub mod virtual_inst;
 
 new_key_type! {struct InnerExecutorKey;}
@@ -232,69 +241,21 @@ impl<'gc> TreewalkState<'gc> {
     }
 }
 
-/// A value pointer enhanced with source tracking information
-#[derive(Debug, Clone, Collect, Copy)]
-#[collect(no_drop)]
-pub struct StackValue<'gc> {
-    pub(crate) value: ValuePtr<'gc>,
-    #[collect(require_static)]
-    pub(crate) range: Option<TextRange>,
-    /// preservation of touch_count when used as data
-    pub(crate) touch_count: Gc<'gc, RefLock<usize>>,
-    /// If this value has been JIT'ed, what is the chunk
-    /// If it hasn't, store if it is possible to JIT (if we haven't tried already)
-    pub(crate) chunk: Result<CodeChunkPtr<'gc>, Gc<'gc, RefLock<bool>>>,
-    /// Source id from VirtualInstruction
-    pub(crate) source_id: Option<usize>,
-}
-
-impl<'gc> StackValue<'gc> {
-    pub fn touch_count(&self) -> usize {
-        *self.touch_count.borrow()
-    }
-
-    /// This is for stack values generated externally, not from anywhere in the source
-    pub fn external<V>(mc: &Mutation<'gc>, v: V) -> Self
-    where
-        V: IntoValue<'gc>,
-    {
-        Self {
-            value: Gc::new(mc, RefLock::new(v.into_value(mc))),
-            range: None,
-            source_id: None,
-            touch_count: Gc::new(mc, RefLock::new(0)),
-            chunk: Err(Gc::new(mc, RefLock::new(true))),
-        }
-    }
-}
-
-/// Transparently access the value of this pointer
-impl<'gc> std::ops::Deref for StackValue<'gc> {
-    type Target = ValuePtr<'gc>;
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
-}
-
-pub struct Context<'gc> {
-    pub mutation: &'gc Mutation<'gc>,
-    pub interner: RefMut<'gc, Rodeo>,
-    pub null_ptr: ValuePtr<'gc>,
-    // symbol for "quote" from the interner
-    quote_sym: value::Symbol,
-}
-
 #[derive(Debug, Collect)]
 #[collect(no_drop)]
 pub struct TreewalkExecutor<'gc> {
-    current_macro: Option<(MacroPtr<'gc>, Option<usize>)>,
-    current_lambda: Option<(LambdaCall<'gc>, LambdaPtr<'gc>)>,
+    current_macro: Option<(MacroPtr<'gc>, Option<usize>, StackValue<'gc>)>,
+    current_lambda: Option<(LambdaCall<'gc>, LambdaPtr<'gc>, Scope<'gc>)>,
     continuation: VecDeque<ContinuationItem<'gc>>,
     execution: Option<ContinuationItem<'gc>>,
-    // macros use this to pass arguments
-    bottom: Option<usize>,
 
+    // !!!! FIXME IMPORTANT split the macro stack from the stack in general
+    // so that macros don't confuse arguments
+    // also, do macro checks almost like lambdas, so that macros can
+    // also evaluate code!!!
     pub stack: Vec<StackValue<'gc>>,
+    // macros use this to pass arguments (remove this)
+    bottom: Option<usize>,
 
     root_scope: Scope<'gc>,
     scope_stack: Vec<Scope<'gc>>,
@@ -311,7 +272,8 @@ pub enum ContinuationItem<'gc> {
     /// call a function. this should be a tail call if there
     /// are no instructions after this
     Call(usize),
-    RestoreEnv(EnvironmentPtr<'gc>),
+    PushScope(EnvironmentPtr<'gc>, Box<str>),
+    BashEnv(EnvironmentPtr<'gc>, Box<str>),
     PopScope,
 }
 
@@ -368,9 +330,9 @@ enum LambdaCallReturn<'gc> {
     /// Suspend the call to this lambda
     Suspend,
     /// Suspend the call to this lambda, executing the given code in a new frame
-    Call(StackValue<'gc>),
+    Call(StackValue<'gc>, Option<EnvironmentPtr<'gc>>),
     /// Execute the given code on this frame
-    TailCall(StackValue<'gc>),
+    TailCall(StackValue<'gc>, Option<EnvironmentPtr<'gc>>),
     /// Lambda error
     Error(LambdaExecError<'gc>),
 }
@@ -429,12 +391,12 @@ impl<'gc> TreewalkExecutor<'gc> {
     /// Access to the current lambda call (if any)
     #[inline]
     pub fn lambda_call(&self) -> Option<&LambdaCall<'gc>> {
-        self.current_lambda.as_ref().map(|(call, _)| call)
+        self.current_lambda.as_ref().map(|(call, _, _)| call)
     }
 
     /// Access to the current macro (if any)
     #[inline]
-    pub fn macro_call(&self) -> Option<(MacroPtr<'gc>, Option<usize>)> {
+    pub fn macro_call(&self) -> Option<(MacroPtr<'gc>, Option<usize>, StackValue<'gc>)> {
         self.current_macro
     }
 
@@ -529,10 +491,15 @@ impl<'gc> TreewalkExecutor<'gc> {
         fuel.consume(FuelCosts::CALL_COST);
         drop(lambda_access);
 
+        // Create a new scope for the lambda
+        self.push_scope(ctx.mutation, "lambda call", None, None);
         let ret = self.call_lambda(lambda, ctx, &mut call, fuel, self.scope().error);
-        let should_suspend = self.handle_lambda_return(ret, ctx);
+        let Some(scope) = self.scope_stack.pop() else {
+            unreachable!("lambdas can't bash scope stack");
+        };
+        let should_suspend = self.handle_lambda_return(lambda, ret, ctx);
         if should_suspend {
-            self.current_lambda = Some((call, lambda));
+            self.current_lambda = Some((call, lambda, scope));
         }
         should_suspend
     }
@@ -650,9 +617,15 @@ impl<'gc> TreewalkExecutor<'gc> {
     }
 
     /// Returns true if the macro want to resuspend execution
-    fn call_macro(&mut self, mcr: MacroPtr<'gc>, ctx: &Context<'gc>, fuel: &mut Fuel) -> bool {
+    fn call_macro(
+        &mut self,
+        mcr: MacroPtr<'gc>,
+        this: StackValue<'gc>,
+        ctx: &Context<'gc>,
+        fuel: &mut Fuel,
+    ) -> bool {
         let mut macro_access = mcr.borrow_mut(ctx.mutation);
-        match macro_access.rewrite(ctx, self, fuel) {
+        match macro_access.rewrite(this, ctx, self, fuel) {
             Ok(res) => match res {
                 MacroReturn::Waiting => true,
                 MacroReturn::Return { inst } => {
@@ -696,11 +669,11 @@ impl<'gc> TreewalkExecutor<'gc> {
             Ok(ret) => match ret {
                 ProcedureReturn::Return(ret) => LambdaCallReturn::Result(ret),
                 ProcedureReturn::Suspend => LambdaCallReturn::Suspend,
-                ProcedureReturn::Call { code, is_tail } => {
+                ProcedureReturn::Call { code, is_tail, env } => {
                     if is_tail {
-                        LambdaCallReturn::TailCall(code)
+                        LambdaCallReturn::TailCall(code, env)
                     } else {
-                        LambdaCallReturn::Call(code)
+                        LambdaCallReturn::Call(code, env)
                     }
                 }
             },
@@ -735,7 +708,12 @@ impl<'gc> TreewalkExecutor<'gc> {
     }
 
     #[must_use]
-    fn handle_lambda_return(&mut self, ret: LambdaCallReturn<'gc>, ctx: &Context<'gc>) -> bool {
+    fn handle_lambda_return(
+        &mut self,
+        ptr: LambdaPtr<'gc>,
+        ret: LambdaCallReturn<'gc>,
+        ctx: &Context<'gc>,
+    ) -> bool {
         match ret {
             LambdaCallReturn::Result(ret) => {
                 self.stack.push(ret);
@@ -745,7 +723,7 @@ impl<'gc> TreewalkExecutor<'gc> {
                 false
             }
             LambdaCallReturn::Suspend => true,
-            LambdaCallReturn::Call(value) => {
+            LambdaCallReturn::Call(value, env) => {
                 // Suspend the lambda and create new scope
                 let code = match (ctx.mutation, value).try_into() {
                     Ok(code) => code,
@@ -756,12 +734,27 @@ impl<'gc> TreewalkExecutor<'gc> {
                     }
                 };
 
-                dbg!(&mut self.continuation).push_back(ContinuationItem::Instruction(code));
+                let instructions: &[_] = if let Some(env) = env {
+                    &[
+                        ContinuationItem::PushScope(
+                            env,
+                            Box::from(format!("<lambda {ptr:p}>").as_str()),
+                        ),
+                        ContinuationItem::Instruction(code),
+                        ContinuationItem::PopScope,
+                    ]
+                } else {
+                    &[ContinuationItem::Instruction(code)]
+                };
+
+                for inst in instructions.iter().cloned() {
+                    self.continuation.push_front(inst);
+                }
 
                 // suspend the lambda too
                 true
             }
-            LambdaCallReturn::TailCall(value) => {
+            LambdaCallReturn::TailCall(value, env) => {
                 // Bash the current scope, replacing it with the given code
                 let code: VirtualInstruction = match (ctx.mutation, value).try_into() {
                     Ok(code) => code,
@@ -782,8 +775,12 @@ impl<'gc> TreewalkExecutor<'gc> {
                         .map(|ci| match ci {
                             ContinuationItem::Call(args) => format!("<call {args}>"),
                             ContinuationItem::PopScope => "<pop>".to_string(),
+                            ContinuationItem::PushScope(env, lbl) =>
+                                format!("<push {env:p} ({lbl})>",),
                             ContinuationItem::Rewrite(_) => "<rewrite>".to_string(),
-                            ContinuationItem::RestoreEnv(env) => format!("<restore {env:p}>"),
+                            ContinuationItem::BashEnv(env, lbl) =>
+                                format!("<bash {env:p} ({lbl})>"),
+                            // ContinuationItem::BashEnv(env) => format!("<restore {env:p}>"),
                             ContinuationItem::Instruction(i) => {
                                 format!(
                                     "{}",
@@ -808,14 +805,22 @@ impl<'gc> TreewalkExecutor<'gc> {
                 // ];
 
                 //((lambda () (define z 3) z ))
-                self.continuation = self
-                    .continuation
-                    .drain(..)
-                    .chain([
+
+                let instructions: &[_] = if let Some(env) = env {
+                    &[
+                        ContinuationItem::BashEnv(
+                            env,
+                            Box::from(format!("<lambda {ptr:p}>").as_str()),
+                        ),
                         ContinuationItem::Instruction(code),
-                        // ContinuationItem::PopScope,
-                    ])
-                    .collect();
+                    ]
+                } else {
+                    &[ContinuationItem::Instruction(code)]
+                };
+
+                for inst in instructions.iter().cloned() {
+                    self.continuation.push_front(inst);
+                }
 
                 // we don't hold the lambda anymore, so this
                 // will *not* continue the lambda when used
@@ -904,8 +909,8 @@ impl<'gc> TreewalkExecutor<'gc> {
                     self.raise_error(err_ptr, ctx);
                 }
             },
-            // a define is only ready if there are no pending evaluations
             MacroInstruction::Define { name } => {
+                dbg!(name);
                 // define a name in the environment by popping the top of the stack
                 let Some(value) = self.stack.pop() else {
                     let err_ptr = self.build_error(ctx.mutation, SchemeErrorType::NullDefine);
@@ -958,9 +963,89 @@ impl<'gc> TreewalkExecutor<'gc> {
         }
     }
 
-    /// Returns Some(true) if macro found
-    /// Some(false) no macro found
-    /// None cannot execute this list
+    // /// Returns Some(true) if macro found
+    // /// Some(false) no macro found
+    // /// None cannot execute this list
+    // fn check_list_for_macro(
+    //     &mut self,
+    //     ctx: &Context<'gc>,
+    //     fuel: &mut Fuel,
+    //     exec: &VirtualInstruction<'gc>,
+    //     head: &VirtualInstruction<'gc>,
+    //     body: &[VirtualInstruction<'gc>],
+    //     dot: Option<&VirtualInstruction<'gc>>,
+    // ) -> Option<bool> {
+    //     // for lists, we only allow the head to be a symbol
+    //     // or list. if it isn't either, this is not executable
+    //     if dot.is_some() || !exec.payload.list_executable() {
+    //         self.raise_error(
+    //             self.build_error(ctx.mutation, SchemeErrorType::BadList),
+    //             ctx,
+    //         );
+    //         return None;
+    //     }
+
+    //     if head
+    //         .payload
+    //         .as_symbol()
+    //         .is_some_and(|sym| Self::is_reserved_form(ctx, sym))
+    //     {
+    //         let form_sym = head.payload.as_symbol().unwrap();
+    //         // handle the reserved forms (quoting)
+    //         if body.len() == 1 {
+    //             self.handle_reserved_form(ctx, form_sym, body[0].clone());
+    //         } else {
+    //             // all reserved forms have exactly 1 body, so this is a macro err
+    //             self.raise_error(
+    //                 self.build_error(
+    //                     ctx.mutation,
+    //                     SchemeErrorType::MacroForm(anyhow::anyhow!(
+    //                         "`{}` needs exactly 1 argument (found {})",
+    //                         ctx.interner.resolve(&form_sym.0),
+    //                         body.len()
+    //                     )),
+    //                 ),
+    //                 ctx,
+    //             );
+    //         }
+    //         return Some(true);
+    //     } else if let Some(mcr) = head
+    //         .payload
+    //         .as_symbol()
+    //         .and_then(|sym| /*self.current_env().borrow().get_macro(sym)*/)
+    //         .map(|mcrb| mcrb.get())
+    //     {
+    //         let args: Vec<_> = body
+    //             .iter()
+    //             .cloned()
+    //             .map(|vi| vi.payload.datum().clone())
+    //             .collect();
+
+    //         if let Err(err) = mcr.borrow().is_properly_formed(&args) {
+    //             self.raise_error(
+    //                 self.build_error(ctx.mutation, SchemeErrorType::MacroForm(err)),
+    //                 ctx,
+    //             );
+    //             return Some(true);
+    //         }
+
+    //         let macro_bottom = Some(self.stack.len());
+    //         self.bottom = macro_bottom;
+    //         // push values to stack *as-is*
+    //         self.stack
+    //             .extend(body.iter().cloned().map(|vi| vi.into_value(ctx)));
+
+    //         let this = exec.clone().into_value(ctx);
+    //         if self.call_macro(mcr, this, ctx, fuel) {
+    //             self.current_macro = Some((mcr, macro_bottom, this));
+    //         }
+    //         self.bottom = None;
+    //         return Some(true);
+    //     }
+
+    //     Some(false)
+    // }
+
     fn check_list_for_macro(
         &mut self,
         ctx: &Context<'gc>,
@@ -970,74 +1055,7 @@ impl<'gc> TreewalkExecutor<'gc> {
         body: &[VirtualInstruction<'gc>],
         dot: Option<&VirtualInstruction<'gc>>,
     ) -> Option<bool> {
-        // for lists, we only allow the head to be a symbol
-        // or list. if it isn't either, this is not executable
-        if dot.is_some() || !exec.payload.list_executable() {
-            self.raise_error(
-                self.build_error(ctx.mutation, SchemeErrorType::BadList),
-                ctx,
-            );
-            return None;
-        }
-
-        if head
-            .payload
-            .as_symbol()
-            .is_some_and(|sym| Self::is_reserved_form(ctx, sym))
-        {
-            let form_sym = head.payload.as_symbol().unwrap();
-            // handle the reserved forms (quoting)
-            if body.len() == 1 {
-                self.handle_reserved_form(ctx, form_sym, body[0].clone());
-            } else {
-                // all reserved forms have exactly 1 body, so this is a macro err
-                self.raise_error(
-                    self.build_error(
-                        ctx.mutation,
-                        SchemeErrorType::MacroForm(anyhow::anyhow!(
-                            "`{}` needs exactly 1 argument (found {})",
-                            ctx.interner.resolve(&form_sym.0),
-                            body.len()
-                        )),
-                    ),
-                    ctx,
-                );
-            }
-            return Some(true);
-        } else if let Some(mcr) = head
-            .payload
-            .as_symbol()
-            .and_then(|sym| self.current_env().borrow().get_macro(sym))
-            .map(|mcrb| mcrb.get())
-        {
-            let args: Vec<_> = body
-                .iter()
-                .cloned()
-                .map(|vi| vi.payload.datum().clone())
-                .collect();
-
-            if let Err(err) = mcr.borrow().is_properly_formed(&args) {
-                self.raise_error(
-                    self.build_error(ctx.mutation, SchemeErrorType::MacroForm(err)),
-                    ctx,
-                );
-                return Some(true);
-            }
-
-            let macro_bottom = Some(self.stack.len());
-            self.bottom = macro_bottom;
-            // push values to stack *as-is*
-            self.stack
-                .extend(body.iter().cloned().map(|vi| vi.into_value(ctx)));
-
-            if self.call_macro(mcr, ctx, fuel) {
-                self.current_macro = Some((mcr, macro_bottom));
-            }
-            self.bottom = None;
-            return Some(true);
-        }
-
-        Some(false)
+        todo!()
     }
 
     pub fn step(&mut self, ctx: &Context<'gc>, fuel: &mut Fuel) -> Result<(), StepError> {
@@ -1050,14 +1068,14 @@ impl<'gc> TreewalkExecutor<'gc> {
         fuel.clear_interrupt();
 
         while fuel.should_continue() {
-            if let Some((mcr, bottom)) = self.current_macro.take() {
+            if let Some((mcr, bottom, this)) = self.current_macro.take() {
                 assert!(self.bottom.is_none());
                 self.bottom = bottom;
-                if self.call_macro(mcr, ctx, fuel) {
+                if self.call_macro(mcr, this, ctx, fuel) {
                     // resuspend execution, and disrupt fuel,
                     // because we can't continue execution until
                     // this finishes (returns false)
-                    self.current_macro = Some((mcr, bottom));
+                    self.current_macro = Some((mcr, bottom, this));
                     self.bottom = None;
                     fuel.interrupt();
                     continue;
@@ -1067,10 +1085,14 @@ impl<'gc> TreewalkExecutor<'gc> {
 
             if self.execution.is_none() {
                 // If the scope is processing a lambda, continue to do so
-                if let Some((mut call, lambda)) = self.current_lambda.take() {
+                if let Some((mut call, lambda, scope)) = self.current_lambda.take() {
+                    self.scope_stack.push(scope);
                     let ret = self.call_lambda(lambda, ctx, &mut call, fuel, self.scope().error);
-                    if self.handle_lambda_return(ret, ctx) {
-                        self.current_lambda = Some((call, lambda));
+                    let Some(scope) = self.scope_stack.pop() else {
+                        unreachable!("lambdas are not allowed to bash the scope stack");
+                    };
+                    if self.handle_lambda_return(lambda, ret, ctx) {
+                        self.current_lambda = Some((call, lambda, scope));
                         continue;
                     }
                 }
@@ -1086,7 +1108,7 @@ impl<'gc> TreewalkExecutor<'gc> {
 
             self.next_inst();
 
-            dbg!(&self.execution);
+            eprintln!("{} >>> {:?}", self.scope_stack.len(), &self.execution);
 
             // if we aren't doing anything, figure out what to do
             // if self.scope().execution.is_none() {
@@ -1117,17 +1139,13 @@ impl<'gc> TreewalkExecutor<'gc> {
                 Some(ContinuationItem::PopScope) => {
                     self.pop_scope();
                 }
-                Some(ContinuationItem::RestoreEnv(env)) => {
-                    // panic!("{}", self.scope_stack.len());
-                    // if self.pop_scope().is_none() {
-                    self.scope_mut().environment = env;
-                    // }
+                Some(ContinuationItem::PushScope(env, label)) => {
+                    self.push_scope_with_env(ctx.mutation, label, env, None, None);
                 }
-                // Some(ContinuationItem::RestoreEnv) => {
-                //     if let Some(err_ptr) = self.pop_scope().and_then(|done| done.error) {
-                //         self.raise_error(err_ptr, ctx)
-                //     }
-                // }
+                Some(ContinuationItem::BashEnv(env, label)) => {
+                    self.scope_mut().environment = env;
+                    self.scope_mut().label = Some(label);
+                }
                 Some(ContinuationItem::Instruction(exec)) => {
                     *exec.touch_count.borrow_mut(ctx.mutation) += 1;
                     match &exec.payload {

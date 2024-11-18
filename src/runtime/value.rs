@@ -6,7 +6,8 @@ use std::{cell::RefCell, rc::Rc};
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 use lasso::{IntoResolver, RodeoResolver};
 
-use crate::{environment::EnvironmentPtr, SchemeNumber};
+use crate::environment::StackEnvironmentPtr;
+use crate::SchemeNumber;
 
 use super::{
     error::SchemeErrorPtr,
@@ -72,7 +73,7 @@ pub enum Value<'gc> {
     Cons(ConsCell<'gc>),
     // Represents something runnable
     // Procedure(Gc<'gc, Procedure>),
-    Environment(EnvironmentPtr<'gc>),
+    Environment(StackEnvironmentPtr<'gc>),
     UserStruct(UserStruct<'gc>),
     // QUESTION Move from ErrorBox to an Any based pointer that
     // can specify predicate type (read-error?, file-error?, etc.)
@@ -419,7 +420,7 @@ pub trait ValueVisitor<'gc> {
         _ = vec;
     }
 
-    fn visit_environment(&mut self, env: EnvironmentPtr<'gc>, value: ValuePtr<'gc>) {
+    fn visit_environment(&mut self, env: StackEnvironmentPtr<'gc>, value: ValuePtr<'gc>) {
         let _ = env;
         let _ = value;
     }

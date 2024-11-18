@@ -398,12 +398,12 @@ fn repl() -> anyhow::Result<()> {
             .unwrap();
             env.define(mc, mul_sym, StackValue::external(mc, mul_lambda), false)
                 .unwrap();
-            env.define_macro(mc, define_sym, scheme::base::macros::Define)
-                .unwrap();
-            env.define_macro(mc, setbang_sym, scheme::base::macros::SetBang)
-                .unwrap();
-            env.define_macro(mc, lambda_sym, scheme::base::macros::Lambda)
-                .unwrap();
+            // env.define_macro(mc, define_sym, scheme::base::macros::Define)
+            //     .unwrap();
+            // env.define_macro(mc, setbang_sym, scheme::base::macros::SetBang)
+            //     .unwrap();
+            // env.define_macro(mc, lambda_sym, scheme::base::macros::Lambda)
+            //     .unwrap();
         });
         let mut fuel = Fuel::with(1);
         let mut running = true;
@@ -418,6 +418,7 @@ fn repl() -> anyhow::Result<()> {
             running = interp
                 .run(exec.clone(), |ctx, mut exec| {
                     exec.step(&ctx, &mut fuel).unwrap();
+
                     println!("== STACK CHECK fuel: {} ==", fuel.remaining());
                     for (idx, ptr) in exec.full_stack().iter().enumerate() {
                         let tc = ptr.touch_count();
@@ -476,7 +477,24 @@ fn repl() -> anyhow::Result<()> {
                         metrics.total_allocation(),
                         metrics.allocation_debt()
                     );
-                    exec.can_continue()
+
+                    let can_continue = exec.can_continue();
+                    if !can_continue {
+                        println!("== FINAL STACK ==");
+                        for (idx, ptr) in exec.full_stack().iter().enumerate() {
+                            let tc = ptr.touch_count();
+                            let resolved = ptr
+                                .borrow()
+                                .resolve_into(ctx.interner.clone(), ctx.null_ptr);
+                            println!("- [{tc}] {idx}: {resolved}");
+                        }
+
+                        println!("== SYMBOLS ==");
+                        for (spur, sym) in ctx.interner.clone().into_iter() {
+                            println!("- {} => '{sym}", spur.into_inner());
+                        }
+                    }
+                    can_continue
                 })
                 .unwrap();
         }

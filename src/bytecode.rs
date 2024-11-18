@@ -4,7 +4,7 @@
 use core::fmt;
 use gc_arena::{Collect, Gc};
 
-use crate::{environment::EnvironmentPtr, treewalk::StackValue};
+use crate::{environment::StackEnvironmentPtr, treewalk::StackValue};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Bytecode {}
@@ -36,7 +36,7 @@ pub struct Chunk<'gc, const V: usize, const S: usize, const E: usize> {
     /// Number of symbols used by this chunk
     symbols_allocated: usize,
     /// environments this chunk references
-    envs: [Option<EnvironmentPtr<'gc>>; E],
+    envs: [Option<StackEnvironmentPtr<'gc>>; E],
     /// Number of environments used by this chunk
     envs_allocated: usize,
     #[collect(require_static)]

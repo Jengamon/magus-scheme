@@ -1,7 +1,7 @@
 use gc_arena::{unsize, Collect, Gc, Mutation, RefLock};
 
 use crate::{
-    environment::EnvironmentPtr,
+    environment::StackEnvironmentPtr,
     treewalk::{virtual_inst::VirtualInstructionDatum, Context, StackValue, TreewalkExecutor},
     Fuel,
 };
@@ -28,6 +28,7 @@ pub trait Macro<'gc>: Collect + core::fmt::Debug {
     /// by the inputs
     fn rewrite(
         &mut self,
+        this: StackValue<'gc>,
         ctx: &Context<'gc>,
         executor: &mut TreewalkExecutor<'gc>,
         fuel: &mut Fuel,
@@ -84,7 +85,7 @@ pub enum MacroInstruction<'gc> {
     // TODO don't use this, but instead see if we can simply have LetSyntax and LetRecSyntax
     // use an alternate version of evaluate that specifies macro pointers and names
     // along with the stack value to evaluate
-    SetEnvironment(EnvironmentPtr<'gc>),
+    SetEnvironment(StackEnvironmentPtr<'gc>),
     /// Pops the top of the stack, and `define`s the given name as that value
     Define {
         #[collect(require_static)]

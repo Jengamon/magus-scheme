@@ -2,7 +2,7 @@ use std::convert::Infallible;
 
 use gc_arena::{Gc, Mutation, RefLock};
 
-use crate::{environment::EnvironmentPtr, runtime::userstruct::UserStruct};
+use crate::{environment::StackEnvironmentPtr, runtime::userstruct::UserStruct};
 
 use super::{lambda::LambdaPtr, value::Value};
 use crate::runtime::lambda::Lambda;
@@ -100,7 +100,7 @@ impl_into_value!(simple i64 => Number);
 impl_into_value!(simple f64 => Inexact);
 impl_into_value!(simple bool => Bool);
 impl_into_value!(simple char => Char);
-impl_into_value!(simple EnvironmentPtr<'gc> => Environment);
+impl_into_value!(simple StackEnvironmentPtr<'gc> => Environment);
 impl_into_value!(simple LambdaPtr<'gc> => Lambda);
 impl<'gc> IntoValue<'gc> for String {
     fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {

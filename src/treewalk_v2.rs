@@ -637,6 +637,14 @@ impl<'gc> TreewalkExecutor<'gc> {
     }
 
     pub fn step(&mut self, ctx: &Context<'gc>, fuel: &mut Fuel) -> Result<(), StepError> {
+        if self.scope().is_none() {
+            unreachable!("empty scope stack")
+        } else if let Some(root_scope) = self.scope_stack.first() {
+            if root_scope.error.is_some() {
+                return Err(StepError);
+            }
+        }
+
         todo!()
     }
 }

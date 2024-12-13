@@ -6,7 +6,7 @@ use std::{
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 use lasso::Rodeo;
 
-use crate::{treewalk::stack_value::StackValue, value::Symbol};
+use crate::{value::StackValue, value::Symbol};
 
 // Big important typedef
 // pub type StackEnvironment<'gc> = Environment<'gc, StackValue<'gc>>;
@@ -41,7 +41,7 @@ create_environment_pair!(
 /// macro definitions, and up to 1 reference to a parent environment
 #[derive(Collect, Debug, Clone, Copy)]
 #[collect(no_drop)]
-pub struct Environment<'gc, V: Collect> {
+pub struct Environment<'gc, V: Collect<'gc>> {
     parent: Option<EnvironmentPtr<'gc, V>>,
     inner: Gc<'gc, RefLock<EnvironmentInner<'gc, V>>>,
     /// This will make all [`Self::define`]s fail as it makes the
@@ -66,7 +66,7 @@ pub enum RebindError {
     Frozen(#[from] FrozenError),
 }
 
-impl<'gc, V: Collect + Copy> Environment<'gc, V> {
+impl<'gc, V: Collect<'gc> + Copy> Environment<'gc, V> {
     pub fn rebind_binding(
         &mut self,
         mc: &Mutation<'gc>,
@@ -122,7 +122,7 @@ impl<'gc, V: Collect + Copy> Environment<'gc, V> {
     }
 }
 
-impl<'gc, V: Collect> Environment<'gc, V> {
+impl<'gc, V: Collect<'gc>> Environment<'gc, V> {
     pub fn new(mc: &Mutation<'gc>, parent: Option<EnvironmentPtr<'gc, V>>) -> Self {
         Self {
             parent,
@@ -145,7 +145,7 @@ impl<'gc, V: Collect> Environment<'gc, V> {
     ///
     /// Both `define` and `set!` are stopped by a shallow freeze, so it
     /// requires intentional manipulation on the Rust side in order to get through
-    /// this freeze (to make constant, use [`Self::deep_freeze`]).
+    /// this freeze (to stop even intentional manipulation, use [`Self::deep_freeze`]).
     #[inline]
     pub fn freeze(&mut self) {
         self.is_frozen = true;
@@ -214,7 +214,7 @@ impl<'gc, V: Collect> Environment<'gc, V> {
 
 #[derive(Collect, Debug, Clone)]
 #[collect(no_drop)]
-struct EnvironmentInner<'gc, V: Collect> {
+struct EnvironmentInner<'gc, V: Collect<'gc>> {
     pub values: HashMap<Symbol, GeneralBinding<'gc, V>>,
 }
 
@@ -232,12 +232,12 @@ pub struct GeneralBinding<'gc, P: ?Sized> {
     is_frozen: bool,
 }
 
-impl<'gc, P: ?Sized> Clone for GeneralBinding<'gc, P> {
+impl<P: ?Sized> Clone for GeneralBinding<'_, P> {
     fn clone(&self) -> Self {
         *self
     }
 }
-impl<'gc, P: ?Sized> Copy for GeneralBinding<'gc, P> {}
+impl<P: ?Sized> Copy for GeneralBinding<'_, P> {}
 
 impl<'gc, P: ?Sized> GeneralBinding<'gc, P> {
     pub fn get(&self) -> Gc<'gc, RefLock<P>> {
@@ -248,10 +248,7 @@ impl<'gc, P: ?Sized> GeneralBinding<'gc, P> {
         func(self.value.borrow())
     }
 
-    /// Freeze this copy of a binding
-    ///
-    /// Note: you have to rebind or define as this new binding
-    /// in order for other users to be frozen.
+    /// Freeze this binding
     pub fn freeze(&mut self) {
         self.is_frozen = true;
     }

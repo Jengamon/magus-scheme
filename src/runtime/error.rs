@@ -90,7 +90,7 @@ impl<'gc> SchemeError<'gc> {
     }
 }
 
-impl<'gc> fmt::Debug for SchemeError<'gc> {
+impl fmt::Debug for SchemeError<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SchemeError")
             .field("backtrace", &self.backtrace)
@@ -105,7 +105,7 @@ pub struct DisplaySchemeError<'s, 'gc> {
 }
 
 struct SourceDisplay<'a>(&'a str);
-impl<'a> fmt::Display for SourceDisplay<'a> {
+impl fmt::Display for SourceDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut prev_is_space = false;
         for c in self.0.chars() {
@@ -136,7 +136,7 @@ impl<'a> fmt::Display for SourceDisplay<'a> {
     }
 }
 
-impl<'s, 'gc> fmt::Display for DisplaySchemeError<'s, 'gc> {
+impl<'gc> fmt::Display for DisplaySchemeError<'_, 'gc> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let error_count = match &self.error.error_type {
             SchemeErrorType::Compound(c) => c.len(),

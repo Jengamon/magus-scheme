@@ -1,4 +1,6 @@
 //! Representation of Scheme values
+mod stack_value;
+
 use core::fmt;
 use std::string::String as StdString;
 use std::{cell::RefCell, rc::Rc};
@@ -11,12 +13,14 @@ use crate::SchemeNumber;
 
 use super::{
     error::SchemeErrorPtr,
-    lambda::LambdaPtr,
+    // lambda::LambdaPtr,
     port::{InputPort, OutputPort},
     userstruct::UserStruct,
 };
 
 pub type ValuePtr<'gc> = Gc<'gc, RefLock<Value<'gc>>>;
+
+pub use stack_value::{SourceData, StackValue};
 
 #[derive(Collect, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[collect(require_static)]
@@ -85,14 +89,15 @@ pub enum Value<'gc> {
     Transformer(RuntimeTransformer<'gc>),
     // Uniquely our lambda's are typed, it's just that (for now)
     // Scheme code simply marks all parameters as untyped
-    Lambda(LambdaPtr<'gc>),
+    // Lambda(LambdaPtr<'gc>),
+    Lambda(()),
     // A Scheme-side error
     Error(SchemeErrorPtr<'gc>),
 }
 
 // implements logic behind eqv?
 // where as ValuePtr::eq implements eq? logic
-impl<'gc> PartialEq for Value<'gc> {
+impl PartialEq for Value<'_> {
     fn eq(&self, other: &Self) -> bool {
         match self {
             Value::Undefined => matches!(other, Value::Undefined),
@@ -196,12 +201,12 @@ impl<'gc> Value<'gc> {
         }
     }
 
-    pub fn as_lambda(&self) -> Option<LambdaPtr<'gc>> {
-        match self {
-            Self::Lambda(lam) => Some(*lam),
-            _ => None,
-        }
-    }
+    // pub fn as_lambda(&self) -> Option<LambdaPtr<'gc>> {
+    //     match self {
+    //         Self::Lambda(lam) => Some(*lam),
+    //         _ => None,
+    //     }
+    // }
 
     pub fn as_symbol(&self) -> Option<Symbol> {
         match self {
@@ -220,7 +225,7 @@ pub struct ResolvedValue<'gc, K: lasso::Key> {
     resolver: Rc<RodeoResolver<K>>,
 }
 
-impl<'gc, K: lasso::Key> fmt::Debug for ResolvedValue<'gc, K> {
+impl<K: lasso::Key> fmt::Debug for ResolvedValue<'_, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ResolvedValue")
             .field("value", &self.value)
@@ -235,7 +240,7 @@ struct ConsPrinter<'a, 'gc, K: lasso::Key> {
     encountered: Rc<RefCell<Vec<Value<'gc>>>>,
 }
 
-impl<'a, 'gc, K: lasso::Key> fmt::Display for ConsPrinter<'a, 'gc, K> {
+impl<K: lasso::Key> fmt::Display for ConsPrinter<'_, '_, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // recurse into the value, keeping track of encountered cons cells
         // so that we don't recurse into them
@@ -267,7 +272,7 @@ impl<'a, 'gc, K: lasso::Key> fmt::Display for ConsPrinter<'a, 'gc, K> {
     }
 }
 
-impl<'gc> fmt::Display for ResolvedValue<'gc, lasso::Spur> {
+impl fmt::Display for ResolvedValue<'_, lasso::Spur> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.value {
             Value::Undefined => write!(f, "#<undef>"),
@@ -325,7 +330,8 @@ impl<'gc> fmt::Display for ResolvedValue<'gc, lasso::Spur> {
                 write!(f, "<{label} {:p}>", &self.value)
             }
             Value::Transformer(_) => todo!(),
-            Value::Lambda(lambda) => write!(f, "<lambda {:p}>", *lambda.borrow()),
+            // Value::Lambda(lambda) => write!(f, "<lambda {:p}>", *lambda.borrow()),
+            Value::Lambda(()) => write!(f, "<lambda TODO>"),
             Value::Error(_) => todo!(),
         }
     }
@@ -437,7 +443,7 @@ pub enum ValueConvertError {
 #[derive(Collect, Clone, Copy)]
 #[collect(no_drop)]
 pub struct RuntimeTransformer<'gc>(pub Gc<'gc, ()>);
-impl<'gc> core::fmt::Debug for RuntimeTransformer<'gc> {
+impl core::fmt::Debug for RuntimeTransformer<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<transformer {:p}>", self.0)
     }

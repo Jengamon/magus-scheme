@@ -69,7 +69,7 @@ struct Value<M, V> {
     value: V,
 }
 
-impl<'gc, M> fmt::Debug for Any<'gc, M>
+impl<M> fmt::Debug for Any<'_, M>
 where
     M: fmt::Debug,
 {
@@ -82,23 +82,23 @@ where
     }
 }
 
-impl<'gc, M> PartialEq for Any<'gc, M> {
+impl<M> PartialEq for Any<'_, M> {
     fn eq(&self, other: &Self) -> bool {
         Gc::ptr_eq(self.0, other.0)
     }
 }
 
-impl<'gc, M> Eq for Any<'gc, M> {}
+impl<M> Eq for Any<'_, M> {}
 
-impl<'gc, M> Hash for Any<'gc, M> {
+impl<M> Hash for Any<'_, M> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         Gc::as_ptr(self.0).hash(state)
     }
 }
 
-impl<'gc, M> Copy for Any<'gc, M> {}
+impl<M> Copy for Any<'_, M> {}
 
-impl<'gc, M> Clone for Any<'gc, M> {
+impl<M> Clone for Any<'_, M> {
     fn clone(&self) -> Self {
         *self
     }
@@ -107,18 +107,18 @@ impl<'gc, M> Clone for Any<'gc, M> {
 impl<'gc, M> Any<'gc, M> {
     pub fn new<R>(mc: &Mutation<'gc>, data: Root<'gc, R>) -> Self
     where
-        M: Collect + Default,
+        M: Collect<'gc> + Default,
         R: for<'a> Rootable<'a> + 'static,
-        Root<'gc, R>: Sized + Collect,
+        Root<'gc, R>: Sized + Collect<'gc>,
     {
         Self::with_metadata::<R>(mc, M::default(), data)
     }
 
     pub fn with_metadata<R>(mc: &Mutation<'gc>, metadata: M, data: Root<'gc, R>) -> Self
     where
-        M: Collect,
+        M: Collect<'gc>,
         R: for<'a> Rootable<'a> + 'static,
-        Root<'gc, R>: Sized + Collect,
+        Root<'gc, R>: Sized + Collect<'gc>,
     {
         let val = Gc::new(
             mc,

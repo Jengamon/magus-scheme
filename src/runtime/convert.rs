@@ -4,8 +4,11 @@ use gc_arena::{Gc, Mutation, RefLock};
 
 use crate::{environment::StackEnvironmentPtr, runtime::userstruct::UserStruct};
 
-use super::{lambda::LambdaPtr, value::Value};
-use crate::runtime::lambda::Lambda;
+use super::{
+    // lambda::LambdaPtr,
+    value::Value,
+};
+// use crate::runtime::lambda::Lambda;
 
 pub trait FromValue<'gc> {
     fn from_value(value: Value<'gc>) -> Option<Self>
@@ -80,11 +83,11 @@ macro_rules! impl_into_value {
         }
     };
 }
-impl<'gc> IntoValue<'gc> for Lambda<'gc> {
-    fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {
-        Value::Lambda(Gc::new(mc, RefLock::new(self)))
-    }
-}
+// impl<'gc> IntoValue<'gc> for Lambda<'gc> {
+//     fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {
+//         Value::Lambda(Gc::new(mc, RefLock::new(self)))
+//     }
+// }
 impl<'gc, T: UserType + 'static> IntoValue<'gc> for T {
     fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {
         Value::UserStruct(UserStruct::new_static(mc, self))
@@ -101,7 +104,7 @@ impl_into_value!(simple f64 => Inexact);
 impl_into_value!(simple bool => Bool);
 impl_into_value!(simple char => Char);
 impl_into_value!(simple StackEnvironmentPtr<'gc> => Environment);
-impl_into_value!(simple LambdaPtr<'gc> => Lambda);
+// impl_into_value!(simple LambdaPtr<'gc> => Lambda);
 impl<'gc> IntoValue<'gc> for String {
     fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {
         Value::String(Gc::new(mc, RefLock::new(self)))

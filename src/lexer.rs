@@ -258,6 +258,8 @@ fn read_number(
         unreachable!("ICE lexer error: mismatched radix {flags:?} radix {radix}");
     }
 
+    // FIXME right now, the lex for things like "3.01" is incorrect b/c it doesn't account for the zeroes at the start.
+    // fix that.
     fn read_number_part(
         iter: &mut std::iter::Peekable<impl Iterator<Item = char>>,
         radix: u32,
@@ -918,7 +920,7 @@ pub struct Lexer<'src> {
     nested_comment_level: usize,
 }
 
-impl<'src> Iterator for Lexer<'src> {
+impl Iterator for Lexer<'_> {
     type Item = (Result<Token, LexerError>, Span);
 
     fn next(&mut self) -> Option<Self::Item> {

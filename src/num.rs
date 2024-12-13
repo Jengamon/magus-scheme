@@ -4,8 +4,6 @@ use core::fmt;
 
 use arbitrary::Arbitrary;
 
-// Does *not* implement Display b/c these structures are parse/lex structures,
-// not runtime ones.
 #[derive(Debug, PartialEq, Clone, Copy, Arbitrary)]
 pub enum SchemeNumber {
     Exact(ExactReal),

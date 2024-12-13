@@ -4,10 +4,45 @@
 use core::fmt;
 use gc_arena::{Collect, Gc};
 
-use crate::{environment::StackEnvironmentPtr, treewalk::StackValue};
+use crate::{environment::StackEnvironmentPtr, value::StackValue};
 
+/*
+compiled form is at its root primitive forms:
+<literal>
+<variable ref>
+<procedure (function/macro) call>
+define
+lambda
+if
+set!
+(when/if supported) include, include-ci
+
+then provide Rust-side impls for the rest of the standard library (and/or mix it with
+Scheme-impls)
+*/
 #[derive(Debug, Clone, Copy)]
-pub enum Bytecode {}
+pub enum Bytecode {
+    // Bytecode is represented in CPS, so there is only 1 CALL command, but
+    // it takes both a number of arguments off the stack *and* a register
+    // (where the register is the continuation)
+    Call {
+        /// This is the register referring to the function to be called
+        function: u8,
+        /// number of arguments to pass into this
+        arg_count: usize,
+        /// Register 0 is always the continuation of the current chunk, so
+        /// when this is 0, this is always a tail-call
+        continuation: u8,
+    },
+    // This instructs the interpreter to execute a macro in the current environment
+    // with the given symbol
+    Syntax {
+        /// index into symbols array
+        symbol: usize,
+        /// number of elements pushed to stack for eval
+        arg_count: usize,
+    },
+}
 
 /// A chunk of bytecode, with necessary constants
 /// and references pre-evaluated
@@ -20,11 +55,10 @@ pub struct Chunk<'gc, const V: usize, const S: usize, const E: usize> {
     /// registers used by this chunk
     ///
     /// The code is register-based, with up to 255 registers
-    /// Register 0 is always allowed and is the return value of the block as
-    /// a whole
+    /// Register 0 is always allowed represents the continuation of
+    /// the lambda chunk.
     ///
     /// The stack is filled with undefined values initially.
-    /// Code ending while register 0 is undefined is an error.
     registers_allocated: u8,
     /// values this chunk references
     values: [StackValue<'gc>; V],
@@ -32,11 +66,11 @@ pub struct Chunk<'gc, const V: usize, const S: usize, const E: usize> {
     values_allocated: usize,
     /// symbols this chunk references
     #[collect(require_static)]
-    symbols: [Option<lasso::Spur>; S],
+    symbols: [lasso::Spur; S],
     /// Number of symbols used by this chunk
     symbols_allocated: usize,
     /// environments this chunk references
-    envs: [Option<StackEnvironmentPtr<'gc>>; E],
+    envs: [StackEnvironmentPtr<'gc>; E],
     /// Number of environments used by this chunk
     envs_allocated: usize,
     #[collect(require_static)]
@@ -45,7 +79,7 @@ pub struct Chunk<'gc, const V: usize, const S: usize, const E: usize> {
 pub type ChunkPtr<'gc, const V: usize, const N: usize, const E: usize> =
     Gc<'gc, Chunk<'gc, V, N, E>>;
 
-impl<'gc, const V: usize, const N: usize, const E: usize> fmt::Debug for Chunk<'gc, V, N, E> {
+impl<const V: usize, const N: usize, const E: usize> fmt::Debug for Chunk<'_, V, N, E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // custom debug so that we can skip printing the unused values
         f.debug_struct("Chunk")

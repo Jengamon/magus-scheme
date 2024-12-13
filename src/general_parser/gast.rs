@@ -305,13 +305,13 @@ pub trait DatumVisitor {
 }
 
 /// Root GAst type for a file
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Module(MagusSyntaxNode);
 simple_gast!(node Module from ROOT);
 contains!(trivia Module);
 contains!(datum Module);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NestedComment(MagusSyntaxNode);
 impl NestedComment {
     // does this represent a valid nested comment
@@ -325,18 +325,18 @@ impl NestedComment {
     }
 }
 simple_gast!(node NestedComment from NCOMMENT);
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OneLineComment(MagusSyntaxToken);
 impl OneLineComment {}
 simple_gast!(token OneLineComment from OLCOMMENT);
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DatumComment(MagusSyntaxNode);
 impl DatumComment {}
 simple_gast!(node DatumComment from DCOMMENT);
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InlineWhitespace(MagusSyntaxToken);
 simple_gast!(token InlineWhitespace from WHITESPACE);
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LineEnding(MagusSyntaxToken);
 simple_gast!(token LineEnding from LINEEND);
 pub enum Whitespace {
@@ -368,7 +368,7 @@ impl TryFrom<MagusSyntaxToken> for Whitespace {
         }
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Comment {
     OneLine(OneLineComment),
     Datum(DatumComment),
@@ -431,7 +431,7 @@ impl DatumVisitor for ContainedTriggerVisitor {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LabeledDatum(MagusSyntaxNode);
 impl LabeledDatum {
     pub fn label(&self) -> Option<usize> {
@@ -475,15 +475,24 @@ pub enum AbbreviationKind {
 }
 impl fmt::Display for AbbreviationKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AbbreviationKind::Quote => write!(f, "quote"),
-            AbbreviationKind::Quasiquote => write!(f, "quasiquote"),
-            AbbreviationKind::Unquote => write!(f, "unquote"),
-            AbbreviationKind::UnquoteSplicing => write!(f, "unquote-splicing"),
+        if f.alternate() {
+            match self {
+                AbbreviationKind::Quote => write!(f, "quote"),
+                AbbreviationKind::Quasiquote => write!(f, "quasiquote"),
+                AbbreviationKind::Unquote => write!(f, "unquote"),
+                AbbreviationKind::UnquoteSplicing => write!(f, "unquote-splicing"),
+            }
+        } else {
+            match self {
+                AbbreviationKind::Quote => write!(f, "'"),
+                AbbreviationKind::Quasiquote => write!(f, "`"),
+                AbbreviationKind::Unquote => write!(f, ","),
+                AbbreviationKind::UnquoteSplicing => write!(f, ",@"),
+            }
         }
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Abbreviation(MagusSyntaxNode);
 impl Abbreviation {
     pub fn kind(&self) -> Option<AbbreviationKind> {
@@ -531,7 +540,7 @@ pub enum DatumKind {
     LabelRef,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Datum(MagusSyntaxNode);
 impl Datum {
     // If this says `Some`, calling the correct as_* and unwrapping must never panic
@@ -600,7 +609,7 @@ datum_as_type!(token as_string for StringToken from STRING);
 datum_as_type!(token as_char for Character from CHARACTER);
 datum_as_type!(token as_bool for Boolean from BOOLEAN);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct List(MagusSyntaxNode);
 impl List {
     /// Get the head element
@@ -658,14 +667,14 @@ simple_gast!(node List from LIST);
 contains!(trivia List);
 contains!(datum List);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Vector(MagusSyntaxNode);
 impl Vector {}
 simple_gast!(node Vector from VECTOR);
 contains!(trivia Vector);
 contains!(datum Vector);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Bytevector(MagusSyntaxNode);
 impl Bytevector {
     pub fn bytes(&self) -> impl Iterator<Item = Option<u8>> + '_ {
@@ -688,7 +697,7 @@ simple_gast!(node Bytevector from BYTEVECTOR);
 contains!(trivia Bytevector);
 contains!(datum Bytevector);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Symbol(MagusSyntaxToken);
 impl Symbol {
     /// returns the case-folded identifier
@@ -745,32 +754,32 @@ macro_rules! simple_extract {
     };
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Number(MagusSyntaxToken);
 simple_gast!(token Number from NUMBER);
 simple_extract!(Number::number from Number as SchemeNumber);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StringToken(MagusSyntaxToken);
 simple_gast!(token StringToken from STRING);
 simple_extract!(StringToken::string from String as Box<str>);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Character(MagusSyntaxToken);
 simple_gast!(token Character from CHARACTER);
 simple_extract!(Character::char from Character as char);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Boolean(MagusSyntaxToken);
 simple_gast!(token Boolean from BOOLEAN);
 simple_extract!(Boolean::bool from Boolean as bool);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LabelRef(MagusSyntaxToken);
 simple_gast!(token LabelRef from DTRIGGER);
 simple_extract!(LabelRef::trigger from DatumLabelValue as usize);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DirectiveToken(MagusSyntaxToken);
 simple_gast!(token DirectiveToken from DIRECTIVE);
 simple_extract!(DirectiveToken::directive from Directive as Directive);

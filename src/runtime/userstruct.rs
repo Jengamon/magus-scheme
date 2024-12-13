@@ -22,15 +22,15 @@ pub struct BadUserStructType;
 // not every single one is a "userstruct"
 pub struct UserStruct<'gc>(Any<'gc, Option<Box<str>>>);
 
-impl<'gc> PartialEq for UserStruct<'gc> {
+impl PartialEq for UserStruct<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.0.eq(&other.0)
     }
 }
 
-impl<'gc> Eq for UserStruct<'gc> {}
+impl Eq for UserStruct<'_> {}
 
-impl<'gc> Hash for UserStruct<'gc> {
+impl Hash for UserStruct<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.hash(state)
     }
@@ -50,7 +50,7 @@ impl<'gc> UserStruct<'gc> {
     pub fn new<R>(mc: &Mutation<'gc>, val: Root<'gc, R>) -> Self
     where
         R: for<'a> Rootable<'a> + 'static,
-        Root<'gc, R>: Sized + Collect,
+        Root<'gc, R>: Sized + Collect<'gc>,
     {
         UserStruct(Any::new::<R>(mc, val))
     }
@@ -58,7 +58,7 @@ impl<'gc> UserStruct<'gc> {
     pub fn new_labeled<R>(mc: &Mutation<'gc>, val: Root<'gc, R>, label: impl AsRef<str>) -> Self
     where
         R: for<'a> Rootable<'a> + 'static,
-        Root<'gc, R>: Sized + Collect,
+        Root<'gc, R>: Sized + Collect<'gc>,
     {
         UserStruct(Any::with_metadata::<R>(
             mc,

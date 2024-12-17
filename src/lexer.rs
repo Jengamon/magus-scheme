@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::LazyLock};
+use std::{collections::HashMap, num::NonZeroUsize, sync::LazyLock};
 
 use arbitrary::Arbitrary;
 use logos::Logos;
@@ -258,8 +258,6 @@ fn read_number(
         unreachable!("ICE lexer error: mismatched radix {flags:?} radix {radix}");
     }
 
-    // FIXME right now, the lex for things like "3.01" is incorrect b/c it doesn't account for the zeroes at the start.
-    // fix that.
     fn read_number_part(
         iter: &mut std::iter::Peekable<impl Iterator<Item = char>>,
         radix: u32,
@@ -292,6 +290,7 @@ fn read_number(
         }
         let mut s = State::Start;
         let mut number_state = None::<u64>;
+        let mut leading_zeros = 0;
         let mut second_number_state = None::<u64>;
         let mut third_number_state = None::<u64>;
         let mut exponent_sign_state = None::<bool>;
@@ -516,6 +515,11 @@ fn read_number(
                             let _ = iter.next();
                             State::ReadExponent
                         }
+                        Some('0') if second_number_state.is_none() => {
+                            let _ = iter.next();
+                            leading_zeros += 1;
+                            State::ReadDecipoint
+                        }
                         Some(c @ '0'..='9') => {
                             let _ = iter.next();
                             if let Some(sn) = second_number_state {
@@ -534,6 +538,7 @@ fn read_number(
                             // Next is an imaginary number
                             return Ok(ExactReal::Decimal {
                                 base: number_state.unwrap_or(0),
+                                leading_zeros: NonZeroUsize::new(leading_zeros),
                                 post_dot: second_number_state.unwrap_or(0),
                                 exponent: 0,
                                 exponent_neg: false,
@@ -544,6 +549,7 @@ fn read_number(
                             // Number ended
                             return Ok(ExactReal::Decimal {
                                 base: number_state.unwrap_or(0),
+                                leading_zeros: NonZeroUsize::new(leading_zeros),
                                 post_dot: second_number_state.unwrap_or(0),
                                 exponent: 0,
                                 exponent_neg: false,
@@ -575,6 +581,7 @@ fn read_number(
                         Some('+' | '-') | None if !is_imaginary => {
                             return Ok(ExactReal::Decimal {
                                 base: number_state.unwrap_or(0),
+                                leading_zeros: NonZeroUsize::new(leading_zeros),
                                 post_dot: second_number_state.unwrap_or(0),
                                 exponent: third_number_state.unwrap_or(0),
                                 exponent_neg: exponent_sign_state.unwrap_or(false),
@@ -590,6 +597,7 @@ fn read_number(
                     return match iter.next() {
                         Some('i' | 'I') => Ok(ExactReal::Decimal {
                             base: number_state.unwrap_or(0),
+                            leading_zeros: NonZeroUsize::new(leading_zeros),
                             post_dot: second_number_state.unwrap_or(0),
                             exponent: third_number_state.unwrap_or(0),
                             exponent_neg: exponent_sign_state.unwrap_or(false),

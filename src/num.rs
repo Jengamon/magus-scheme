@@ -1,6 +1,7 @@
 //! Because exact number handling is quite important to Scheme
 
 use core::fmt;
+use std::num::NonZeroUsize;
 
 use arbitrary::Arbitrary;
 
@@ -79,12 +80,14 @@ impl SchemeNumber {
     pub fn real_decimal(
         is_neg: bool,
         base: u64,
+        leading_zeros: usize,
         post_dot: u64,
         exponent_neg: bool,
         exponent: u64,
     ) -> Self {
         Self::Exact(ExactReal::Decimal {
             base,
+            leading_zeros: NonZeroUsize::new(leading_zeros),
             post_dot,
             exponent,
             exponent_neg,
@@ -117,6 +120,8 @@ pub enum ExactReal {
     },
     Decimal {
         base: u64,
+        /// The *number* of leading zeroes in the source of the number after the decimal point
+        leading_zeros: Option<NonZeroUsize>,
         post_dot: u64,
         exponent: u64,
         exponent_neg: bool,
@@ -148,13 +153,15 @@ impl fmt::Display for ExactReal {
             ExactReal::Nan { is_neg } => write!(f, "{}nan.0", if *is_neg { "-" } else { "+" }),
             ExactReal::Decimal {
                 base,
+                leading_zeros,
                 post_dot,
                 exponent,
                 exponent_neg,
                 is_neg,
             } => write!(
                 f,
-                "{}{base}.{post_dot}e{}{exponent}",
+                "{}{base}.{}{post_dot}e{}{exponent}",
+                "0".repeat(Self::calc_leading_zeros(*leading_zeros)),
                 calc_sign(*is_neg),
                 calc_sign(*exponent_neg)
             ),
@@ -223,6 +230,12 @@ impl ExactReal {
         }
     }
 
+    fn calc_leading_zeros(leading_zeros: Option<NonZeroUsize>) -> usize {
+        leading_zeros
+            .map(|i| i.saturating_add(1).get())
+            .unwrap_or(0)
+    }
+
     pub fn is_numeric(self) -> bool {
         !matches!(self, Self::Inf { .. } | Self::Nan { .. })
     }
@@ -248,12 +261,14 @@ impl ExactReal {
             ExactReal::Nan { is_neg } => (if is_neg { -1.0 } else { 1.0 }) * f64::NAN,
             ExactReal::Decimal {
                 base,
+                leading_zeros,
                 post_dot,
                 exponent,
                 exponent_neg,
                 is_neg,
             } => {
-                let post_dot_10_power = (post_dot as f64).log10().ceil();
+                let post_dot_10_power = (post_dot as f64).log10().ceil()
+                    + Self::calc_leading_zeros(leading_zeros) as f64;
                 (if is_neg { -1.0 } else { 1.0 })
                     * (base as f64
                         + (post_dot as f64
@@ -316,6 +331,7 @@ impl ExactReal {
             }
             ExactReal::Decimal {
                 base,
+                leading_zeros,
                 post_dot,
                 exponent,
                 exponent_neg,
@@ -326,6 +342,9 @@ impl ExactReal {
                 }
                 output.push_str(&Self::to_string_radix(base, radix)?);
                 output.push('.');
+                for _ in 0..Self::calc_leading_zeros(leading_zeros) {
+                    output.push('0');
+                }
                 output.push_str(&Self::to_string_radix(post_dot, radix)?);
                 output.push('e');
                 if exponent_neg {
@@ -341,6 +360,8 @@ impl ExactReal {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use super::ExactReal;
     use assert2::check;
 
@@ -348,6 +369,7 @@ mod tests {
     fn exact_to_inexact() {
         let exact = ExactReal::Decimal {
             base: 3,
+            leading_zeros: None,
             post_dot: 5,
             exponent: 2,
             exponent_neg: true,
@@ -356,6 +378,7 @@ mod tests {
         check!(exact.inexact() == 0.035);
         let exact = ExactReal::Decimal {
             base: 42,
+            leading_zeros: None,
             post_dot: 5020,
             exponent: 2,
             exponent_neg: false,
@@ -365,11 +388,22 @@ mod tests {
         // Found by arbtest
         let exact = ExactReal::Decimal {
             base: 0,
+            leading_zeros: None,
             post_dot: 0,
             exponent: 0,
             exponent_neg: false,
             is_neg: false,
         };
         check!(exact.inexact() == 0.0);
+        // Found by trying shit
+        let leading_zeros = ExactReal::Decimal {
+            base: 3,
+            leading_zeros: NonZeroUsize::new(1),
+            post_dot: 1,
+            exponent: 0,
+            exponent_neg: false,
+            is_neg: false,
+        };
+        check!(leading_zeros.inexact() == 3.01);
     }
 }

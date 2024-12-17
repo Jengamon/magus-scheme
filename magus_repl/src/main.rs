@@ -1,8 +1,9 @@
 use std::borrow::Cow;
 
+use anyhow::Context;
 use clap::Parser;
 use codesnake::{Block, CodeWidth, Label, LineIndex};
-use magus::{ContainsDatum, GAstNode, Module};
+use magus::{general_parser::GeneralParserError, ContainsDatum, GAstNode, Module};
 use reedline::{
     FileBackedHistory, Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus,
     PromptViMode, Reedline, Signal, Validator,
@@ -25,7 +26,7 @@ fn main() -> anyhow::Result<()> {
             // Find a good way to display compiled data (using the visitor)
             todo!("read from standard input")
         } else {
-            todo!("open and read file")
+            execute_file(file)
         }
     } else {
         repl()
@@ -100,6 +101,59 @@ impl Prompt for MagusPrompt {
     }
 }
 
+/// Compiles a given source into a module
+fn compile(source: impl AsRef<str>) -> Result<Module, Vec<GeneralParserError>> {
+    // General parse
+    let gast = magus::general_parse(source.as_ref());
+
+    if gast.errors().is_empty() {
+        Ok(Module::cast(gast.syntax()).unwrap())
+    } else {
+        Err(gast.into_errors())
+    }
+}
+
+/// Executes a given module
+fn execute(module: &Module) {
+    // TODO Return output (either () or the interpreter error)
+    // Show what the parser sees
+    println!("{:#?}", module.syntax());
+
+    // Print the programs parsable external representation
+    for datum in module.datum() {
+        println!("{:#}", datum_printer::DisplayDatum(&datum));
+    }
+}
+
+fn execute_file(path: impl AsRef<std::path::Path>) -> anyhow::Result<()> {
+    let path = path.as_ref();
+    let source = std::fs::read_to_string(path).context("failed to read input file")?;
+
+    match compile(&source) {
+        Ok(module) => {
+            execute(&module);
+        }
+        Err(errors) => {
+            let idx = LineIndex::new(&source);
+            let blocks = errors.iter().flat_map(|err| {
+                Block::new(
+                    &idx,
+                    [Label::new(err.span())
+                        .with_text(err.to_string())
+                        .with_style(|s| s.red().to_string())],
+                )
+            });
+
+            for block in blocks.map(|blk| blk.map_code(|c| CodeWidth::new(c, c.len()))) {
+                println!("{}[{path:?}]", block.prologue());
+                print!("{block}");
+                println!("{}", block.epilogue());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn repl() -> anyhow::Result<()> {
     let mut readline = Reedline::create()
         .with_history(Box::new(
@@ -118,47 +172,31 @@ fn repl() -> anyhow::Result<()> {
                 let src = input.as_str();
 
                 // General parse
-                let gast = magus::general_parse(&input);
+                match compile(src) {
+                    Ok(module) => {
+                        // consider this line successfully executed
+                        prompt.completed_lines += 1;
 
-                let idx = LineIndex::new(src);
-
-                let blocks = (!gast.errors().is_empty())
-                    .then_some(gast.errors())
-                    .map(|errors| {
-                        errors.iter().flat_map(|err| {
+                        execute(&module);
+                    }
+                    Err(errors) => {
+                        let idx = LineIndex::new(src);
+                        let blocks = errors.iter().flat_map(|err| {
                             Block::new(
                                 &idx,
                                 [Label::new(err.span())
                                     .with_text(err.to_string())
                                     .with_style(|s| s.red().to_string())],
                             )
-                        })
-                    });
+                        });
 
-                if let Some(blocks) = blocks {
-                    for block in blocks.map(|blk| blk.map_code(|c| CodeWidth::new(c, c.len()))) {
-                        println!("{}[repl.scm]", block.prologue());
-                        print!("{block}");
-                        println!("{}", block.epilogue());
+                        for block in blocks.map(|blk| blk.map_code(|c| CodeWidth::new(c, c.len())))
+                        {
+                            println!("{}[repl.scm]", block.prologue());
+                            print!("{block}");
+                            println!("{}", block.epilogue());
+                        }
                     }
-                }
-
-                if !gast.errors().is_empty() {
-                    continue;
-                }
-
-                // consider this line successfully executed
-                prompt.completed_lines += 1;
-
-                // Tell me your secrets
-                let module = Module::cast(gast.syntax()).unwrap();
-
-                // Show what the parser sees
-                println!("{:#?}", gast.syntax());
-
-                // Print the programs parsable external representation
-                for datum in module.datum() {
-                    println!("{:#}", datum_printer::DisplayDatum(&datum));
                 }
             }
             Ok(Signal::CtrlC) | Ok(Signal::CtrlD) => break,

@@ -684,6 +684,8 @@ pub enum LexerError {
     MalformedString,
     #[error("malformed number")]
     MalformedNumber,
+    #[error("malformed boolean")]
+    MalformedBoolean,
     #[error("number literal too big")]
     NumberTooBig,
     #[error("label too big")]
@@ -767,8 +769,9 @@ pub enum SyntaxToken {
     #[regex(r"[-+]\.[a-zA-Z!$%&*/:<=>?^_~+\-.@][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*", |l| Box::from(l.slice()))]
     #[regex(r"\.[a-zA-Z!$%&*/:<=>?^_~+\-.@][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*", |l| Box::from(l.slice()))]
     Identifier(Box<str>),
-    #[regex("(?i)#t(rue)?", |_| true)]
-    #[regex("(?i)#f(alse)?", |_| false)]
+    #[regex("(?i)#t|#true", |_| true)]
+    #[regex("(?i)#f|#false", |_| false)]
+    #[regex("(?i)#tr|#tru|#fa|#fal|#fals", |_| Err(LexerError::MalformedBoolean))]
     Boolean(bool),
     #[regex(r"#?\\.", callback = process_character)]
     #[regex(r"#?\\[a-zA-Z]+", priority = 2, callback = process_named_character)]

@@ -113,11 +113,11 @@ pub enum GeneralParserError {
     },
     #[error("unexpected {found:?}")]
     UnexpectedToken { found: TokenKind, at: Span },
-    #[error("unexpected {found:?}: expected {}", 
+    #[error("unexpected {found:?}: expected {}",
         if expected.len() == 1 {
             format!("{:?}", expected[0])
         } else {
-            format!("one of {expected:?}") 
+            format!("one of {expected:?}")
         }
     )]
     ExpectedToken {
@@ -628,6 +628,15 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
                         });
                         errors.push(GeneralParserError::Malformed {
                             kind: TokenKind::Number,
+                            at: span,
+                        });
+                    }
+                    LexerError::MalformedBoolean => {
+                        finish_datum(&mut checkpoints, &mut builder, None, |builder| {
+                            builder.token(BOOLEAN.into(), &source[span.clone()]);
+                        });
+                        errors.push(GeneralParserError::Malformed {
+                            kind: TokenKind::Boolean,
                             at: span,
                         });
                     }

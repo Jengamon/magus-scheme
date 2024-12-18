@@ -1,7 +1,7 @@
 //! Because exact number handling is quite important to Scheme
 
 use core::fmt;
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU16, NonZeroU64};
 
 use arbitrary::Arbitrary;
 
@@ -80,14 +80,14 @@ impl SchemeNumber {
     pub fn real_decimal(
         is_neg: bool,
         base: u64,
-        leading_zeros: usize,
+        leading_zeros: u16,
         post_dot: u64,
         exponent_neg: bool,
         exponent: u64,
     ) -> Self {
         Self::Exact(ExactReal::Decimal {
             base,
-            leading_zeros: NonZeroUsize::new(leading_zeros),
+            leading_zeros: NonZeroU16::new(leading_zeros),
             post_dot,
             exponent,
             exponent_neg,
@@ -101,7 +101,7 @@ impl SchemeNumber {
 }
 
 /// Possible values to exactly represent real numbers
-#[derive(Debug, PartialEq, Clone, Copy, Arbitrary)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum ExactReal {
     Integer {
         value: u64,
@@ -121,12 +121,54 @@ pub enum ExactReal {
     Decimal {
         base: u64,
         /// The *number* of leading zeroes in the source of the number after the decimal point
-        leading_zeros: Option<NonZeroUsize>,
+        leading_zeros: Option<NonZeroU16>,
         post_dot: u64,
         exponent: u64,
         exponent_neg: bool,
         is_neg: bool,
     },
+}
+
+impl<'a> Arbitrary<'a> for ExactReal {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(match u.int_in_range(0..=4)? {
+            0 => Self::Integer {
+                value: u64::arbitrary(u)?,
+                is_neg: bool::arbitrary(u)?,
+            },
+            1 => Self::Rational {
+                numer: u64::arbitrary(u)?,
+                denom: u64::arbitrary(u)?,
+                is_neg: bool::arbitrary(u)?,
+            },
+            2 => Self::Inf {
+                is_neg: bool::arbitrary(u)?,
+            },
+            3 => Self::Nan {
+                is_neg: bool::arbitrary(u)?,
+            },
+            4 => {
+                // cap the number of leading zeros to a "reasonable" amount.
+                let leading_zeros = NonZeroU16::new(u16::arbitrary(u)?.min(32));
+                let post_dot = if leading_zeros.is_some() {
+                    // if leading zeros is some, then the post dot will cannot be just 0
+                    // if it was zero, leading zeros would be 1 bigger.
+                    NonZeroU64::arbitrary(u)?.get()
+                } else {
+                    u64::arbitrary(u)?
+                };
+                Self::Decimal {
+                    base: u64::arbitrary(u)?,
+                    leading_zeros,
+                    post_dot,
+                    exponent: u64::arbitrary(u)?,
+                    exponent_neg: bool::arbitrary(u)?,
+                    is_neg: bool::arbitrary(u)?,
+                }
+            }
+            _ => unreachable!(),
+        })
+    }
 }
 
 // display is useful and is used for external representation
@@ -161,8 +203,8 @@ impl fmt::Display for ExactReal {
             } => write!(
                 f,
                 "{}{base}.{}{post_dot}e{}{exponent}",
-                "0".repeat(Self::calc_leading_zeros(*leading_zeros)),
                 calc_sign(*is_neg),
+                "0".repeat(leading_zeros.map(|nz| nz.get()).unwrap_or_default() as usize),
                 calc_sign(*exponent_neg)
             ),
         }
@@ -230,7 +272,8 @@ impl ExactReal {
         }
     }
 
-    fn calc_leading_zeros(leading_zeros: Option<NonZeroUsize>) -> usize {
+    // Used internally for inexact calculation
+    fn calc_leading_zeros(leading_zeros: Option<NonZeroU16>) -> u16 {
         leading_zeros
             .map(|i| i.saturating_add(1).get())
             .unwrap_or(0)
@@ -342,9 +385,10 @@ impl ExactReal {
                 }
                 output.push_str(&Self::to_string_radix(base, radix)?);
                 output.push('.');
-                for _ in 0..Self::calc_leading_zeros(leading_zeros) {
-                    output.push('0');
-                }
+                output.push_str(
+                    "0".repeat(leading_zeros.map(|nz| nz.get()).unwrap_or_default() as usize)
+                        .as_str(),
+                );
                 output.push_str(&Self::to_string_radix(post_dot, radix)?);
                 output.push('e');
                 if exponent_neg {
@@ -360,7 +404,7 @@ impl ExactReal {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroUsize;
+    use std::num::NonZeroU16;
 
     use super::ExactReal;
     use assert2::check;
@@ -398,7 +442,7 @@ mod tests {
         // Found by trying shit
         let leading_zeros = ExactReal::Decimal {
             base: 3,
-            leading_zeros: NonZeroUsize::new(1),
+            leading_zeros: NonZeroU16::new(1),
             post_dot: 1,
             exponent: 0,
             exponent_neg: false,

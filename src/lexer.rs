@@ -1,4 +1,4 @@
-use std::{collections::HashMap, num::NonZeroUsize, sync::LazyLock};
+use std::{collections::HashMap, num::NonZeroU16, sync::LazyLock};
 
 use arbitrary::Arbitrary;
 use logos::Logos;
@@ -296,7 +296,7 @@ fn read_number(
         let mut exponent_sign_state = None::<bool>;
         let mut is_neg_state = None::<bool>;
         loop {
-            // eprintln!("State ({s:?}) (im? {is_imaginary}) ({number_state:?} {second_number_state:?} {third_number_state:?} {exponent_sign_state:?} {is_neg_state:?})");
+            // eprintln!("State ({s:?}) (im? {is_imaginary}) ({number_state:?} {leading_zeros} {second_number_state:?} {third_number_state:?} {exponent_sign_state:?} {is_neg_state:?})");
             let ns = match s {
                 // Start
                 State::Start => match iter.next() {
@@ -538,7 +538,7 @@ fn read_number(
                             // Next is an imaginary number
                             return Ok(ExactReal::Decimal {
                                 base: number_state.unwrap_or(0),
-                                leading_zeros: NonZeroUsize::new(leading_zeros),
+                                leading_zeros: NonZeroU16::new(leading_zeros),
                                 post_dot: second_number_state.unwrap_or(0),
                                 exponent: 0,
                                 exponent_neg: false,
@@ -549,7 +549,7 @@ fn read_number(
                             // Number ended
                             return Ok(ExactReal::Decimal {
                                 base: number_state.unwrap_or(0),
-                                leading_zeros: NonZeroUsize::new(leading_zeros),
+                                leading_zeros: NonZeroU16::new(leading_zeros),
                                 post_dot: second_number_state.unwrap_or(0),
                                 exponent: 0,
                                 exponent_neg: false,
@@ -581,7 +581,7 @@ fn read_number(
                         Some('+' | '-') | None if !is_imaginary => {
                             return Ok(ExactReal::Decimal {
                                 base: number_state.unwrap_or(0),
-                                leading_zeros: NonZeroUsize::new(leading_zeros),
+                                leading_zeros: NonZeroU16::new(leading_zeros),
                                 post_dot: second_number_state.unwrap_or(0),
                                 exponent: third_number_state.unwrap_or(0),
                                 exponent_neg: exponent_sign_state.unwrap_or(false),
@@ -597,7 +597,7 @@ fn read_number(
                     return match iter.next() {
                         Some('i' | 'I') => Ok(ExactReal::Decimal {
                             base: number_state.unwrap_or(0),
-                            leading_zeros: NonZeroUsize::new(leading_zeros),
+                            leading_zeros: NonZeroU16::new(leading_zeros),
                             post_dot: second_number_state.unwrap_or(0),
                             exponent: third_number_state.unwrap_or(0),
                             exponent_neg: exponent_sign_state.unwrap_or(false),
@@ -607,6 +607,7 @@ fn read_number(
                     };
                 }
             };
+            // eprintln!("{s:?} -> {ns:?}");
             s = ns;
         }
     }
@@ -1003,14 +1004,14 @@ mod tests {
 
     use super::SyntaxToken;
     use arbtest::{arbtest, ArbTest};
-    use assert2::{assert, check, let_assert};
+    use assert2::{assert, let_assert};
 
     #[test]
     fn test_number_arbtest_decimal() {
         arbtest(|u| {
             let number: ExactReal = u.arbitrary()?;
             let decimal = format!("#e{}", number.display(10).unwrap());
-            check!(
+            assert!(
                 SyntaxToken::lexer(&decimal).next()
                     == Some(Ok(SyntaxToken::Number(SchemeNumber::Exact(number)))),
                 "{number:?} `{decimal}` does not roundtrip"
@@ -1022,9 +1023,9 @@ mod tests {
                     Some(Ok(SyntaxToken::Number(SchemeNumber::Inexact(inum)))) =
                         SyntaxToken::lexer(&inexact_decimal).next()
                 );
-                check!(inum.is_nan());
+                assert!(inum.is_nan());
             } else {
-                check!(
+                assert!(
                     SyntaxToken::lexer(&inexact_decimal).next()
                         == Some(Ok(SyntaxToken::Number(SchemeNumber::Inexact(
                             number.inexact()
@@ -1043,7 +1044,7 @@ mod tests {
                 },
                 im.display(10).unwrap(),
             );
-            check!(
+            assert!(
                 SyntaxToken::lexer(&im_decimal).next()
                     == Some(Ok(SyntaxToken::Number(SchemeNumber::ExactComplex {
                         real: number,
@@ -1069,7 +1070,7 @@ mod tests {
                             imaginary
                         }))) = SyntaxToken::lexer(&inexact_im_decimal).next()
                     );
-                    check!(real.is_nan() && imaginary.is_nan());
+                    assert!(real.is_nan() && imaginary.is_nan());
                 }
                 (ExactReal::Nan { .. }, _) => {
                     let_assert!(
@@ -1078,7 +1079,7 @@ mod tests {
                             imaginary
                         }))) = SyntaxToken::lexer(&inexact_im_decimal).next()
                     );
-                    check!(real.is_nan() && imaginary == im.inexact());
+                    assert!(real.is_nan() && imaginary == im.inexact());
                 }
                 (_, ExactReal::Nan { .. }) => {
                     let_assert!(
@@ -1087,10 +1088,10 @@ mod tests {
                             imaginary
                         }))) = SyntaxToken::lexer(&inexact_im_decimal).next()
                     );
-                    check!(real == number.inexact() && imaginary.is_nan());
+                    assert!(real == number.inexact() && imaginary.is_nan());
                 }
                 _ => {
-                    check!(
+                    assert!(
                         SyntaxToken::lexer(&inexact_im_decimal).next()
                             == Some(Ok(SyntaxToken::Number(SchemeNumber::InexactComplex {
                                 real: number.inexact(),
@@ -1141,7 +1142,7 @@ mod tests {
                     None => return Ok(()),
                 }
             );
-            check!(
+            assert!(
                 SyntaxToken::lexer(&decimal).next()
                     == Some(Ok(SyntaxToken::Number(SchemeNumber::Exact(number)))),
                 "{number:?} `{decimal}` does not roundtrip"
@@ -1159,9 +1160,9 @@ mod tests {
                     Some(Ok(SyntaxToken::Number(SchemeNumber::Inexact(inum)))) =
                         SyntaxToken::lexer(&inexact_decimal).next()
                 );
-                check!(inum.is_nan());
+                assert!(inum.is_nan());
             } else {
-                check!(
+                assert!(
                     SyntaxToken::lexer(&inexact_decimal).next()
                         == Some(Ok(SyntaxToken::Number(SchemeNumber::Inexact(
                             number.inexact()
@@ -1186,7 +1187,7 @@ mod tests {
                     None => return Ok(()),
                 },
             );
-            check!(
+            assert!(
                 SyntaxToken::lexer(&im_decimal).next()
                     == Some(Ok(SyntaxToken::Number(SchemeNumber::ExactComplex {
                         real: number,
@@ -1218,7 +1219,7 @@ mod tests {
                             imaginary
                         }))) = SyntaxToken::lexer(&inexact_im_decimal).next()
                     );
-                    check!(real.is_nan() && imaginary.is_nan(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
+                    assert!(real.is_nan() && imaginary.is_nan(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
                 }
                 (ExactReal::Nan { .. }, _) => {
                     let_assert!(
@@ -1227,8 +1228,8 @@ mod tests {
                             imaginary
                         }))) = SyntaxToken::lexer(&inexact_im_decimal).next()
                     );
-                    check!(real.is_nan(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
-                    check!(imaginary == im.inexact(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
+                    assert!(real.is_nan(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
+                    assert!(imaginary == im.inexact(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
                 }
                 (_, ExactReal::Nan { .. }) => {
                     let_assert!(
@@ -1237,11 +1238,11 @@ mod tests {
                             imaginary
                         }))) = SyntaxToken::lexer(&inexact_im_decimal).next()
                     );
-                    check!(imaginary.is_nan(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
-                    check!(real == number.inexact(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
+                    assert!(imaginary.is_nan(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
+                    assert!(real == number.inexact(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
                 }
                 _ => {
-                    check!(
+                    assert!(
                         SyntaxToken::lexer(&inexact_im_decimal).next()
                             == Some(Ok(SyntaxToken::Number(SchemeNumber::InexactComplex {
                                 real: number.inexact(),

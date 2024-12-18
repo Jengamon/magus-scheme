@@ -273,10 +273,9 @@ impl ExactReal {
     }
 
     // Used internally for inexact calculation
+    // TODO Make this a no-op by storing in a u16
     fn calc_leading_zeros(leading_zeros: Option<NonZeroU16>) -> u16 {
-        leading_zeros
-            .map(|i| i.saturating_add(1).get())
-            .unwrap_or(0)
+        leading_zeros.map(|nz| nz.get()).unwrap_or(0)
     }
 
     pub fn is_numeric(self) -> bool {
@@ -310,7 +309,7 @@ impl ExactReal {
                 exponent_neg,
                 is_neg,
             } => {
-                let post_dot_10_power = (post_dot as f64).log10().ceil()
+                let post_dot_10_power = (post_dot as f64).log10().max(1.).ceil()
                     + Self::calc_leading_zeros(leading_zeros) as f64;
                 (if is_neg { -1.0 } else { 1.0 })
                     * (base as f64

@@ -11,7 +11,7 @@ secrets:
 tasks:
   - run-tests: |
       cd magus
-      just test
+      just test-ci
   - run-arbtests: |
       cd magus
-      just arbtest
+      just arbtest-ci

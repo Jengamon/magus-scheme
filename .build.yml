@@ -1,0 +1,17 @@
+image: alpine/edge
+packages:
+  - rust
+  - cargo
+  - just
+  - cargo-nextest
+sources:
+  - git@git.sr.ht:~jangermad/magus
+secrets:
+  - b3a02cf9-8da6-4caa-a4c9-833027656007
+tasks:
+  - run-tests: |
+      cd magus
+      just test
+  - run-arbtests: |
+      cd magus
+      just arbtest

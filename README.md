@@ -1,5 +1,7 @@
 # Magus - an R5RS-ish impl for Magicflute
 
+Build status: [![builds.sr.ht status](https://builds.sr.ht/~jangermad/magus/commits/impl-redo.svg)](https://builds.sr.ht/~jangermad/magus/commits/impl-redo?)
+
 So we are targeting R5RS and R7RS as we please. In general:
 - R7RS has case-sensitivity. since we already wrote the code, might as well use it...
 - R7RS has a module system + `include`. we don't need that, so we won't

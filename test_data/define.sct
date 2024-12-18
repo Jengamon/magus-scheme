@@ -1,0 +1,5 @@
+; Interpreter output TODO
+---
+; Compiler output TODO
+---
+(define y 3) (+ y x) (define x 4) (+ x #!fold-case Y X)

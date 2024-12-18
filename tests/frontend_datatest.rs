@@ -175,6 +175,11 @@ fn read_datatest(test_contents: &str) -> DatatestFile {
     )
 }
 
+fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()> {
+    let (interpreter_output, compiler_output, source, comments, li) = read_datatest(&contents);
+    Ok(())
+}
+
 fn general_parser_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()> {
     let (error_debugs, sn_output_lines, source, comments, li) = read_datatest(&contents);
     let sn_output = sn_output_lines.join("\n");
@@ -296,4 +301,5 @@ fn lexer_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()> 
 datatest_stable::harness! {
     general_parser_test, "test_data", r"^.*\.gpd",
     lexer_test, "test_data", r"^.*\.lxd",
+    scheme_test, "test_data", r"^.*\.sct",
 }

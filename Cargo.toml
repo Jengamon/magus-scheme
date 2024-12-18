@@ -14,7 +14,7 @@ edition = "2021"
 description = "R5RS-scheme implementation in Rust using gc-arena"
 
 [[test]]
-name = "frontend_datatest"
+name = "datatests"
 harness = false
 
 [dependencies]

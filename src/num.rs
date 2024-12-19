@@ -31,7 +31,11 @@ impl fmt::Display for SchemeNumber {
                 e => write!(f, "{e}"),
             },
             SchemeNumber::ExactComplex { real, imaginary } => {
-                write!(f, "{real}{imaginary:#}i")
+                if real.is_decimal() || imaginary.is_decimal() {
+                    write!(f, "#e{real}{imaginary:#}i")
+                } else {
+                    write!(f, "{real}{imaginary:#}i")
+                }
             }
             SchemeNumber::ExactPolar { modulus, argument } => {
                 write!(f, "{modulus}@{argument}")
@@ -193,19 +197,11 @@ impl fmt::Display for ExactReal {
             } => write!(f, "{}{numer}/{denom}", calc_sign(*is_neg)),
             ExactReal::Inf { is_neg } => write!(f, "{}inf.0", if *is_neg { "-" } else { "+" }),
             ExactReal::Nan { is_neg } => write!(f, "{}nan.0", if *is_neg { "-" } else { "+" }),
-            ExactReal::Decimal {
-                base,
-                leading_zeros,
-                post_dot,
-                exponent,
-                exponent_neg,
-                is_neg,
-            } => write!(
+            ExactReal::Decimal { is_neg, .. } => write!(
                 f,
-                "{}{base}.{}{post_dot}e{}{exponent}",
-                calc_sign(*is_neg),
-                "0".repeat(leading_zeros.map(|nz| nz.get()).unwrap_or_default() as usize),
-                calc_sign(*exponent_neg)
+                "{}{}",
+                if !*is_neg && f.alternate() { "+" } else { "" },
+                self.display(10).unwrap()
             ),
         }
     }
@@ -280,6 +276,10 @@ impl ExactReal {
 
     pub fn is_numeric(self) -> bool {
         !matches!(self, Self::Inf { .. } | Self::Nan { .. })
+    }
+
+    pub fn is_decimal(self) -> bool {
+        matches!(self, Self::Decimal { .. })
     }
 
     // makes a version of this number that can be stored inexactly
@@ -383,17 +383,21 @@ impl ExactReal {
                     output.push('-');
                 }
                 output.push_str(&Self::to_string_radix(base, radix)?);
-                output.push('.');
-                output.push_str(
-                    "0".repeat(leading_zeros.map(|nz| nz.get()).unwrap_or_default() as usize)
-                        .as_str(),
-                );
-                output.push_str(&Self::to_string_radix(post_dot, radix)?);
-                output.push('e');
-                if exponent_neg {
-                    output.push('-');
+                if post_dot != 0 {
+                    output.push('.');
+                    output.push_str(
+                        "0".repeat(leading_zeros.map(|nz| nz.get()).unwrap_or_default() as usize)
+                            .as_str(),
+                    );
+                    output.push_str(&Self::to_string_radix(post_dot, radix)?);
                 }
-                output.push_str(&Self::to_string_radix(exponent, radix)?);
+                if exponent_neg || exponent != 0 {
+                    output.push('e');
+                    if exponent_neg {
+                        output.push('-');
+                    }
+                    output.push_str(&Self::to_string_radix(exponent, radix)?);
+                }
             }
             ExactReal::Decimal { .. } => return None,
         }

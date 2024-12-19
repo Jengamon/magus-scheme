@@ -619,10 +619,17 @@ fn read_number(
         match chars.peek() {
             Some('+' | '-') if !just_imaginary => {
                 let im_part = read_number_part(&mut chars, radix, true)?;
-                Ok(SchemeNumber::ExactComplex {
-                    real: real_part,
-                    imaginary: im_part,
-                })
+                if (real_part.is_decimal() || im_part.is_decimal()) && !contains_flag('e') {
+                    Ok(SchemeNumber::InexactComplex {
+                        real: real_part.inexact(),
+                        imaginary: im_part.inexact(),
+                    })
+                } else {
+                    Ok(SchemeNumber::ExactComplex {
+                        real: real_part,
+                        imaginary: im_part,
+                    })
+                }
             }
             Some(_) => Err(LexerError::MalformedNumber)?,
             None if !just_imaginary => match real_part {

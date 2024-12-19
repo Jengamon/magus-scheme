@@ -1,0 +1,46 @@
+---
+ROOT@0..78
+  DATUM@0..1
+    NUMBER@0..1 "4"
+  LINEEND@1..2 "\n"
+  DATUM@2..4
+    NUMBER@2..4 "4."
+  LINEEND@4..5 "\n"
+  DATUM@5..7
+    NUMBER@5..7 ".4"
+  LINEEND@7..8 "\n"
+  DATUM@8..14
+    NUMBER@8..14 ".5+.6i"
+  LINEEND@14..15 "\n"
+  DATUM@15..23
+    NUMBER@15..23 "4e5+4e4i"
+  LINEEND@23..24 "\n"
+  DATUM@24..31
+    NUMBER@24..31 "#x6+aci"
+  LINEEND@31..32 "\n"
+  DATUM@32..41
+    NUMBER@32..41 "#i#x5+ffi"
+  LINEEND@41..42 "\n"
+  DATUM@42..50
+    NUMBER@42..50 "4e4+3.4i"
+  LINEEND@50..51 "\n"
+  DATUM@51..58
+    NUMBER@51..58 "4e4+.3i"
+  LINEEND@58..59 "\n"
+  DATUM@59..67
+    NUMBER@59..67 "4.e3+.6i"
+  LINEEND@67..68 "\n"
+  DATUM@68..78
+    NUMBER@68..78 "#i4e4+4e4i"
+---
+4
+4.
+.4
+.5+.6i
+4e5+4e4i
+#x6+aci
+#i#x5+ffi
+4e4+3.4i
+4e4+.3i
+4.e3+.6i
+#i4e4+4e4i

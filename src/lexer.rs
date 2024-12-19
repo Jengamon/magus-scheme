@@ -266,22 +266,29 @@ fn read_number(
         // Write a FSM to recognize the number and parse it into a RealNumber
         #[derive(Debug)]
         enum State {
+            /// Start
             Start,
+            /// read sign, inf nan or num
             ReadSign,
+            /// read digit, continue reading digits until interrupt [/+-] (add [.e] if decimal)
             ReadDigit,
+            /// read /, continue rational
             ReadRational,
             FinishImaginaryRational,
             ReadDecipoint,
             ReadExponentSign,
+            /// read [eE], read in the exponent (or jump straight to digits)
             ReadExponent,
             FinishImaginaryDecimal,
             // on inf.0
+            /// inf reading
             OnI,
             OnIn,
             OnInf,
             OnDotInf,
             OnDotInfIm,
             // on nan.0
+            /// nan reading
             OnN,
             OnNa,
             OnNan,
@@ -296,9 +303,8 @@ fn read_number(
         let mut exponent_sign_state = None::<bool>;
         let mut is_neg_state = None::<bool>;
         loop {
-            // eprintln!("State ({s:?}) (im? {is_imaginary}) ({number_state:?} {leading_zeros} {second_number_state:?} {third_number_state:?} {exponent_sign_state:?} {is_neg_state:?})");
+            // eprintln!("State {:?} ({s:?}) (im? {is_imaginary}) ({number_state:?} {leading_zeros} {second_number_state:?} {third_number_state:?} {exponent_sign_state:?} {is_neg_state:?})", iter.peek());
             let ns = match s {
-                // Start
                 State::Start => match iter.next() {
                     Some('+') => {
                         is_neg_state = Some(false);
@@ -315,7 +321,6 @@ fn read_number(
                     }
                     _ => return Err(LexerError::MalformedNumber),
                 },
-                // read sign, inf nan or num
                 State::ReadSign => match iter.next() {
                     Some('i' | 'I') => State::OnI,
                     Some('n' | 'N') => State::OnN,
@@ -326,7 +331,6 @@ fn read_number(
                     }
                     _ => return Err(LexerError::MalformedNumber),
                 },
-                // inf reading
                 State::OnI => {
                     assert!(is_neg_state.is_some());
                     match iter.next() {
@@ -366,7 +370,6 @@ fn read_number(
                         _ => Err(LexerError::MalformedNumber),
                     };
                 }
-                // nan reading
                 State::OnN => {
                     assert!(is_neg_state.is_some());
                     match iter.next() {
@@ -400,7 +403,6 @@ fn read_number(
                         _ => Err(LexerError::MalformedNumber),
                     };
                 }
-                // read digit, continue reading digits until interrupt [/+-] (add [.e] if decimal)
                 State::ReadDigit => {
                     assert!(number_state.is_some());
                     match iter.peek().copied() {
@@ -449,7 +451,6 @@ fn read_number(
                         _ => return Err(LexerError::MalformedNumber),
                     }
                 }
-                // read /, continue rational
                 State::ReadRational => match iter.peek().copied() {
                     Some(c) if c.is_digit(radix) => {
                         let _ = iter.next();
@@ -485,20 +486,21 @@ fn read_number(
                     }
                     _ => return Err(LexerError::MalformedNumber),
                 },
-                // read [eE], read in the exponent (or jump straight to digits)
                 State::ReadExponent => {
                     assert!(radix == 10);
-                    match iter.next() {
+                    match iter.peek() {
                         Some('+') => {
+                            let _ = iter.next();
                             exponent_sign_state = Some(false);
                             State::ReadExponentSign
                         }
                         Some('-') => {
+                            let _ = iter.next();
                             exponent_sign_state = Some(true);
                             State::ReadExponentSign
                         }
-                        Some(c @ '0'..='9') => {
-                            third_number_state = Some(c.to_digit(10).unwrap() as u64);
+                        Some('0'..='9') => {
+                            exponent_sign_state = Some(false);
                             State::ReadExponentSign
                         }
                         _ => return Err(LexerError::MalformedNumber),
@@ -879,6 +881,12 @@ pub enum SyntaxToken {
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+/[0-9]+i?", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-]\.[0-9]+(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+(\.[0-9]*)?(e[+-]?[0-9]+)[+-][0-9]*i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+(\.[0-9]*)?(e[+-]?[0-9]+)[+-](inf|nan).0i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+(\.[0-9]*)?(e[+-]?[0-9]+)[+-][0-9]+/[0-9]+i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+(\.[0-9]*)?(e[+-]?[0-9]+)[+-][0-9]+(\.[0-9]*)(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+(\.[0-9]*)?(e[+-]?[0-9]+)[+-][0-9]+(\.[0-9]*)?(e[+-]?[0-9]+)i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)((#e)?(#d)?|(#d)?(#e)?)[+-]?[0-9]+(\.[0-9]*)?(e[+-]?[0-9]+)[+-]\.[0-9]+(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     // - inexact decimal real
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+i?", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-](inf|nan).0i?", |l| read_number(l, 10))]
@@ -912,6 +920,12 @@ pub enum SyntaxToken {
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+/[0-9]+i?", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-][0-9]+\.[0-9]*(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?\.[0-9]+(e[+-]?[0-9]+)?[+-]\.[0-9]+(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+(\.[0-9]*)?(e[+-]?[0-9]+)[+-][0-9]*i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+(\.[0-9]*)?(e[+-]?[0-9]+)[+-](inf|nan).0i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+(\.[0-9]*)?(e[+-]?[0-9]+)[+-][0-9]+/[0-9]+i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+(\.[0-9]*)?(e[+-]?[0-9]+)[+-][0-9]+(\.[0-9]*)(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+(\.[0-9]*)?(e[+-]?[0-9]+)[+-][0-9]+(\.[0-9]*)?(e[+-]?[0-9]+)i?", |l| read_number(l, 10))]
+    #[regex(r"(?i)(#i(#d)?|(#d)?#i)[+-]?[0-9]+(\.[0-9]*)?(e[+-]?[0-9]+)[+-]\.[0-9]+(e[+-]?[0-9]+)?i?", |l| read_number(l, 10))]
     Number(SchemeNumber),
     #[regex(r"#[0-9]+=", |l| l.slice().chars().skip(1).take(l.slice().len()-2).collect::<Box<str>>().parse::<usize>().map_err(|_| LexerError::LabelTooBig))]
     DatumLabel(usize),

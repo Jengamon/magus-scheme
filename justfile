@@ -10,14 +10,24 @@ locale-data: clear-locale-data
 test *FLAGS:
     cargo nextest r -E "not test(arbtest)" {{FLAGS}}
 
-test-ci *FLAGS:
-    cargo nextest -Pci r -E "not test(arbtest)" {{FLAGS}}
+test-ci:
+    cargo nextest -Pci r -E "not test(arbtest)"
+    cargo nextest -Pci r -E "not test(arbtest)" -p datatest_parse
+
+lexer-test *FLAGS:
+    cargo nextest r -E "test(lxd)" {{FLAGS}}
+
+parser-test *FLAGS:
+    cargo nextest r -E "test(gpd)" {{FLAGS}}
+
+scheme-test *FLAGS:
+    cargo nextest r -E "test(sct)" {{FLAGS}}
 
 arbtest *FLAGS:
     cargo nextest r -E "test(arbtest)" {{FLAGS}}
 
-arbtest-ci *FLAGS:
-    cargo nextest -Pci r -E "test(arbtest)" {{FLAGS}}
+arbtest-ci:
+    cargo nextest -Pci r -E "test(arbtest)"
 
 # Meant for CI
 build-wasm: locale-data

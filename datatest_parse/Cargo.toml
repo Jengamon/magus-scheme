@@ -1,0 +1,11 @@
+[package]
+name = "datatest_parse"
+edition = "2021"
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chumsky = "^1.0.0-alpha"
+
+[dev-dependencies]
+assert2 = "0.3.15"

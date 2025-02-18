@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = [".", "magus_repl"]
+members = [".", "datatest_parse", "magus_repl"]
 
 [workspace.package]
 version = "0.1.0"
@@ -35,3 +35,4 @@ thiserror = "1.0.63"
 arbtest = "0.3.1"
 assert2 = "0.3.15"
 datatest-stable = "0.2.9"
+datatest_parse = { path = "datatest_parse" }

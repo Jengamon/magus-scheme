@@ -21,7 +21,7 @@ harness = false
 anyhow = "1.0.91"
 arbitrary = { version = "1", features = ["derive"] }
 either = "1.13.0"
-gc-arena = { git = "https://github.com/kyren/gc-arena", rev = "a7638dcb0ebb0525f4fa69638c4790fe989fe073" }
+gc-arena = { git = "https://github.com/kyren/gc-arena", rev = "d18259e33bd360beb6f8e07a86fc774512aec965" }
 icu_casemap = "1.5.1"
 lasso = { version = "0.7.2" }
 logos = { version = "0.14.1" }

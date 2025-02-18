@@ -531,9 +531,9 @@ dependencies = [
 [[package]]
 name = "gc-arena"
 version = "0.5.3"
-source = "git+https://github.com/kyren/gc-arena?rev=a7638dcb0ebb0525f4fa69638c4790fe989fe073#a7638dcb0ebb0525f4fa69638c4790fe989fe073"
+source = "git+https://github.com/kyren/gc-arena?rev=d18259e33bd360beb6f8e07a86fc774512aec965#d18259e33bd360beb6f8e07a86fc774512aec965"
 dependencies = [
- "gc-arena-derive 0.5.3 (git+https://github.com/kyren/gc-arena?rev=a7638dcb0ebb0525f4fa69638c4790fe989fe073)",
+ "gc-arena-derive 0.5.3 (git+https://github.com/kyren/gc-arena?rev=d18259e33bd360beb6f8e07a86fc774512aec965)",
  "sptr",
 ]
 
@@ -551,7 +551,7 @@ dependencies = [
 [[package]]
 name = "gc-arena-derive"
 version = "0.5.3"
-source = "git+https://github.com/kyren/gc-arena?rev=a7638dcb0ebb0525f4fa69638c4790fe989fe073#a7638dcb0ebb0525f4fa69638c4790fe989fe073"
+source = "git+https://github.com/kyren/gc-arena?rev=d18259e33bd360beb6f8e07a86fc774512aec965#d18259e33bd360beb6f8e07a86fc774512aec965"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -930,7 +930,7 @@ dependencies = [
  "datatest-stable",
  "datatest_parse",
  "either",
- "gc-arena 0.5.3 (git+https://github.com/kyren/gc-arena?rev=a7638dcb0ebb0525f4fa69638c4790fe989fe073)",
+ "gc-arena 0.5.3 (git+https://github.com/kyren/gc-arena?rev=d18259e33bd360beb6f8e07a86fc774512aec965)",
  "icu_casemap",
  "lasso",
  "logos",

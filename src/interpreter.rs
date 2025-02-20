@@ -1,84 +1,110 @@
 //! Executes Chunks (while integrating macros)
 
-use std::{
-    ops::Deref,
-    sync::{Arc, atomic::AtomicUsize},
-};
+use std::{ops::Deref, sync::Arc};
 
 use gc_arena::{Collect, Gc, Mutation, RefLock, Rootable};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
 
-use crate::value::{ConsCell, Value, ValuePtr};
+use crate::{
+    bytecode, compiler,
+    value::{ConsCell, Value, ValuePtr},
+};
 
 pub mod thread;
 
-new_key_type! { struct ThreadKey; }
+new_key_type! { struct ThreadKey; struct ChunkKey; struct CompilerKey; struct ValueKey; }
 #[derive(Debug)]
-struct ThreadMap<'gc> {
+struct Stash<'gc> {
     // we'll use SlotMap over HopSlotMap for now, as most of the time
     // we aren't expecting to iterate a *lot* over threads nor have many deleted threads.
     // evaluate this assumption later.
-    slotmap: SlotMap<ThreadKey, thread::ThreadPtr<'gc>>,
+    threads: SlotMap<ThreadKey, thread::ThreadPtr<'gc>>,
+    chunks: SlotMap<ChunkKey, bytecode::ChunkPtr<'gc>>,
+    compilers: SlotMap<CompilerKey, compiler::Compiler<'gc>>,
+    values: SlotMap<ValueKey, ValuePtr<'gc>>,
 }
 
-impl ThreadMap<'_> {
+impl Stash<'_> {
     fn new() -> Self {
         Self {
-            slotmap: SlotMap::with_key(),
+            threads: SlotMap::with_key(),
+            chunks: SlotMap::with_key(),
+            compilers: SlotMap::with_key(),
+            values: SlotMap::with_key(),
         }
     }
 }
 
-unsafe impl<'gc> Collect<'gc> for ThreadMap<'gc> {
+#[allow(unsafe_code)]
+unsafe impl<'gc> Collect<'gc> for Stash<'gc> {
     fn trace<T: gc_arena::collect::Trace<'gc>>(&self, cc: &mut T) {
-        for thread in self.slotmap.values() {
-            thread.trace(cc);
+        macro_rules! trace_slotmap {
+            ($field:ident) => {
+                for value in self.$field.values() {
+                    value.trace(cc);
+                }
+            };
         }
+
+        trace_slotmap!(threads);
+        trace_slotmap!(chunks);
+        trace_slotmap!(compilers);
+        trace_slotmap!(values);
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ThreadHandle {
-    key: ThreadKey,
-    count: Arc<AtomicUsize>,
+macro_rules! handler_type {
+    ($v:vis $hn:ident => $k:ty) => {
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        $v struct $hn {
+            _knob: Arc<()>,
+            key: $k,
+        }
+    };
 }
 
-impl PartialEq for ThreadHandle {
-    fn eq(&self, other: &Self) -> bool {
-        self.key == other.key
-    }
-}
-impl Eq for ThreadHandle {}
-
-impl std::hash::Hash for ThreadHandle {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.key.hash(state);
-    }
-}
-
-impl Drop for ThreadHandle {
-    fn drop(&mut self) {
-        let v = self.count.load(std::sync::atomic::Ordering::SeqCst);
-        _ = self.count.compare_exchange(
-            v,
-            v.saturating_sub(1),
-            std::sync::atomic::Ordering::SeqCst,
-            std::sync::atomic::Ordering::SeqCst,
-        );
-    }
-}
+handler_type!(pub ThreadHandle => ThreadKey);
+handler_type!(pub ChunkHandle => ChunkKey);
+handler_type!(pub CompilerHandle => CompilerKey);
+handler_type!(pub ValueHandle => ValueKey);
 
 /// Gc arena type
 #[derive(Debug, Collect)]
 #[collect(no_drop)]
-struct Arena<'gc> {
+pub struct Arena<'gc> {
     // This has an actual meaning, it is Gc::ptr_eq to mean "a null cons"
     null_value: ValuePtr<'gc>,
     // These are for convenience
     true_value: ValuePtr<'gc>,
     false_value: ValuePtr<'gc>,
 
-    threads: ThreadMap<'gc>,
+    stash: Stash<'gc>,
+    #[collect(require_static)]
+    chunk_knobs: SecondaryMap<ChunkKey, Arc<()>>,
+    #[collect(require_static)]
+    value_knobs: SecondaryMap<ValueKey, Arc<()>>,
+}
+
+impl<'gc> Arena<'gc> {
+    pub fn create_chunk_handle(
+        &mut self,
+        mc: &Mutation<'gc>,
+        chunk: bytecode::Chunk<'gc>,
+    ) -> ChunkHandle {
+        let knob = Arc::new(());
+        let key = self.stash.chunks.insert(Gc::new(mc, chunk));
+        ChunkHandle { _knob: knob, key }
+    }
+
+    pub fn stash_value(&mut self, value: ValuePtr<'gc>) -> ValueHandle {
+        let knob = Arc::new(());
+        let key = self.stash.values.insert(value);
+        ValueHandle { _knob: knob, key }
+    }
+
+    pub fn get_value(&self, handle: &ValueHandle) -> Option<ValuePtr<'gc>> {
+        self.stash.values.get(handle.key).copied()
+    }
 }
 
 /// Context for execution
@@ -89,6 +115,22 @@ pub struct Context<'gc> {
     pub null_value: ValuePtr<'gc>,
     pub true_value: ValuePtr<'gc>,
     pub false_value: ValuePtr<'gc>,
+}
+
+impl Context<'_> {
+    #[cfg(test)]
+    pub(crate) fn new_test_context<'gc>(
+        mc: &'gc Mutation<'gc>,
+        thread: thread::ThreadPtr<'gc>,
+    ) -> Context<'gc> {
+        Context {
+            mc,
+            thread,
+            null_value: Gc::new(mc, RefLock::new(Value::Cons(ConsCell::empty()))),
+            true_value: Gc::new(mc, RefLock::new(Value::Bool(true))),
+            false_value: Gc::new(mc, RefLock::new(Value::Bool(false))),
+        }
+    }
 }
 
 impl<'gc> Deref for Context<'gc> {
@@ -104,8 +146,7 @@ pub trait Includer {
 }
 
 /// Default includer that always results in an error
-struct NullIncluder;
-
+pub struct NullIncluder;
 impl Includer for NullIncluder {
     fn include(&self, filename: &str) -> anyhow::Result<Box<str>> {
         Err(anyhow::anyhow!("cannot include {filename}: null includer"))
@@ -115,9 +156,9 @@ impl Includer for NullIncluder {
 /// Entrypoint of execution.
 pub struct Interpreter {
     arena: gc_arena::Arena<Rootable![Arena<'_>]>,
-    key_counts: SecondaryMap<ThreadKey, Arc<AtomicUsize>>,
+    thread_knobs: SecondaryMap<ThreadKey, Arc<()>>,
+    compiler_knobs: SecondaryMap<CompilerKey, Arc<()>>,
     interner: lasso::Rodeo,
-    includer: Box<dyn Includer>,
 }
 
 impl Default for Interpreter {
@@ -127,47 +168,128 @@ impl Default for Interpreter {
                 null_value: Gc::new(mc, RefLock::new(Value::Cons(ConsCell::empty()))),
                 true_value: Gc::new(mc, RefLock::new(Value::Bool(true))),
                 false_value: Gc::new(mc, RefLock::new(Value::Bool(false))),
-                threads: ThreadMap::new(),
+                chunk_knobs: SecondaryMap::new(),
+                value_knobs: SecondaryMap::new(),
+                stash: Stash::new(),
             }),
-            key_counts: SecondaryMap::new(),
+            thread_knobs: SecondaryMap::new(),
+            compiler_knobs: SecondaryMap::new(),
             interner: lasso::Rodeo::new(),
-            includer: Box::new(NullIncluder),
         }
     }
 }
 
 impl Interpreter {
-    pub fn with_includer(includer: impl Includer + 'static) -> Self {
-        Self {
-            includer: Box::new(includer),
-            ..Default::default()
-        }
-    }
-
     /// Checks for any threads where the thread count is 0, and drops those pointers from the threadmap,
     /// eventually freeing the thread when the next collection occurs.
     fn check_for_dropped(&mut self) {
-        let keys_to_drop = self
-            .key_counts
+        let threads_to_drop = self
+            .thread_knobs
             .iter()
-            .filter_map(|(key, count)| {
-                (count.load(std::sync::atomic::Ordering::SeqCst) == 0).then_some(key)
-            })
+            // The strong count is 1 when the Arc in this map is the *only* reference it its value, which means that any external
+            // handle has been dropped
+            .filter_map(|(key, knob)| (Arc::strong_count(knob) == 1).then_some(key))
+            .collect::<fxhash::FxHashSet<_>>();
+        let compilers_to_drop = self
+            .compiler_knobs
+            .iter()
+            // The strong count is 1 when the Arc in this map is the *only* reference it its value, which means that any external
+            // handle has been dropped
+            .filter_map(|(key, knob)| (Arc::strong_count(knob) == 1).then_some(key))
             .collect::<fxhash::FxHashSet<_>>();
 
         self.arena.mutate_root(|_mc, arena| {
-            for key in keys_to_drop {
-                arena.threads.slotmap.remove(key);
+            let chunks_to_drop = arena
+                .chunk_knobs
+                .iter()
+                .filter_map(|(key, knob)| (Arc::strong_count(knob) == 1).then_some(key))
+                .collect::<fxhash::FxHashSet<_>>();
+            let values_to_drop = arena
+                .value_knobs
+                .iter()
+                .filter_map(|(key, knob)| (Arc::strong_count(knob) == 1).then_some(key))
+                .collect::<fxhash::FxHashSet<_>>();
+
+            for key in threads_to_drop {
+                arena.stash.threads.remove(key);
+            }
+
+            for key in compilers_to_drop {
+                arena.stash.compilers.remove(key);
+            }
+
+            for key in chunks_to_drop {
+                arena.stash.chunks.remove(key);
+            }
+
+            for key in values_to_drop {
+                arena.stash.values.remove(key);
             }
         })
     }
 
-    pub fn enter(&mut self, handle: ThreadHandle, f: impl FnOnce(Context<'_>, &mut lasso::Rodeo)) {
+    pub fn interner(&self) -> &lasso::Rodeo {
+        &self.interner
+    }
+
+    pub fn interner_mut(&mut self) -> &mut lasso::Rodeo {
+        &mut self.interner
+    }
+
+    pub fn new_compiler(&mut self) -> CompilerHandle {
+        let knob = Arc::new(());
+        self.arena.mutate_root(|mc, arena| {
+            let new_compiler = compiler::Compiler::new(mc, &mut self.interner);
+            let key = arena.stash.compilers.insert(new_compiler);
+            self.compiler_knobs.insert(key, knob.clone());
+            CompilerHandle { _knob: knob, key }
+        })
+    }
+
+    pub fn compiler_context<T>(
+        &mut self,
+        handle: &CompilerHandle,
+        func: impl FnOnce(&Mutation<'_>, &mut compiler::Compiler<'_>, &mut lasso::Rodeo) -> T,
+    ) -> T {
         self.check_for_dropped();
-        self.arena.mutate(|mc, arena| {
-            let thread = arena
+        self.arena.mutate_root(|mc, arena| {
+            let compiler = arena
+                .stash
+                .compilers
+                .get_mut(handle.key)
+                .expect("compiler was dropped when a handle still exists");
+            (func)(mc, compiler, &mut self.interner)
+        })
+    }
+
+    pub fn create_thread(&mut self, code: &ChunkHandle) -> ThreadHandle {
+        let knob = Arc::new(());
+        self.arena.mutate_root(|mc, arena| {
+            let chunk = arena
+                .stash
+                .chunks
+                .get(code.key)
+                .expect("chunk was deallocated");
+            let new_thread = thread::Thread::new(mc, *chunk);
+            let key = arena
+                .stash
                 .threads
-                .slotmap
+                .insert(Gc::new(mc, RefLock::new(new_thread)));
+            self.thread_knobs.insert(key, knob.clone());
+            ThreadHandle { key, _knob: knob }
+        })
+    }
+
+    pub fn enter(
+        &mut self,
+        handle: &ThreadHandle,
+        func: impl FnOnce(Context<'_>, &mut Arena<'_>, &mut lasso::Rodeo),
+    ) {
+        self.check_for_dropped();
+        self.arena.mutate_root(|mc, arena| {
+            let thread = arena
+                .stash
+                .threads
                 .get(handle.key)
                 .expect("thread was dropped when a handle still exists");
             let ctx = Context {
@@ -177,7 +299,7 @@ impl Interpreter {
                 true_value: arena.true_value,
                 false_value: arena.false_value,
             };
-            (f)(ctx, &mut self.interner);
+            (func)(ctx, arena, &mut self.interner);
         })
     }
 }

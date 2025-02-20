@@ -1,5 +1,6 @@
 //! This is *also* lifted from piccolo, so that we can store downcastable Any types
 //! that are GC compatible
+#![allow(unsafe_code)]
 
 use std::{
     any::TypeId,
@@ -8,9 +9,9 @@ use std::{
 };
 
 use gc_arena::{
+    Collect, Gc, Mutation, Rootable,
     arena::Root,
     barrier::{self, Write},
-    Collect, Gc, Mutation, Rootable,
 };
 
 /// A `Gc` pointer to any type `T: Collect + 'gc` which allows safe downcasting.

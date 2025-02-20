@@ -2,19 +2,24 @@
 //
 // It is convertable to and from StackValues as well as Datum
 
-use std::{collections::HashMap, sync::Arc};
+use core::fmt;
+use std::{
+    collections::{HashMap, HashSet},
+    num::NonZero,
+    rc::Rc,
+    sync::Arc,
+};
 
 use fxhash::FxHashMap;
-use gc_arena::{Collect, Gc, Mutation};
-use lasso::Interner;
+use gc_arena::{Collect, Gc, Mutation, RefLock};
 
 use crate::{
-    GAstNode, ValuePtr,
+    ContainsDatum, DatumVisitor, GAstNode, ValuePtr,
     bytecode::{Bytecode, Chunk, ChunkPtr, Constant, SourceData},
-    environment::StackEnvironmentPtr,
+    environment::{Environment, StackEnvironmentPtr},
     general_parser::GeneralParserError,
-    interpreter::syntax::MacroPtr,
-    lexer::LexerError,
+    interpreter::Includer,
+    runtime::lambda::CompiledLambdaPtr,
 };
 
 /// Values that can be at the head of a list
@@ -32,6 +37,24 @@ pub enum ListHead<'gc> {
     DefineLibrary,
 }
 
+impl ListHead<'_> {
+    pub fn into_symbol(self, interner: &mut lasso::Rodeo) -> Option<lasso::Spur> {
+        let import = interner.get_or_intern_static("import");
+        let define_library = interner.get_or_intern_static("define-library");
+        match self {
+            ListHead::Program(p) if matches!(p.data, ProgramData::Symbol(_)) => {
+                Some(match p.data {
+                    ProgramData::Symbol(s) => s,
+                    _ => unreachable!(),
+                })
+            }
+            ListHead::Import => Some(import),
+            ListHead::DefineLibrary => Some(define_library),
+            _ => None,
+        }
+    }
+}
+
 pub type ProgramPtr<'gc> = Gc<'gc, Program<'gc>>;
 /// This corresponds directly with external representations.
 ///
@@ -41,6 +64,7 @@ pub type ProgramPtr<'gc> = Gc<'gc, Program<'gc>>;
 ///   that are always available, and handle some symbol resolution ahead-of-time
 /// - macros can generate this value w/o needing actual source (the source location of the macro is used
 ///   for this)
+/// - for set forms (syntax-rules, etc)
 ///
 /// because of this, a program explicitly does *not* have any source information.
 #[derive(Debug, Collect, Clone)]
@@ -74,53 +98,109 @@ pub enum ProgramData<'gc> {
 #[derive(Debug, Collect, Clone)]
 #[collect(no_drop)]
 pub struct Program<'gc> {
-    data: ProgramData<'gc>,
+    pub data: ProgramData<'gc>,
     // If this program came from source, this is the info
     #[collect(require_static)]
-    source: SourceData,
+    pub source: Option<SourceData>,
+}
+
+impl<'gc> Program<'gc> {
+    pub fn display<R: lasso::Resolver>(
+        program: ProgramPtr<'gc>,
+        resolver: R,
+    ) -> DisplayableProgram<'gc, R> {
+        DisplayableProgram {
+            program,
+            resolver: Rc::new(resolver),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct DisplayableProgram<'gc, R: lasso::Resolver> {
+    program: ProgramPtr<'gc>,
+    resolver: Rc<R>,
+}
+
+impl<T: lasso::Resolver> fmt::Display for DisplayableProgram<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.program.data {
+            ProgramData::Integer(i) => write!(f, "{i}"),
+            ProgramData::Inexact(fl) => write!(f, "{fl}"),
+            ProgramData::String(spur) => todo!(),
+            ProgramData::Symbol(spur) => todo!(),
+            ProgramData::Bool(_) => todo!(),
+            ProgramData::Char(_) => todo!(),
+            ProgramData::Labeled { label, item } => todo!(),
+            ProgramData::LabelRef(_) => todo!(),
+            ProgramData::EmptyList => todo!(),
+            ProgramData::List { head, body } => todo!(),
+            ProgramData::DottedList { pre_dot, dot } => todo!(),
+        }
+    }
 }
 
 // TODO Provide nice ways of "mutation" that create new programs
 // (or just provide a visitor API that instead can return a value)
 
 impl<'gc> Program<'gc> {
-    pub fn new(data: ProgramData<'gc>, source: SourceData) -> Self {
+    pub fn new(data: ProgramData<'gc>, source: Option<SourceData>) -> Self {
         Self { data, source }
     }
 }
 
-pub trait ProgramDataTransform<T, C = ()> {
-    fn visit_program_data(&mut self, program: &ProgramData<'_>, ctx: C) -> T {
+pub trait ProgramVisitor {
+    fn visit_program_data(&mut self, program: &ProgramData<'_>) {
         match program {
-            ProgramData::Integer(int) => self.visit_integer(*int, ctx),
-            ProgramData::Inexact(inexact) => self.visit_inexact(*inexact, ctx),
-            ProgramData::String(string_id) => self.visit_string(*string_id, ctx),
-            ProgramData::Symbol(symbol_id) => self.visit_symbol(*symbol_id, ctx),
-            ProgramData::Bool(b) => self.visit_bool(*b, ctx),
-            ProgramData::Char(c) => self.visit_char(*c, ctx),
-            ProgramData::Labeled { label, item } => self.visit_labeled(*label, *item, ctx),
-            ProgramData::LabelRef(label_ref) => self.visit_label_ref(*label_ref, ctx),
-            ProgramData::EmptyList => self.visit_empty_list(ctx),
-            ProgramData::List { head, body } => self.visit_list(*head, body.as_slice(), ctx),
+            ProgramData::Integer(int) => self.visit_integer(*int),
+            ProgramData::Inexact(inexact) => self.visit_inexact(*inexact),
+            ProgramData::String(string_id) => self.visit_string(*string_id),
+            ProgramData::Symbol(symbol_id) => self.visit_symbol(*symbol_id),
+            ProgramData::Bool(b) => self.visit_bool(*b),
+            ProgramData::Char(c) => self.visit_char(*c),
+            ProgramData::Labeled { label, item } => self.visit_labeled(*label, *item),
+            ProgramData::LabelRef(label_ref) => self.visit_label_ref(*label_ref),
+            ProgramData::EmptyList => self.visit_empty_list(),
+            ProgramData::List { head, body } => self.visit_list(*head, body.as_slice()),
             ProgramData::DottedList { pre_dot, dot } => {
-                self.visit_dotted_list(pre_dot.as_slice(), *dot, ctx)
+                self.visit_dotted_list(pre_dot.as_slice(), *dot)
             }
         }
     }
-    fn visit_program(&mut self, ptr: ProgramPtr<'_>, ctx: C) -> T {
-        self.visit_program_data(&ptr.data, ctx)
+    fn visit_program(&mut self, ptr: ProgramPtr<'_>) {
+        self.visit_program_data(&ptr.data)
     }
-    fn visit_integer(&mut self, integer: i64, ctx: C) -> T;
-    fn visit_inexact(&mut self, inexact: f64, ctx: C) -> T;
-    fn visit_string(&mut self, string_id: lasso::Spur, ctx: C) -> T;
-    fn visit_symbol(&mut self, symbol_id: lasso::Spur, ctx: C) -> T;
-    fn visit_bool(&mut self, b: bool, ctx: C) -> T;
-    fn visit_char(&mut self, c: char, ctx: C) -> T;
-    fn visit_labeled(&mut self, label: usize, item: ProgramPtr<'_>, ctx: C) -> T;
-    fn visit_label_ref(&mut self, label_ref: usize, ctx: C) -> T;
-    fn visit_empty_list(&mut self, ctx: C) -> T;
-    fn visit_list(&mut self, head: ListHead<'_>, body: &[ProgramPtr<'_>], ctx: C) -> T;
-    fn visit_dotted_list(&mut self, pre_dot: &[ProgramPtr<'_>], dot: ProgramPtr<'_>, ctx: C) -> T;
+    fn visit_integer(&mut self, integer: i64) {
+        let _ = integer;
+    }
+    fn visit_inexact(&mut self, inexact: f64) {
+        let _ = inexact;
+    }
+    fn visit_string(&mut self, string_id: lasso::Spur) {
+        let _ = string_id;
+    }
+    fn visit_symbol(&mut self, symbol_id: lasso::Spur) {
+        let _ = symbol_id;
+    }
+    fn visit_bool(&mut self, b: bool) {
+        let _ = b;
+    }
+    fn visit_char(&mut self, c: char) {
+        let _ = c;
+    }
+    fn visit_labeled(&mut self, label: usize, item: ProgramPtr<'_>) {
+        let _ = (label, item);
+    }
+    fn visit_label_ref(&mut self, label_ref: usize) {
+        let _ = label_ref;
+    }
+    fn visit_empty_list(&mut self) {}
+    fn visit_list(&mut self, head: ListHead<'_>, body: &[ProgramPtr<'_>]) {
+        let _ = (head, body);
+    }
+    fn visit_dotted_list(&mut self, pre_dot: &[ProgramPtr<'_>], dot: ProgramPtr<'_>) {
+        let _ = (pre_dot, dot);
+    }
 }
 
 // TODO If we use/had specialization, we maybe could provide default impls if T: Default
@@ -136,13 +216,27 @@ pub trait ParseProgram {
 }
 
 #[derive(thiserror::Error, Debug)]
+pub struct GeneralParseErrors(Box<[GeneralParserError]>);
+impl fmt::Display for GeneralParseErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "failed to parse code:")?;
+
+        for err in &self.0 {
+            writeln!(f, "  - {err} ({err:?})")?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
 pub enum StringProgramError {
-    #[error("failed to parse code")]
-    GeneralParse(Box<[GeneralParserError]>),
+    #[error(transparent)]
+    GeneralParse(#[from] GeneralParseErrors),
     #[error(transparent)]
     GAst(#[from] GAstProgramError),
 }
-impl<T: AsRef<str>> ParseProgram for T {
+impl<T: AsRef<str>, SN: AsRef<str>> ParseProgram for (SN, T) {
     type Error = StringProgramError;
     fn parse_program<'gc>(
         self,
@@ -150,20 +244,23 @@ impl<T: AsRef<str>> ParseProgram for T {
         interner: &mut lasso::Rodeo,
         case_insensitive: bool,
     ) -> Result<Vec<ProgramPtr<'gc>>, Self::Error> {
-        let gast = crate::general_parse(self);
+        let (source_name, source) = self;
+        let gast = crate::general_parse(source);
         if !gast.errors().is_empty() {
-            return Err(StringProgramError::GeneralParse(gast.into_errors().into()));
+            return Err(GeneralParseErrors(gast.into_errors().into()))?;
         }
 
-        Ok(crate::Module::cast(gast.syntax())
-            .expect("ICE: top-level code cannot be Module")
+        Ok((
+            source_name,
+            crate::Module::cast(gast.syntax()).expect("ICE: top-level code cannot be Module"),
+        )
             .parse_program(mc, interner, case_insensitive)?)
     }
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum GAstProgramError {}
-impl ParseProgram for crate::Module {
+impl<SN: AsRef<str>> ParseProgram for (SN, crate::Module) {
     type Error = GAstProgramError;
     fn parse_program<'gc>(
         self,
@@ -171,12 +268,35 @@ impl ParseProgram for crate::Module {
         interner: &mut lasso::Rodeo,
         case_insensitive: bool,
     ) -> Result<Vec<ProgramPtr<'gc>>, Self::Error> {
-        todo!()
+        let (source_name, module) = self;
+
+        struct ProgramVisitor<'a, 'gc> {
+            mc: &'a Mutation<'gc>,
+            interner: &'a mut lasso::Rodeo,
+            case_insensitive: bool,
+            ptr: Option<Result<ProgramPtr<'gc>, GAstProgramError>>,
+        }
+        impl DatumVisitor for ProgramVisitor<'_, '_> {}
+
+        let mut programs = vec![];
+        for d in module.datum() {
+            let mut visitor = ProgramVisitor {
+                mc,
+                interner,
+                case_insensitive,
+                ptr: None,
+            };
+            visitor.visit_datum(dbg!(&d));
+            programs.push(visitor.ptr.expect("null program")?);
+        }
+
+        Ok(programs)
     }
 }
 // TODO impl IntoProgram for GAst types (Module, Datum, etc.)
 
 /*
+NOTE Nah
 TODO Prevent the definition of macros of any primitive form, meaning:
 define
 lambda
@@ -188,10 +308,85 @@ then provide Rust-side impls for the rest of the standard library (and/or mix it
 Scheme-impls)
 */
 
-/// Some macros are special, and are resolved at compile-time, given special access to the parts of
-/// a `Chunk`, and can add instructions to them, but are unable to suspend, are only given shared
-/// access to themself (rather than unique), and have no access to environments.
-pub trait Primitive {
+pub struct SyntaxContext<'a, 'gc> {
+    pub mc: &'a Mutation<'gc>,
+    pub interner: &'a mut lasso::Rodeo,
+    pub world: &'a World,
+    constants: &'a mut Vec<Constant>,
+    lambdas: &'a mut Vec<CompiledLambdaPtr<'gc>>,
+}
+
+impl<'gc> SyntaxContext<'_, 'gc> {
+    pub fn push_constant(&mut self, c: Constant) -> usize {
+        if let Some(p) = self.constants.iter().position(|constant| constant == &c) {
+            p
+        } else {
+            let idx = self.constants.len();
+            self.constants.push(c);
+            idx
+        }
+    }
+
+    pub fn add_lambda(&mut self, ptr: CompiledLambdaPtr<'gc>) -> usize {
+        if let Some(p) = self.lambdas.iter().position(|lptr| Gc::ptr_eq(*lptr, ptr)) {
+            p
+        } else {
+            let idx = self.lambdas.len();
+            self.lambdas.push(ptr);
+            idx
+        }
+    }
+
+    pub fn constants(&self) -> impl IntoIterator<Item = Constant> {
+        self.constants.clone()
+    }
+
+    pub fn lambdas(&self) -> impl IntoIterator<Item = CompiledLambdaPtr<'gc>> {
+        self.lambdas.clone()
+    }
+}
+
+impl<'gc> std::ops::Deref for SyntaxContext<'_, 'gc> {
+    type Target = Mutation<'gc>;
+    fn deref(&self) -> &Self::Target {
+        self.mc
+    }
+}
+
+trait Collectable {}
+pub trait Transformer<'gc>: Syntax {}
+impl<'gc, T: Syntax + Collect<'gc>> Transformer<'gc> for T {}
+
+/// The result of a syntax evaluation
+pub enum SyntaxReturn<'gc> {
+    /// This is code to add to the compiling chunk
+    Code(Box<[Bytecode]>),
+    /// This is a transformer that can be used by a syntax item
+    /// to transform code
+    Transformer(Gc<'gc, dyn Transformer<'gc>>),
+}
+
+impl<'gc> SyntaxReturn<'gc> {
+    pub fn into_bytecode(self) -> impl IntoIterator<Item = Bytecode> + use<> {
+        match self {
+            Self::Code(code) => code,
+            // A transformer's runtime value is (eq? '())
+            Self::Transformer(_) => Box::from([Bytecode::PushNull]),
+        }
+    }
+
+    pub fn into_transformer(self) -> Option<Gc<'gc, dyn Transformer<'gc>>> {
+        match self {
+            Self::Code(_) => None,
+            Self::Transformer(trans) => Some(trans),
+        }
+    }
+}
+
+/// this is a macro, it interacts with compiler code as we compile
+/// `define-syntax`, for example, is a primitive that creates a primitive and inserts it into
+/// the local world
+pub trait Syntax: std::fmt::Debug {
     /// Evaluate a macro, until it finishes
     ///
     /// # Parameters
@@ -199,18 +394,17 @@ pub trait Primitive {
     /// - `args`: external representation corresponding to passed in syntax
     fn evaluate<'gc>(
         &self,
-        mc: &Mutation<'gc>,
-        compiler: &mut Compiler,
-        interner: &mut lasso::Rodeo,
-        world: &World,
-        constants: &mut Vec<Constant>,
-        // TODO Chunk constants
+        ctx: &mut SyntaxContext<'_, 'gc>,
+        compiler: &mut Compiler<'gc>,
+        // (technically a misnomer, as it isn't really that but an environment
+        // whose parent is the import environment)
+        import_env: StackEnvironmentPtr<'gc>,
         // TODO Chunk lambdas
-        args: &[Program<'gc>],
-    ) -> anyhow::Result<Box<[Bytecode]>>;
+        args: &[ProgramPtr<'gc>],
+    ) -> anyhow::Result<SyntaxReturn<'gc>>;
 }
 // TODO we are very stringent, and might relax this in the future...
-type ArcPrimitive = Arc<dyn Primitive + Sync + Send + 'static>;
+pub type ArcSyntax = Arc<dyn Syntax + Sync + Send + 'static>;
 
 // TODO contemplate Arc or Rc?
 // ...benchmark to see?
@@ -220,6 +414,12 @@ type ArcPrimitive = Arc<dyn Primitive + Sync + Send + 'static>;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Collect)]
 #[collect(require_static)]
 pub struct LibraryName(Arc<[LibraryNameItem]>);
+impl LibraryName {
+    #[inline]
+    pub fn is_valid(&self) -> bool {
+        !self.0.is_empty()
+    }
+}
 impl FromIterator<LibraryNameItem> for LibraryName {
     fn from_iter<T: IntoIterator<Item = LibraryNameItem>>(iter: T) -> Self {
         Self(iter.into_iter().collect())
@@ -230,19 +430,36 @@ pub enum LibraryNameItem {
     Identifier(lasso::Spur),
     Integer(u64),
 }
-// FIXME when creating a Library name for *defining* a library
-// reserve (prevent the definition of) libraries where the first element is
-// either "scheme", "srfi" (reserved for report impl and SRFI impl respectively),
-// or "magus" (reserved for use by "World" modules that want a unique namespace)
-// TODO something we will *definitely* support is SRFI 1: List library
-// cuz that's where `filter` is, but that should just show up as a Module that one can include
-// in a world
+
+#[macro_export]
+macro_rules! library_name {
+    ($intern:expr => $( $s:tt )+) => {
+        [
+            $(
+                library_name!(@parsing $intern => $s)
+            ),+
+        ]
+    };
+    (@parsing $intern:expr => $s:ident) => {
+        $crate::compiler::LibraryNameItem::Identifier($intern.get_or_intern_static(stringify!($s)))
+    };
+    (@parsing $_:expr => $s:literal) => {
+        $crate::compiler::LibraryNameItem::Integer($s)
+    }
+}
 
 /// Interface for Scheme libraries defined in Rust
 pub trait Module {
-    fn syntax<'gc>(&self, mc: &Mutation<'gc>, symbol: &str) -> Option<MacroPtr<'gc>>;
-    fn primitive(&self, symbol: &str) -> Option<ArcPrimitive>;
-    fn value<'gc>(&self, mc: &Mutation<'gc>, symbol: &str) -> Option<ValuePtr<'gc>>;
+    /// all symbols defined by this module (used when *everything* is imported)
+    fn all_symbols(&self, interner: &mut lasso::Rodeo) -> HashSet<lasso::Spur>;
+    fn primitive(&self, interner: &mut lasso::Rodeo, symbol: lasso::Spur) -> Option<ArcSyntax> {
+        let _ = (interner, symbol);
+        None
+    }
+    fn value<'gc>(&self, mc: &Mutation<'gc>, symbol: &str) -> Option<ValuePtr<'gc>> {
+        let _ = (mc, symbol);
+        None
+    }
 }
 
 /// Container for Rust-defined modules
@@ -289,11 +506,34 @@ impl World {
     }
 }
 
+/// The result of a `define-library`
+#[derive(Debug)]
+struct SchemeLibrary<'gc> {
+    exported_items: HashMap<lasso::Spur, ValuePtr<'gc>>,
+}
+
+#[allow(unsafe_code)]
+unsafe impl<'gc> Collect<'gc> for SchemeLibrary<'gc> {
+    fn trace<T: gc_arena::collect::Trace<'gc>>(&self, cc: &mut T) {
+        for value in self.exported_items.values() {
+            value.trace(cc);
+        }
+    }
+}
+
 /// A container for Scheme-defined modules (using `define-library` at the top level)
-#[derive(Collect, Debug)]
+#[derive(Collect, Debug, Default)]
 #[collect(no_drop)]
-pub struct LocalWorld<'gc> {
-    modules: HashMap<LibraryName, Gc<'gc, ()>>,
+struct LocalWorld<'gc> {
+    modules: HashMap<LibraryName, SchemeLibrary<'gc>>,
+}
+
+type SyntaxDef = HashMap<lasso::Spur, ArcSyntax>;
+type VariableDef = HashSet<lasso::Spur>;
+#[derive(Debug, Clone, Default)]
+pub struct ArgumentScope {
+    args: Box<[lasso::Spur]>,
+    rest: Option<lasso::Spur>,
 }
 
 // Compiles Programs into Chunks
@@ -306,33 +546,559 @@ pub struct Compiler<'gc> {
     /// Compilers store the modules that have been defined in source using `define-library`
     /// here.
     local_world: LocalWorld<'gc>,
+    // macros that have been defined
+    #[collect(require_static)]
+    syntax_items: SyntaxDef,
+    // variables that are in scope
+    #[collect(require_static)]
+    variables_defined: VariableDef,
+    // arguments that are in scope
+    #[collect(require_static)]
+    argument_scope: ArgumentScope,
+
+    // checkpoints store macro and variable definitions
+    #[collect(require_static)]
+    checkpoints: Vec<(SyntaxDef, VariableDef, ArgumentScope)>,
+    // import environments in-scope
+    environments: Vec<StackEnvironmentPtr<'gc>>,
+    // which environment to use
+    env_ptr: usize,
+}
+#[derive(Debug, Clone, Copy)]
+pub struct Checkpoint(usize);
+#[derive(Debug, Clone, Copy)]
+pub struct EnvironmentSpec(NonZero<usize>);
+#[derive(Debug, Clone, Copy)]
+pub enum Arg {
+    Index(usize),
+    Rest,
+}
+
+#[derive(thiserror::Error, Debug, Clone)]
+pub enum CompileError {
+    #[error("a label was encountered in code")]
+    Labeled(Option<SourceData>),
+    #[error("a label ref was encountered in code")]
+    LabelRef(Option<SourceData>),
+    #[error("an empty list was encountered in code")]
+    EmptyList(Option<SourceData>),
+    #[error("a dotted list was encountered in code")]
+    DottedList(Option<SourceData>),
+    #[error("a macro encountered an error: {0}")]
+    Macro(Arc<anyhow::Error>, Option<SourceData>),
+}
+
+#[derive(Debug, Clone)]
+pub enum ImportSet {
+    /// Import all exports of a modules
+    Name(LibraryName),
+    /// Import only certain symbols from a module
+    Only {
+        set: Arc<ImportSet>,
+        symbols: Arc<[lasso::Spur]>,
+    },
+    // TODO other import specs: except, prefix, rename
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum CompilerError {}
+pub enum ImportSetError<'gc> {
+    #[error("{0} is not an import set")]
+    NotImportSet(DisplayableProgram<'gc, lasso::RodeoResolver>),
+    #[error("{0} is not a valid library name")]
+    InvalidLibraryName(DisplayableProgram<'gc, lasso::RodeoResolver>),
+}
+impl ImportSet {
+    fn as_library_name(ptr: ProgramPtr<'_>) -> Option<LibraryName> {
+        // We allow creating the empty library name as a "secret from code" module (as we compile
+        // imports from code, we reject code imports from the '() module, which the Rust side
+        // is completely fine with)
+        todo!()
+    }
+
+    pub fn convert<'gc>(
+        interner: &mut lasso::Rodeo,
+        ptr: ProgramPtr<'gc>,
+    ) -> Result<Self, ImportSetError<'gc>> {
+        let only = interner.get_or_intern_static("only");
+        let except = interner.get_or_intern_static("except");
+        let prefix = interner.get_or_intern_static("prefix");
+        let rename = interner.get_or_intern_static("rename");
+
+        match &ptr.data {
+            ProgramData::List { head, body } => match head {
+                ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == only) => {
+                    // read first body param as an import set, and the rest *must* be symbols
+                    todo!()
+                }
+                ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == except) =>
+                {
+                    // read first body param as an import set, and the rest *must* be symbols
+                    todo!()
+                }
+                ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == prefix) =>
+                {
+                    // read first body param as an import set, and the second as a prefix to prepend
+                    // can only specify those 2
+                    todo!()
+                }
+                ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == rename) =>
+                {
+                    // read first body param as an import set, and the rest *must* be pairs of sym1 and sym2
+                    todo!()
+                }
+                ListHead::Program(p)
+                    if matches!(&p.data, ProgramData::Symbol(_) | ProgramData::Integer(_)) =>
+                {
+                    Ok(Self::Name(Self::as_library_name(*p).ok_or(
+                        ImportSetError::InvalidLibraryName(Program::display(
+                            *p,
+                            interner.clone().into_resolver(),
+                        )),
+                    )?))
+                }
+                _ => Err(ImportSetError::NotImportSet(Program::display(
+                    ptr,
+                    interner.clone().into_resolver(),
+                ))),
+            },
+            _ => Err(ImportSetError::NotImportSet(Program::display(
+                ptr,
+                interner.clone().into_resolver(),
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum LibraryDeclaration<'gc> {
+    Import(Rc<[ImportSet]>),
+    IncludeLibraryDeclarations(Rc<[Rc<str>]>),
+    Include {
+        filenames: Rc<[Rc<str>]>,
+        case_insensitive: bool,
+    },
+    Begin(Rc<[ProgramPtr<'gc>]>),
+}
+
+impl<'gc> LibraryDeclaration<'gc> {
+    pub fn convert(interner: &mut lasso::Rodeo, ptr: ProgramPtr<'gc>) -> Option<Self> {
+        let import = interner.get_or_intern_static("import");
+        let include_library_definitions =
+            interner.get_or_intern_static("include-library-definitions");
+        let include = interner.get_or_intern_static("include");
+        let include_ci = interner.get_or_intern_static("include-ci");
+        let begin = interner.get_or_intern_static("begin");
+        None
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ImportError {}
+
+#[derive(thiserror::Error, Debug)]
+pub enum DefineLibraryError {
+    #[error("empty library name")]
+    EmptyLibraryName,
+    #[error("attempted to define reserved library name")]
+    ReservedName(LibraryName),
+    #[error("attempted to define an existing library")]
+    AlreadyExists(LibraryName),
+}
 
 impl<'gc> Compiler<'gc> {
+    pub fn new(mc: &Mutation<'gc>, interner: &mut lasso::Rodeo) -> Self {
+        Self {
+            local_world: LocalWorld::default(),
+            syntax_items: Default::default(),
+            variables_defined: Default::default(),
+            argument_scope: Default::default(),
+            checkpoints: Default::default(),
+            // The very first environment pointer is always the default environment
+            environments: vec![Gc::new(mc, RefLock::new(Environment::new(mc, None)))],
+            env_ptr: 0,
+        }
+    }
+
     /// Compile an list of programs into a [`Chunk`]
     ///
     /// # Parameters
     /// - `mc`
     /// - `interner`
     /// - `world`
+    /// - `includer`: an [`Includer`] for external files
+    /// - `program`: pointers to the members of a program
     pub fn compile(
         &mut self,
         mc: &Mutation<'gc>,
         interner: &mut lasso::Rodeo,
         world: &World,
-        program: &[ProgramPtr<'gc>],
-    ) -> Result<Chunk<'gc>, CompilerError> {
-        // At the top-level, we interpret the list-heads of Import and
-        // DefineLibrary, otherwise it is code to compile
+        includer: &impl Includer,
+        programs: impl IntoIterator<Item = ProgramPtr<'gc>>,
+    ) -> Result<ChunkPtr<'gc>, CompileError> {
+        let mut programs = programs.into_iter().peekable();
 
-        // once we encounter a piece that is interpreted as code,
-        // we turn off the import system (import and define-library), and interpret
-        // them as symbols.
-        let mut library_system = true;
+        // TODO Read programs in order, while the program is List with head Import or DefineLibrary
+        // interp as library system, otherwise, compile and turn off lib system (use compile_code)
 
+        // Module system loop
+        loop {
+            match programs.peek() {
+                Some(p)
+                    if matches!(
+                        p.data,
+                        ProgramData::List {
+                            head: ListHead::Import | ListHead::DefineLibrary,
+                            ..
+                        }
+                    ) =>
+                {
+                    // import code, so read carefully
+                    let _program = programs.next().unwrap();
+                    // Convert the list heads into our internal type
+                    // the body of Import become import sets,
+                    // TODO When importing things, make sure to check is_valid when the import set comes from code!!
+                    // the bodies of define-library become library declarations
+                }
+                _ => break,
+            }
+        }
+
+        // compile code loop
+        let mut constants = Vec::new();
+        let mut lambdas = Vec::new();
+        let mut context = SyntaxContext {
+            mc,
+            interner,
+            world,
+            constants: &mut constants,
+            lambdas: &mut lambdas,
+        };
+        let mut code = vec![];
+        let mut labels = FxHashMap::default();
+        for program in programs {
+            if let Some(source) = program.source {
+                labels.insert(code.len(), source);
+            }
+            code.extend(self.compile_code(&mut context, program)?.into_bytecode());
+        }
+
+        // TODO Generate labels
+
+        // when we create our chunk, our import env is *always* the initial default environment
+        Ok(Chunk::new(
+            mc,
+            code,
+            constants,
+            lambdas,
+            self.default_environment_ptr(),
+            labels,
+        ))
+    }
+
+    /// Compile code in the current context
+    ///
+    /// Is meant for the implementations of macros ([`Syntax`])
+    pub fn compile_code(
+        &mut self,
+        ctx: &mut SyntaxContext<'_, 'gc>,
+        program: ProgramPtr<'gc>,
+    ) -> Result<SyntaxReturn<'gc>, CompileError> {
+        macro_rules! simple_constant {
+            ($data:expr => $name:ident) => {{
+                let index = ctx.push_constant(Constant::$name($data));
+                Ok(SyntaxReturn::Code(Box::from([Bytecode::PushConst {
+                    index,
+                }])))
+            }};
+        }
+        match &program.data {
+            ProgramData::Integer(i) => {
+                simple_constant!(*i => Number)
+            }
+            ProgramData::Inexact(f) => {
+                simple_constant!(*f => Inexact)
+            }
+            ProgramData::String(spur) => {
+                let index =
+                    ctx.push_constant(Constant::String(Arc::from(ctx.interner.resolve(spur))));
+                Ok(SyntaxReturn::Code(Box::from([Bytecode::PushConst {
+                    index,
+                }])))
+            }
+            ProgramData::Symbol(spur) => Ok(SyntaxReturn::Code(Box::from([Bytecode::Reference {
+                symbol: *spur,
+            }]))),
+            ProgramData::Bool(b) => Ok(SyntaxReturn::Code(Box::from([Bytecode::PushBool {
+                bool: *b,
+            }]))),
+            ProgramData::Char(c) => {
+                simple_constant!(*c => Char)
+            }
+            ProgramData::Labeled { .. } => Err(CompileError::Labeled(program.source)),
+            ProgramData::LabelRef(_) => Err(CompileError::LabelRef(program.source)),
+            ProgramData::EmptyList => Err(CompileError::EmptyList(program.source)),
+            ProgramData::List { head, body } => {
+                // At this point, import and define-library don't have a special meaning anymore, so just interpret them as
+                // their corresponding symbols
+                let head_symbol = head.into_symbol(ctx.interner);
+                if let Some(mcr) = head_symbol.and_then(|sym| self.get_macro(sym)) {
+                    mcr.evaluate(ctx, self, self._current_env(), body)
+                        .map_err(|e| CompileError::Macro(Arc::new(e), program.source))
+                } else {
+                    let mut code = vec![];
+                    let args = body.len();
+                    for res in body.iter().map(|program| self.compile_code(ctx, *program)) {
+                        code.extend(res?.into_bytecode());
+                    }
+
+                    match head {
+                        ListHead::Program(program) => {
+                            code.extend(self.compile_code(ctx, *program)?.into_bytecode());
+                        }
+                        // head_symbol is Some(spur) where spur is the symbol we want
+                        ListHead::DefineLibrary | ListHead::Import => {
+                            code.push(Bytecode::Reference {
+                                symbol: head_symbol.unwrap(),
+                            });
+                        }
+                    };
+
+                    code.push(Bytecode::Call { args });
+                    Ok(SyntaxReturn::Code(code.into()))
+                }
+            }
+            ProgramData::DottedList { .. } => Err(CompileError::DottedList(program.source)),
+        }
+    }
+
+    /// Interpret an import set in the current environment
+    pub fn import(
+        &mut self,
+        mc: &Mutation<'gc>,
+        interner: &mut lasso::Rodeo,
+        world: &World,
+        import_set: &ImportSet,
+    ) -> Result<(), ImportError> {
+        // - import: reads import sets, then searches local world (once implemented), then world, for the requisite module
+        //   and importing the names as defined by spec
         todo!()
+    }
+
+    /// Interpret a library definition into a given LocalWorld
+    ///
+    /// # Parameters
+    /// - `mc`
+    /// - `name`: library name to register
+    /// - `worlds`: [`LocalWorld`] and [`World`] to use
+    /// - `interner`:
+    /// - `is_native`: will reserved names be allowed through?
+    /// - `library_decls`: library declarations
+    fn define_library(
+        mc: &Mutation<'gc>,
+        name: &LibraryName,
+        worlds: (&mut LocalWorld<'gc>, &World),
+        interner: &mut lasso::Rodeo,
+        includer: &impl Includer,
+        is_native: bool,
+        library_decls: impl IntoIterator<Item = LibraryDeclaration<'gc>>,
+    ) -> Result<(), DefineLibraryError> {
+        // The '() module is private from Scheme code
+        if !name.is_valid() {
+            return Err(DefineLibraryError::EmptyLibraryName);
+        }
+
+        // We reserve all modules name with the first component 'scheme, 'srfi, and 'magus
+        let reserved_starts = ["scheme", "srfi", "magus"].map(|s| interner.get_or_intern_static(s));
+        if !is_native
+            && matches!(name.0[0], LibraryNameItem::Identifier(ref id) if reserved_starts.contains(id))
+        {
+            return Err(DefineLibraryError::ReservedName(name.clone()));
+        }
+
+        // If a name can be found, that is *also* an error
+        let (local_world, world) = worlds;
+        if local_world.modules.contains_key(name) || world.modules.contains_key(name) {
+            return Err(DefineLibraryError::AlreadyExists(name.clone()));
+        }
+
+        // TODO something we will *definitely* support is SRFI 1: List library
+        // cuz that's where `filter` is, but that should just show up as a Module that one can include
+        // in a world
+
+        // - define-library: goes through the definition, interpreting the heads as keywords
+        //   then creates a module in the local world for that name (errors before interp if the name is already
+        //   taken by either a previous define-library or the world)
+        todo!()
+    }
+
+    /// Checks if an expression is considered a definition by Scheme
+    pub fn is_definition(interner: &mut lasso::Rodeo, program: ProgramPtr<'gc>) -> bool {
+        let define_head_symbols: [_; 4] = [
+            "define",
+            "define-syntax",
+            "define-values",
+            "define-record-type",
+        ]
+        .map(|s| interner.get_or_intern_static(s));
+        let begin = interner.get_or_intern_static("begin");
+
+        match &program.data {
+            ProgramData::List { head, body } => {
+                matches!(head, ListHead::Program(p) if match p.data {
+                    ProgramData::Symbol(s) if define_head_symbols.contains(&s) => true,
+                    ProgramData::Symbol(s)
+                        if s == begin
+                            && body.iter().all(|bp| Self::is_definition(interner, *bp)) =>
+                    {
+                        true
+                    }
+                    _ => false,
+                })
+            }
+            _ => false,
+        }
+    }
+
+    /// Used internally to get the current import environment
+    fn _current_env(&self) -> StackEnvironmentPtr<'gc> {
+        self.environments[self.env_ptr]
+    }
+
+    pub fn new_environment(
+        &mut self,
+        mc: &Mutation<'gc>,
+        import_env: StackEnvironmentPtr<'gc>,
+    ) -> EnvironmentSpec {
+        let new_env = Gc::new(mc, RefLock::new(Environment::new(mc, Some(import_env))));
+        let Some(nzp) = NonZero::new(self.environments.len()) else {
+            unreachable!()
+        };
+        self.environments.push(new_env);
+        EnvironmentSpec(nzp)
+    }
+
+    /// Helper for a hygenic context
+    pub fn hygenic<T>(
+        &mut self,
+        ctx: &mut SyntaxContext<'_, 'gc>,
+        import_env: StackEnvironmentPtr<'gc>,
+        f: impl FnOnce(&mut SyntaxContext<'_, 'gc>, &mut Compiler<'gc>, StackEnvironmentPtr<'gc>) -> T,
+    ) -> T {
+        let checkpoint = self.checkpoint();
+        let new_env = self.new_environment(ctx, import_env);
+        let old_env = self.current_environment();
+        self.environment(Some(new_env));
+        let ret = (f)(ctx, self, self._current_env());
+        self.environment(old_env);
+        self.restore_checkpoint(checkpoint);
+        ret
+    }
+
+    /// If `None` sets to default env
+    pub fn environment(&mut self, spec: Option<EnvironmentSpec>) {
+        if let Some(EnvironmentSpec(n)) = spec {
+            self.env_ptr = n.get();
+        } else {
+            self.env_ptr = 0;
+        }
+    }
+
+    /// Get the specifier for the current environment
+    pub fn current_environment(&self) -> Option<EnvironmentSpec> {
+        NonZero::new(self.env_ptr).map(EnvironmentSpec)
+    }
+
+    /// Get default environment ptr
+    pub fn default_environment_ptr(&self) -> StackEnvironmentPtr<'gc> {
+        self.environments[0]
+    }
+
+    /// Get the environment ptr for a specifier
+    pub fn environment_ptr(&self, spec: EnvironmentSpec) -> StackEnvironmentPtr<'gc> {
+        self.environments[spec.0.get()]
+    }
+
+    /// Create a checkpoint for the current compiler state
+    ///
+    /// This allows a macro to restore the syntax items, variables, and argument symbols defined at this point in
+    /// time.
+    pub fn checkpoint(&mut self) -> Checkpoint {
+        let checkpoint = Checkpoint(self.checkpoints.len());
+        self.checkpoints.push((
+            self.syntax_items.clone(),
+            self.variables_defined.clone(),
+            self.argument_scope.clone(),
+        ));
+        checkpoint
+    }
+
+    /// Restore the syntax items, variables, and argument symbols defined at the point the checkpoint was created.
+    pub fn restore_checkpoint(&mut self, checkpoint: Checkpoint) {
+        let Some((syntax_items, variables_defined, argument_scope)) =
+            self.checkpoints.get(checkpoint.0)
+        else {
+            unreachable!()
+        };
+
+        self.syntax_items = syntax_items.clone();
+        self.variables_defined = variables_defined.clone();
+        self.argument_scope = argument_scope.clone();
+    }
+
+    pub fn is_argument(&self, symbol: lasso::Spur) -> Option<Arg> {
+        if let Some(rest) = self.argument_scope.rest {
+            if symbol == rest {
+                return Some(Arg::Rest);
+            }
+        }
+
+        self.argument_scope
+            .args
+            .iter()
+            .position(|s| *s == symbol)
+            .map(Arg::Index)
+    }
+
+    // if this fails, the variable is either undefined by the script,
+    // or is a variable or arg
+    //
+    // since the environment is not determined until the script is run
+    pub fn get_macro(&self, symbol: lasso::Spur) -> Option<ArcSyntax> {
+        if self.variables_defined.contains(&symbol)
+            || self.argument_scope.args.contains(&symbol)
+            || (self.argument_scope.rest.is_some_and(|r| r == symbol))
+        {
+            return None;
+        }
+
+        self.syntax_items.get(&symbol).cloned()
+    }
+
+    pub fn define_macro(&mut self, symbol: lasso::Spur, primitive: ArcSyntax) {
+        self.variables_defined.remove(&symbol);
+        self.argument_scope.args = self
+            .argument_scope
+            .args
+            .iter()
+            .copied()
+            .filter(|s| *s != symbol)
+            .collect();
+        if self.argument_scope.rest.is_some_and(|r| r == symbol) {
+            self.argument_scope.rest.take();
+        }
+        self.syntax_items.insert(symbol, primitive);
+    }
+
+    pub fn define_variable(&mut self, symbol: lasso::Spur) {
+        self.variables_defined.insert(symbol);
+    }
+
+    pub fn define_arg_symbols(
+        &mut self,
+        args: impl IntoIterator<Item = lasso::Spur>,
+        rest: Option<lasso::Spur>,
+    ) {
+        self.argument_scope.args = args.into_iter().collect();
+        self.argument_scope.rest = rest;
     }
 }

@@ -7,8 +7,8 @@ use logos::Span;
 use rowan::{GreenNode, GreenNodeBuilder};
 
 use crate::{
-    lexer::{LexerError, NestedCommentToken, SyntaxToken, Token},
     ExactReal, SchemeNumber,
+    lexer::{LexerError, NestedCommentToken, SyntaxToken, Token},
 };
 pub mod gast;
 

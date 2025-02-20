@@ -1,8 +1,9 @@
 use core::fmt;
+use std::rc::Rc;
 
 use gc_arena::{Collect, Gc};
 
-use crate::{environment::RebindError, value::ResolvedValue};
+use crate::{interpreter::thread::LambdaException, value::ResolvedValue};
 
 /// Errors store this to record where they're from
 #[derive(Debug, Clone, Copy)]
@@ -17,48 +18,53 @@ pub struct StackFrame {
 
 /// Scheme is allowed to check what kind of error
 /// This allows us to do that.
-#[derive(Collect, Debug, thiserror::Error)]
+#[derive(Collect, Debug, thiserror::Error, Clone)]
 #[collect(no_drop)]
 pub enum SchemeErrorType<'gc> {
-    /// A value was raised
+    /// A value was raised by 'raise
     #[error("a value was raised: {0}")]
-    Raise(ResolvedValue<'gc, lasso::Spur>),
+    Raise(ResolvedValue<'gc, lasso::RodeoResolver>),
+    /// A value was raised by 'raise-continuable
+    #[error("a value was raised: {0}")]
+    RaiseContinuable(ResolvedValue<'gc, lasso::RodeoResolver>),
+    /// Handler returned on a non-continuable error
+    #[error("error handler failed: {0}")]
+    HandlerFailed(Gc<'gc, SchemeErrorType<'gc>>),
     /// Rust code produced an error
     #[error("Rust code produced an error: {0}")]
-    Rust(#[collect(require_static)] anyhow::Error),
-    /// Rust macro produced an error
-    #[error("Rust macro produced an error: {0}")]
-    Macro(#[collect(require_static)] anyhow::Error),
-    /// Macro was in wrong form
-    #[error("bad macro form: {0}")]
-    MacroForm(#[collect(require_static)] anyhow::Error),
-    /// Attempted to execute an empty list
-    #[error("attempted to execute an empty list")]
-    Null,
+    Rust(#[collect(require_static)] Rc<anyhow::Error>),
+    /// Rust code produced an error (continuable)
+    #[error("Rust code produced an error: {0}")]
+    RustContinuable(#[collect(require_static)] Rc<anyhow::Error>),
     /// Attempted to read from environment a name that doesn't exist
     #[error("`{0}` does not exist in environment")]
     EnvLoad(Box<str>),
-    /// Attempted to execute a list with a dot, or non-symbol, non-list head
-    #[error("cannot execute list")]
-    BadList,
-    /// Define did not find a value to define
-    #[error("define cannot define nothing")]
-    NullDefine,
-    /// Define attempted on frozen environment
-    #[error("cannot define in frozen environment")]
+    /// Bytecode references an argument it didn't have
+    #[error("referenced non-existant parameter {0}")]
+    InvalidArg(usize),
+    /// Bytecode uses rest parameter where no rest argument can exist
+    #[error("referenced nonexistent rest parameter")]
+    InvalidRest,
+    /// Attempted to call a non-callable
+    #[error("attempt to call non-callable")]
+    NonCallable,
+    /// Attempted to define in a frozen environment
+    #[error("cannot define in a frozen environment")]
     FrozenDefine,
-    /// An error occured with `set!`
-    #[error("set! error: {0}")]
-    SetBang(#[collect(require_static)] RebindError),
-    /// Attempted to evaluate a value with no external representation
-    #[error("data has no external representation: {0}")]
-    BadEval(ResolvedValue<'gc, lasso::Spur>),
-    /// Lambda didn't return a value
-    #[error("lambda has no return value")]
-    LambdaNoReturn,
-    /// Tried to execute a non-lambda
-    #[error("{0} is not a lambda")]
-    NonLambda(ResolvedValue<'gc, lasso::Spur>),
+    /// Lambda exceptions (runtime errors)
+    #[error("lambda exception: {0}")]
+    LambdaException(
+        #[from]
+        #[collect(require_static)]
+        LambdaException,
+    ),
+}
+
+impl SchemeErrorType<'_> {
+    /// Can Scheme catch and process the error?
+    pub fn is_continuable(&self) -> bool {
+        matches!(self, Self::RaiseContinuable(_) | Self::RustContinuable(_))
+    }
 }
 
 /// Scheme-side error

@@ -1,52 +1,71 @@
 //! We provide 2 kinds of lambdas: native and compiled
 
-use gc_arena::{Collect, Gc};
+use core::fmt;
+
+use gc_arena::{Collect, Gc, Mutation, RefLock};
 
 use crate::{
     Fuel, ValuePtr,
     bytecode::ChunkPtr,
-    compiler::Program,
+    compiler::World,
     environment::StackEnvironmentPtr,
-    interpreter::{Context, syntax::MacroEnvironmentPtr, thread::ThreadFrame},
+    interpreter::{Context, Includer, thread::ThreadFrame},
 };
 
-use super::error::SchemeErrorPtr;
+use super::{error::SchemeErrorPtr, value::Continuation};
+
+/// Possible errors
+#[derive(thiserror::Error, Debug)]
+pub enum LambdaError {
+    #[error(transparent)]
+    NonContinuable(#[from] anyhow::Error),
+    #[error(transparent)]
+    Continuable(anyhow::Error),
+}
 
 /// Possible things a lambda can return
 /// If something marked `[call-end]` is returned, the lambda will not be called again.
 pub enum LambdaReturn<'gc> {
-    /// Return the given values, push them to stack
+    /// Return the given values, pushing them to the stack
     ///
     /// `[call-end]`
     Return(Vec<ValuePtr<'gc>>),
-    /// Raise the given value
+    /// Raise the given value as an error
     ///
     /// `[call-end]`
-    Raise(ValuePtr<'gc>),
+    Raise {
+        error: ValuePtr<'gc>,
+        is_continuable: bool,
+    },
     /// Propagate an error value
     ///
     /// `[call-end]`
     Propagate(SchemeErrorPtr<'gc>),
 
-    /// Evaluate a given program in the current environment
-    Eval(Program<'gc>),
-    /// Evaluate a given program in the current environment
+    /// Call a continuation
     ///
     /// `[call-end]`
-    TailEval(Program<'gc>),
-
-    /// Call a given lambda
+    Continue { cont: Continuation<'gc> },
+    /// Call a given lambda, and push the values it returns onto the stack
     Call {
         lambda: Lambda<'gc>,
         args: Vec<ValuePtr<'gc>>,
     },
-    /// Call a given lambda
+    /// Call a given lambda, as a return value
     ///
     /// `[call-end]`
     TailCall {
         lambda: Lambda<'gc>,
         args: Vec<ValuePtr<'gc>>,
     },
+    /// Set an exception handler for this frame
+    ///
+    /// If an error arises on a frame:
+    /// - if a bytecode frame, the frame is popped unless a handler has been set, where execution takes and calls
+    ///   the handler
+    /// - if a native frame, the error run path is checked, then if the error is propagated (or a new error is
+    ///   raised), the handler is checked if any (and the rest handles like a bytecode frame)
+    SetExceptionHandler(Lambda<'gc>),
 }
 
 // Since Collect is not dyn-compatible, we create a "Collectable" trait implement
@@ -60,7 +79,45 @@ trait Collectable {}
 #[diagnostic::do_not_recommend]
 impl<'gc, T: Collect<'gc>> Collectable for T {}
 
+pub struct NativeLambdaContext<'a, 'gc> {
+    pub self_ptr: NativeLambdaPtr<'gc>,
+    pub ctx: Context<'gc>,
+    pub stack: &'a [ValuePtr<'gc>],
+    pub interner: &'a mut lasso::Rodeo,
+    pub world: &'a World,
+    pub includer: &'a dyn Includer,
+    pub fuel: &'a mut Fuel,
+    pub env: StackEnvironmentPtr<'gc>,
+    pub frames: &'a [ThreadFrame<'gc>],
+}
+
+impl<'gc> NativeLambdaContext<'_, 'gc> {
+    /// Get the arity of a [`Lambda`]
+    ///
+    /// To prevent a double borrow, check the equality of lambda with the self pointer.
+    /// If they refer to the same [`NativeLambda`], use the borrow to retrieve the lambda instead.
+    pub fn get_arity(&self, native: &impl NativeLambda, lambda: Lambda<'gc>) -> Arity {
+        if lambda == self.self_ptr {
+            native.arity()
+        } else {
+            lambda.arity()
+        }
+    }
+}
+
+impl<'gc> std::ops::Deref for NativeLambdaContext<'_, 'gc> {
+    type Target = Mutation<'gc>;
+    fn deref(&self) -> &Self::Target {
+        self.ctx.mc
+    }
+}
+
 /// A native lambda is a Rust-implemented lambda
+///
+/// # Notes
+/// - implementations are defined by a [`World`](crate::compiler::World) and are thus shared across all scripts
+///   that use that `World`, depending on how that `World` defines them
+#[expect(private_bounds)]
 pub trait NativeLambda: std::fmt::Debug + Collectable {
     /// What is the arity of this lambda?
     fn arity(&self) -> Arity;
@@ -68,41 +125,41 @@ pub trait NativeLambda: std::fmt::Debug + Collectable {
     /// Run in normal mode
     fn run<'gc>(
         &mut self,
-        ctx: Context<'gc>,
-        interner: &mut lasso::Rodeo,
-        fuel: &mut Fuel,
-        env: StackEnvironmentPtr<'gc>,
-        macro_env: MacroEnvironmentPtr<'gc>,
-        frames: &[ThreadFrame<'gc>],
+        ctx: NativeLambdaContext<'_, 'gc>,
         args: &[ValuePtr<'gc>],
-    ) -> LambdaReturn<'gc>;
+    ) -> Result<LambdaReturn<'gc>, LambdaError>;
     /// Run when there is an error present
     fn error<'gc>(
         &mut self,
-        ctx: Context<'gc>,
-        interner: &mut lasso::Rodeo,
-        fuel: &mut Fuel,
-        env: StackEnvironmentPtr<'gc>,
-        macro_env: MacroEnvironmentPtr<'gc>,
-        frames: &[ThreadFrame<'gc>],
+        ctx: NativeLambdaContext<'_, 'gc>,
         args: &[ValuePtr<'gc>],
         err: SchemeErrorPtr<'gc>,
-    ) -> LambdaReturn<'gc> {
-        let _ = (ctx, interner, env, macro_env);
-        LambdaReturn::Propagate(err)
+    ) -> Result<LambdaReturn<'gc>, LambdaError> {
+        let _ = (ctx, args);
+        // used to mark unhandled errors, will set the error (like Raise) unless already set
+        Ok(LambdaReturn::Propagate(err))
     }
 }
-pub type NativeLambdaPtr<'gc> = Gc<'gc, dyn NativeLambda>;
+pub type NativeLambdaPtr<'gc> = Gc<'gc, RefLock<dyn NativeLambda>>;
+pub type LambdaResult<'gc> = Result<LambdaReturn<'gc>, LambdaError>;
 
 /// A compiled lambda is a wrapper around a [`ChunkPtr`](crate::bytecode::ChunkPtr) with additional information about arity
 pub type CompiledLambdaPtr<'gc> = Gc<'gc, CompiledLambda<'gc>>;
-#[derive(Debug)]
+#[derive(Debug, Collect)]
+#[collect(no_drop)]
 pub struct CompiledLambda<'gc> {
-    arity: Arity,
-    chunk: ChunkPtr<'gc>,
+    #[collect(require_static)]
+    pub(crate) arity: Arity,
+    pub(crate) chunk: ChunkPtr<'gc>,
 }
 
-#[derive(Debug, Clone, Copy)]
+impl<'gc> CompiledLambda<'gc> {
+    pub fn new(arity: Arity, chunk: ChunkPtr<'gc>) -> Self {
+        Self { arity, chunk }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Arity {
     /// Require an exact number of arguments
     Exact(usize),
@@ -111,10 +168,26 @@ pub enum Arity {
 }
 
 impl Arity {
-    fn satisfies(self, len: usize) -> bool {
+    pub fn is_satisfied(self, len: usize) -> bool {
         match self {
             Self::Exact(exact) => exact == len,
             Self::AtLeast(minimum) => minimum <= len,
+        }
+    }
+
+    pub fn minimum(self) -> usize {
+        match self {
+            Self::Exact(exact) => exact,
+            Self::AtLeast(min) => min,
+        }
+    }
+}
+
+impl fmt::Display for Arity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Arity::Exact(exact) => write!(f, "{exact}"),
+            Arity::AtLeast(min) => write!(f, ">={min}"),
         }
     }
 }
@@ -127,6 +200,15 @@ pub enum Lambda<'gc> {
     Compiled(CompiledLambdaPtr<'gc>),
 }
 
+impl Lambda<'_> {
+    pub fn arity(self) -> Arity {
+        match self {
+            Self::Native(n) => n.borrow().arity(),
+            Self::Compiled(c) => c.arity,
+        }
+    }
+}
+
 impl PartialEq for Lambda<'_> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -134,6 +216,16 @@ impl PartialEq for Lambda<'_> {
             (Lambda::Compiled(sp), Lambda::Compiled(op)) => Gc::ptr_eq(*sp, *op),
             _ => false,
         }
+    }
+}
+impl<'gc> PartialEq<NativeLambdaPtr<'gc>> for Lambda<'gc> {
+    fn eq(&self, other: &NativeLambdaPtr<'gc>) -> bool {
+        matches!(self, Lambda::Native(n) if Gc::ptr_eq(*n, *other))
+    }
+}
+impl<'gc> PartialEq<CompiledLambdaPtr<'gc>> for Lambda<'gc> {
+    fn eq(&self, other: &CompiledLambdaPtr<'gc>) -> bool {
+        matches!(self, Lambda::Compiled(n) if Gc::ptr_eq(*n, *other))
     }
 }
 impl Eq for Lambda<'_> {}

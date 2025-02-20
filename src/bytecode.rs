@@ -1,9 +1,11 @@
 //! Execution model for Scheme code
 
-use fxhash::FxHashMap;
-use gc_arena::{Collect, Gc};
+use std::{rc::Rc, sync::Arc};
 
-use crate::environment::StackEnvironmentPtr;
+use fxhash::FxHashMap;
+use gc_arena::{Collect, Gc, Mutation};
+
+use crate::{environment::StackEnvironmentPtr, runtime::lambda::CompiledLambdaPtr};
 
 /*
 compiled form is at its root primitive forms:
@@ -29,52 +31,33 @@ Scheme-impls)
 // you can't really do much in that kind of environment)
 #[derive(Debug, Clone, Copy)]
 pub enum Bytecode {
+    /// Push the null cons to the stack
+    PushNull,
     /// Push to stack a constant value at a given index of the constant table
     PushConst { index: usize },
     /// Push a boolean value to stack
     PushBool { bool: bool },
     /// Push a compiled lambda to the stack
     PushLambda { index: usize },
-    /// Make a list (popping from stack), using the amount specified as the number of
-    /// items
-    MakeList { length: usize },
-    // /// Pop a value (must be a nonnegative integer or 0)
-    // /// then make a list (popping from stack) using the value as the number of items
-    // MakeListIndirect,
+    /// Fetch args from the current scope
+    FetchArg { index: usize },
+    /// Fetch the rest arg from the current scope
+    FetchRest,
+    /// Pop the top 2 arguments from the stack and make a cons cell out of them
+    /// (fails if either of the 2 arguments are undefined)
+    MakeCons,
     /// Make a vector (popping from stack), using the amount specified as the number of
     /// items
     MakeVector { length: usize },
-    // /// Pop a value (must be a nonnegative integer or 0)
-    // /// then make a vector (popping from stack) using the value as the number of items
-    // MakeVectorIndirect,
-    /// Look up the given symbol in the stack environment, and push the result to
-    /// stack (if not found, errors)
-    Reference {
-        symbol: lasso::Spur,
-        import_env: Option<usize>,
-    },
-    // /// Pop the top value (must be a symbol)
-    // /// Look up the value in the stack environment, and push the result to
-    // /// stack (if not found, errors)
-    // ReferenceIndirect { import_env: Option<usize> },
-    /// Invoke the given macro from the macro environment
-    /// using `args` values from the stack where the topmost is the first value
-    Syntax {
-        symbol: lasso::Spur,
-        args: usize,
-        import_env: Option<usize>,
-    },
-    // /// Pop the top value (must be a symbol)
-    // /// Look up the value in the macro environment, then evaluate the macro
-    // /// using `args` values from the stack where the topmost is the first value
-    // SyntaxIndirect {
-    //     args: usize,
-    //     import_env: Option<usize>,
-    // },
+    /// Add the amount of items to the end of a vector (which must be below all the items)
+    AppendVector { length: usize },
+    /// Look up the symbol in the stack environment, and push the result to
+    /// stack (if not found or not a symbol, errors)
+    Reference { symbol: lasso::Spur },
     /// Pop the top value (must be a callable)
     /// Call the given lambda, making it a tail call if possible (there are
     /// no more instructions in the current context to execute)
-    Call,
+    Call { args: usize },
 
     // NOTE These are the "definitive forms" that are
     // theoretically all that's needed to implement the
@@ -90,40 +73,39 @@ pub enum Bytecode {
     /// Branching instruction
     ///
     /// Jump forward by a certain number of instructions
-    /// if the value popped from the top of the stack is falsey
-    /// (which is only #f and '() \[null])
+    /// if the value popped from the top of the stack is false (any other
+    /// value is considered true)
     If { jump: usize },
 
     /// Duplicate the reference to the value at the top of the stack
     Duplicate,
-    /// Pop the value at the top of the stack
-    Pop,
-    /// Explicitly end an execution frame
-    Return,
+    // /// Pop the value at the top of the stack
+    // Pop,
+    // /// Explicitly end an execution frame
+    // Return,
 }
 
 impl Bytecode {
     /// Calculate the VM fuel cost of an instruction
     pub fn cost(&self) -> i32 {
         match self {
+            Self::PushNull => 1,
             Self::PushConst { .. } => 1,
             Self::PushBool { .. } => 1,
             Self::PushLambda { .. } => 1,
-            Self::MakeList { .. } => 1,
-            // Self::MakeListIndirect => 1,
+            Self::FetchArg { .. } => 1,
+            Self::FetchRest { .. } => 1,
+            Self::MakeCons => 1,
             Self::MakeVector { .. } => 1,
-            // Self::MakeVectorIndirect => 1,
+            Self::AppendVector { .. } => 1,
             Self::Reference { .. } => 1,
-            // Self::ReferenceIndirect { .. } => 1,
-            Self::Syntax { .. } => 2,
-            // Self::SyntaxIndirect { .. } => 2,
-            Self::Call => 4,
+            Self::Call { .. } => 4,
             Self::Define { .. } => 2,
             Self::SetBang { .. } => 2,
             Self::If { .. } => 2,
             Self::Duplicate => 1,
-            Self::Pop => 1,
-            Self::Return => 4,
+            // Self::Pop => 1,
+            // Self::Return => 4,
         }
     }
 }
@@ -132,100 +114,79 @@ impl Bytecode {
 ///
 /// Mostly used to store "primitive" values, and correspond to external
 /// representation types (except for list)
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     Symbol(lasso::Spur),
     Char(char),
     Number(i64),
-    String(String),
-    Bytevector(Vec<u8>),
+    Inexact(f64),
+    String(Arc<str>),
+    Bytevector(Arc<[u8]>),
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum SourceData {
-    /// a value directly written in source
-    Direct {
-        source_id: lasso::Spur,
-        range: (usize, usize),
-    },
-    /// a value generated from source at a location
-    /// (whether lambda or macro)
-    Computed {
-        source_id: lasso::Spur,
-        range: (usize, usize),
-    },
+pub struct SourceData {
+    pub source_id: lasso::Spur,
+    pub range: (usize, usize),
 }
 
 impl SourceData {
     #[inline]
     pub fn source_id(self) -> lasso::Spur {
-        match self {
-            Self::Direct { source_id, .. } => source_id,
-            Self::Computed { source_id, .. } => source_id,
-        }
+        self.source_id
     }
 
     #[inline]
     pub fn range(self) -> (usize, usize) {
-        match self {
-            Self::Direct { range, .. } => range,
-            Self::Computed { range, .. } => range,
-        }
-    }
-
-    /// Create a computed copy of this SourceData
-    fn derive(self) -> Self {
-        match self {
-            Self::Direct { source_id, range } => Self::Computed { source_id, range },
-            computed => computed,
-        }
+        self.range
     }
 }
 
 /// A chunk of bytecode
-#[derive(Collect, Clone, Debug)]
+#[derive(Collect, Debug)]
 #[collect(no_drop)]
+// NOTE Chunks are not thread-safe and are immutable, so to make them *really* cheap to clone,
+// we can use Rc
 pub struct Chunk<'gc> {
     /// symbols this chunk references
     #[collect(require_static)]
-    pub(crate) constants: Box<[Constant]>,
+    pub constants: Rc<[Constant]>,
+    /// lambdas this chunk defines
+    pub lambdas: Rc<[CompiledLambdaPtr<'gc>]>,
     /// environment this chunk references
     // We only need 1 because of the fact that a Scheme program is all the imports *then*
     // commands and definitions
-    pub(crate) import_stack_env: StackEnvironmentPtr<'gc>,
-    // TODO import macro env
-    // TODO compiled lambdas
+    pub import_env: StackEnvironmentPtr<'gc>,
     #[collect(require_static)]
-    pub(crate) code: Box<[Bytecode]>,
+    pub code: Rc<[Bytecode]>,
     /// Hash map of code locations to SourceData
     #[collect(require_static)]
-    labels: FxHashMap<usize, SourceData>,
-    /// Does this chunk extend into another chunk? (used if referencing more than C constants)
-    #[collect(require_static)]
-    pub(crate) next_chunk: Option<ChunkPtr<'gc>>,
+    pub labels: Rc<FxHashMap<usize, SourceData>>,
 }
 pub type ChunkPtr<'gc> = Gc<'gc, Chunk<'gc>>;
 
 impl<'gc> Chunk<'gc> {
-    fn new(
+    pub fn new(
+        mc: &Mutation<'gc>,
         code: impl IntoIterator<Item = Bytecode>,
         constants: impl IntoIterator<Item = Constant>,
+        lambdas: impl IntoIterator<Item = CompiledLambdaPtr<'gc>>,
         import_stack_env: StackEnvironmentPtr<'gc>,
-        // TODO macro_env
-        // TODO compiled lambdas
         labels: FxHashMap<usize, SourceData>,
-    ) -> Self {
-        Self {
+    ) -> ChunkPtr<'gc> {
+        let chunk = Self {
             code: code.into_iter().collect(),
             constants: constants.into_iter().collect(),
-            import_stack_env,
-            labels,
-            next_chunk: None,
-        }
+            lambdas: lambdas.into_iter().collect(),
+            import_env: import_stack_env,
+            labels: Rc::new(labels),
+        };
+
+        Gc::new(mc, chunk)
     }
 
     /// Find the corresponding [`SourceData`] for a given index into bytecode
-    fn find_label(&self, pc: usize) -> Option<SourceData> {
+    pub fn find_label(&self, pc: usize) -> Option<SourceData> {
         self.labels
             .keys()
             .filter(|k| **k <= pc)

@@ -5,13 +5,12 @@ use std::string::String as StdString;
 use std::{cell::RefCell, rc::Rc};
 
 use gc_arena::{Collect, Gc, Mutation, RefLock};
-use lasso::{IntoResolver, RodeoResolver};
+use lasso::IntoResolver;
 
-use crate::SchemeNumber;
 use crate::bytecode::ChunkPtr;
 use crate::environment::StackEnvironmentPtr;
 
-use super::lambda::Lambda;
+use super::lambda::{Arity, Lambda};
 use super::{
     error::SchemeErrorPtr,
     // lambda::LambdaPtr,
@@ -39,7 +38,6 @@ pub enum ValueType {
     Cons,
     Environment,
     UserStruct,
-    Transformer,
     Lambda,
     Continuation,
     Error,
@@ -79,20 +77,12 @@ pub enum Value<'gc> {
     // Procedure(Gc<'gc, Procedure>),
     Environment(StackEnvironmentPtr<'gc>),
     UserStruct(UserStruct<'gc>),
-    // QUESTION Move from ErrorBox to an Any based pointer that
-    // can specify predicate type (read-error?, file-error?, etc.)
-    // Error(Gc<'gc, ErrorBox>),
-    // TODO records
-    // I want to handle userdata the same way as we handle records
-    // TODO syntax-rules (transformers)
-    // the return value of `syntax-rules`
-    Transformer(RuntimeTransformer<'gc>),
     // Uniquely our lambda's are typed, it's just that (for now)
     // Scheme code simply marks all parameters as untyped
     Lambda(Lambda<'gc>),
     // A continuation is a chunk and program counter
     // bundled together, and is treated as a callable
-    Continuation(Continuation<'gc>),
+    Continuation(ContinuationPtr<'gc>),
     // A Scheme-side error
     Error(SchemeErrorPtr<'gc>),
 }
@@ -148,7 +138,6 @@ impl PartialEq for Value<'_> {
             }
             Value::Environment(_) => todo!(),
             Value::UserStruct(_) => todo!(),
-            Value::Transformer(_) => todo!(),
             Value::Lambda(lptr) => matches!(other, Value::Lambda(optr) if lptr == optr),
             Value::Continuation(c) => matches!(other, Value::Continuation(oc) if c == oc),
 
@@ -175,7 +164,6 @@ impl<'gc> Value<'gc> {
             Value::Cons(_) => ValueType::Cons,
             Value::Environment(_) => ValueType::Environment,
             Value::UserStruct(_) => ValueType::UserStruct,
-            Value::Transformer(_) => ValueType::Transformer,
             Value::Lambda(_) => ValueType::Lambda,
             Value::Continuation(_) => ValueType::Continuation,
             Value::Error(_) => ValueType::Error,
@@ -186,17 +174,17 @@ impl<'gc> Value<'gc> {
         Gc::new(mc, RefLock::new(self))
     }
 
-    pub fn resolve_into<K: lasso::Key>(
+    pub fn resolve_into<K: lasso::Resolver>(
         self,
-        resolver: impl IntoResolver<Resolver = RodeoResolver<K>> + 'static,
+        resolver: impl IntoResolver<Resolver = K> + 'static,
         null_ptr: ValuePtr<'gc>,
     ) -> ResolvedValue<'gc, K> {
         self.resolve(Rc::new(resolver.into_resolver()), null_ptr)
     }
 
-    pub fn resolve<K: lasso::Key>(
+    pub fn resolve<K: lasso::Resolver>(
         self,
-        resolver: Rc<RodeoResolver<K>>,
+        resolver: Rc<K>,
         null_ptr: ValuePtr<'gc>,
     ) -> ResolvedValue<'gc, K> {
         ResolvedValue {
@@ -223,14 +211,24 @@ impl<'gc> Value<'gc> {
 
 #[derive(Collect)]
 #[collect(no_drop)]
-pub struct ResolvedValue<'gc, K: lasso::Key> {
+pub struct ResolvedValue<'gc, R: lasso::Resolver> {
     value: Value<'gc>,
     null_ptr: ValuePtr<'gc>,
     #[collect(require_static)]
-    resolver: Rc<RodeoResolver<K>>,
+    resolver: Rc<R>,
 }
 
-impl<K: lasso::Key> fmt::Debug for ResolvedValue<'_, K> {
+impl<'gc, R: lasso::Resolver> Clone for ResolvedValue<'gc, R> {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value,
+            null_ptr: self.null_ptr,
+            resolver: self.resolver.clone(),
+        }
+    }
+}
+
+impl<K: lasso::Resolver> fmt::Debug for ResolvedValue<'_, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ResolvedValue")
             .field("value", &self.value)
@@ -238,20 +236,28 @@ impl<K: lasso::Key> fmt::Debug for ResolvedValue<'_, K> {
     }
 }
 
-struct ConsPrinter<'a, 'gc, K: lasso::Key> {
-    cons: &'a ConsCell<'gc>,
-    resolver: Rc<RodeoResolver<K>>,
-    null: ValuePtr<'gc>,
+enum ConsInner<'a, 'gc> {
+    Cons(&'a ConsCell<'gc>),
+    Vec(&'a Vector<'gc>),
+}
+// Handles printing possibly self-referential structures
+struct ConsPrinter<'a, 'gc, K: lasso::Resolver> {
+    cons: ConsInner<'a, 'gc>,
+    resolver: Rc<K>,
+    null_ptr: ValuePtr<'gc>,
     encountered: Rc<RefCell<Vec<Value<'gc>>>>,
 }
 
-impl<K: lasso::Key> fmt::Display for ConsPrinter<'_, '_, K> {
+impl<K: lasso::Resolver> fmt::Display for ConsPrinter<'_, '_, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // recurse into the value, keeping track of encountered cons cells
         // so that we don't recurse into them
-        let cons_value = Value::Cons(*self.cons);
+        let value = match self.cons {
+            ConsInner::Cons(cons) => Value::Cons(*cons),
+            ConsInner::Vec(vec) => Value::Vector(*vec),
+        };
 
-        if *self.null.borrow() == cons_value {
+        if *self.null_ptr.borrow() == value {
             if self.encountered.borrow().is_empty() {
                 // we are starting at the null cons, so close it out
                 write!(f, "()")?;
@@ -259,25 +265,83 @@ impl<K: lasso::Key> fmt::Display for ConsPrinter<'_, '_, K> {
             return Ok(());
         }
 
-        write!(f, "(")?;
+        write!(
+            f,
+            "{}",
+            if matches!(self.cons, ConsInner::Vec(_)) {
+                "#("
+            } else {
+                "("
+            }
+        )?;
 
-        if self.encountered.borrow().contains(&cons_value) {
+        if self.encountered.borrow().contains(&value) {
             // write as self-recursive list
             write!(f, "...)")?;
             return Ok(());
         }
 
         // handle car and cdr, adding a dot if cdr is *not* a cons cell
-        self.encountered.borrow_mut().push(cons_value);
-        let _ = self.resolver;
-        let _ = f;
+        self.encountered.borrow_mut().push(value);
+        // we handle both
+        match self.cons {
+            ConsInner::Cons(cons) => {
+                match cons.car.map(|p| *p.borrow()) {
+                    Some(Value::Cons(car)) => todo!(),
+                    Some(Value::Vector(cdr)) => todo!(),
+                    Some(value) => {
+                        // this value is *definitely* not self-referential, so it's ok to
+                        // use ResolvedValue
+                        write!(
+                            f,
+                            "{}",
+                            ResolvedValue {
+                                value,
+                                null_ptr: self.null_ptr,
+                                resolver: Rc::clone(&self.resolver)
+                            }
+                        )?;
+                    }
+                    None => {}
+                };
+                match cons.cdr.map(|p| *p.borrow()) {
+                    Some(Value::Cons(cdr)) => todo!(),
+                    Some(Value::Vector(cdr)) => todo!(),
+                    Some(value) => {
+                        // this value is *definitely* not self-referential, so it's ok to
+                        // use ResolvedValue
+                        write!(
+                            f,
+                            " . {}",
+                            ResolvedValue {
+                                value,
+                                null_ptr: self.null_ptr,
+                                resolver: Rc::clone(&self.resolver)
+                            }
+                        )?;
+                    }
+                    None => {}
+                };
+            }
+            ConsInner::Vec(vec) => {
+                for vptr in vec.vec.borrow().iter() {
+                    match *vptr.borrow() {
+                        Value::Cons(cdr) => todo!(),
+                        Value::Vector(cdr) => todo!(),
+                        value => {
+                            todo!()
+                        }
+                    }
+                }
+            }
+        }
         // pop encountered and close the list
         self.encountered.borrow_mut().pop();
-        write!(f, "<notnull>)")
+        write!(f, ")")
     }
 }
 
-impl fmt::Display for ResolvedValue<'_, lasso::Spur> {
+impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.value {
             Value::Undefined => write!(f, "#<undef>"),
@@ -285,23 +349,33 @@ impl fmt::Display for ResolvedValue<'_, lasso::Spur> {
             Value::Number(n) => write!(f, "{n}"),
             Value::Inexact(fp) => write!(f, "{fp}"),
             Value::String(s) => write!(f, "\"{}\"", s.borrow().replace('\"', "\\\"")),
-            Value::Symbol(sym) => write!(f, "'{}", self.resolver.resolve(&sym.0)),
+            Value::Symbol(sym) => write!(f, "'{}", self.resolver.resolve(&sym.0.into())),
             Value::Bool(b) => write!(f, "#{}", if b { "t" } else { "f" }),
             Value::Char(c) => write!(f, "#\\{c}"),
-            Value::Vector(vec) => {
-                write!(f, "#(")?;
-                for (idx, elem) in vec.vec.borrow().iter().copied().enumerate() {
-                    if idx != 0 {
-                        write!(f, " ")?;
+            Value::Vector(ref vec) => {
+                // write!(f, "#(")?;
+                // for (idx, elem) in vec.vec.borrow().iter().copied().enumerate() {
+                //     if idx != 0 {
+                //         write!(f, " ")?;
+                //     }
+                //     write!(
+                //         f,
+                //         "{}",
+                //         elem.borrow().resolve(self.resolver.clone(), self.null_ptr)
+                //     )?;
+                // }
+                // write!(f, ")")?;
+                // Ok(())
+                write!(
+                    f,
+                    "{}",
+                    ConsPrinter {
+                        cons: ConsInner::Vec(vec),
+                        resolver: self.resolver.clone(),
+                        null_ptr: self.null_ptr,
+                        encountered: Rc::new(RefCell::new(Vec::new())),
                     }
-                    write!(
-                        f,
-                        "{}",
-                        elem.borrow().resolve(self.resolver.clone(), self.null_ptr)
-                    )?;
-                }
-                write!(f, ")")?;
-                Ok(())
+                )
             }
             Value::Bytevector(bv) => {
                 write!(f, "#u8(")?;
@@ -322,9 +396,9 @@ impl fmt::Display for ResolvedValue<'_, lasso::Spur> {
                     f,
                     "{}",
                     ConsPrinter {
-                        cons,
+                        cons: ConsInner::Cons(cons),
                         resolver: self.resolver.clone(),
-                        null: self.null_ptr,
+                        null_ptr: self.null_ptr,
                         encountered: Rc::new(RefCell::new(Vec::new())),
                     }
                 )
@@ -334,127 +408,11 @@ impl fmt::Display for ResolvedValue<'_, lasso::Spur> {
                 let label = user.label().unwrap_or("userdata");
                 write!(f, "#<{label} {:p}>", &self.value)
             }
-            Value::Transformer(_) => todo!(),
             // Value::Lambda(lambda) => write!(f, "<lambda {:p}>", *lambda.borrow()),
             Value::Lambda(lambda) => write!(f, "#<lambda {lambda:p}>"),
             Value::Continuation(cont) => write!(f, "#<continuation {cont}>"),
-            Value::Error(_) => todo!(),
+            Value::Error(e) => write!(f, "{}", e.display(self.resolver.as_ref())),
         }
-    }
-}
-
-// NOTE this will probably be used to convert a value into a program
-pub trait ValueVisitor<'gc> {
-    fn visit_value(&mut self, value: ValuePtr<'gc>) {
-        match *value.borrow() {
-            Value::Undefined => self.visit_undefined(value),
-            Value::Void => self.visit_void(value),
-            Value::Vector(vec) => self.visit_vector(vec, value),
-            Value::Bytevector(vec) => self.visit_bytevector(vec, value),
-            Value::Cons(cons) => self.visit_cons(cons, value),
-            Value::Number(int) => self.visit_number(int, value),
-            Value::Inexact(iex) => self.visit_inexact(iex, value),
-            Value::String(str) => self.visit_string(str.as_ref().borrow().as_str(), value),
-            Value::Symbol(sym) => self.visit_symbol(sym, value),
-            Value::Bool(bool) => self.visit_bool(bool, value),
-            Value::Char(char) => self.visit_char(char, value),
-            Value::InputPort(inp) => self.visit_input_port(inp, value),
-            Value::OutputPort(oup) => self.visit_output_port(oup, value),
-            // Value::Procedure(_proc) => todo!(),
-            Value::Environment(env) => self.visit_environment(env, value),
-            Value::UserStruct(_uss) => todo!(),
-            // Value::Error(_err) => todo!(),
-            Value::Transformer(_trans) => todo!(),
-            Value::Lambda(_lam) => todo!(),
-            Value::Continuation(_cont) => todo!(),
-            Value::Error(_err) => todo!(),
-        }
-    }
-
-    fn visit_undefined(&mut self, value: ValuePtr<'gc>) {
-        let _ = value;
-    }
-
-    fn visit_void(&mut self, value: ValuePtr<'gc>) {
-        let _ = value;
-    }
-
-    fn visit_number(&mut self, integer: i64, value: ValuePtr<'gc>) {
-        let _ = value;
-        _ = integer;
-    }
-
-    fn visit_inexact(&mut self, integer: f64, value: ValuePtr<'gc>) {
-        let _ = value;
-        _ = integer;
-    }
-
-    fn visit_string(&mut self, string: &str, value: ValuePtr<'gc>) {
-        let _ = value;
-        _ = string;
-    }
-
-    fn visit_symbol(&mut self, symbol: Symbol, value: ValuePtr<'gc>) {
-        let _ = value;
-        _ = symbol;
-    }
-
-    fn visit_bool(&mut self, bool: bool, value: ValuePtr<'gc>) {
-        let _ = value;
-        _ = bool;
-    }
-
-    fn visit_char(&mut self, char: char, value: ValuePtr<'gc>) {
-        let _ = value;
-        _ = char;
-    }
-
-    fn visit_input_port(&mut self, input_port: Gc<'gc, InputPort>, value: ValuePtr<'gc>) {
-        let _ = value;
-        _ = input_port;
-    }
-
-    fn visit_output_port(&mut self, output_port: Gc<'gc, OutputPort>, value: ValuePtr<'gc>) {
-        let _ = value;
-        _ = output_port;
-    }
-
-    fn visit_cons(&mut self, cons: ConsCell<'gc>, value: ValuePtr<'gc>) {
-        let _ = value;
-        _ = cons;
-    }
-
-    fn visit_vector(&mut self, vec: Vector<'gc>, value: ValuePtr<'gc>) {
-        let _ = value;
-        _ = vec;
-    }
-
-    fn visit_bytevector(&mut self, vec: Bytevector<'gc>, value: ValuePtr<'gc>) {
-        let _ = value;
-        _ = vec;
-    }
-
-    fn visit_environment(&mut self, env: StackEnvironmentPtr<'gc>, value: ValuePtr<'gc>) {
-        let _ = env;
-        let _ = value;
-    }
-    // TODO procedure,  userstruct, error, transformer
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum ValueConvertError {
-    // currently only support exact integers
-    #[error("unsupported number {0}")]
-    UnsupportedNumber(SchemeNumber),
-}
-
-/// The return value of `syntax-rules`
-#[derive(Collect, Clone, Copy)]
-#[collect(no_drop)]
-pub struct RuntimeTransformer<'gc>(pub Gc<'gc, ()>);
-impl core::fmt::Debug for RuntimeTransformer<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "#<transformer {:p}>", self.0)
     }
 }
 
@@ -491,27 +449,50 @@ pub struct Vector<'gc> {
 }
 
 /// A bytecode chunk and program counter bundled together
-#[derive(Debug, Collect, Clone, Copy)]
+#[derive(Debug, Collect, Clone)]
 #[collect(no_drop)]
 pub enum Continuation<'gc> {
+    /// Makes the calling from a bytecode frame with the thread state
+    /// of the continuation source
     Continue {
         pc: usize,
         chunk: ChunkPtr<'gc>,
+        #[collect(require_static)]
+        arity: Arity,
+        handler: Option<Lambda<'gc>>,
+        args: Box<[ValuePtr<'gc>]>,
     },
-    /// A null continuation causes the program to terminate
+    /// A null continuation causes the program to pop frames until it hits
+    /// a native lambda frame
     Null,
 }
+pub type ContinuationPtr<'gc> = Gc<'gc, Continuation<'gc>>;
 
 impl PartialEq for Continuation<'_> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (
-                Continuation::Continue { pc, chunk },
+                Continuation::Continue {
+                    pc,
+                    chunk,
+                    arity,
+                    handler,
+                    args,
+                },
                 Continuation::Continue {
                     pc: opc,
                     chunk: ochunk,
+                    arity: oarity,
+                    handler: ohandler,
+                    args: oargs,
                 },
-            ) => pc == opc && Gc::ptr_eq(*chunk, *ochunk),
+            ) => {
+                pc == opc
+                    && Gc::ptr_eq(*chunk, *ochunk)
+                    && arity == oarity
+                    && handler == ohandler
+                    && args == oargs
+            }
             (Continuation::Null, Continuation::Null) => true,
             _ => false,
         }
@@ -522,7 +503,7 @@ impl Eq for Continuation<'_> {}
 impl fmt::Display for Continuation<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Continuation::Continue { pc, chunk } => write!(f, "{:p}@{}", chunk, pc),
+            Continuation::Continue { pc, chunk, .. } => write!(f, "{chunk:p}@{pc}"),
             Continuation::Null => write!(f, "terminate"),
         }
     }

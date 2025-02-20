@@ -5,8 +5,8 @@ use core::fmt;
 use std::collections::HashSet;
 
 use crate::{
-    lexer::{Directive, SyntaxToken},
     ExactReal, SchemeNumber,
+    lexer::{Directive, SyntaxToken},
 };
 use icu_casemap::CaseMapper;
 
@@ -104,7 +104,11 @@ impl rowan::Language for MagusSchemeLang {
     type Kind = SyntaxKind;
     fn kind_from_raw(raw: rowan::SyntaxKind) -> Self::Kind {
         assert!(raw.0 <= ROOT as u16);
-        unsafe { std::mem::transmute::<u16, SyntaxKind>(raw.0) }
+
+        #[allow(unsafe_code)]
+        unsafe {
+            std::mem::transmute::<u16, SyntaxKind>(raw.0)
+        }
     }
     fn kind_to_raw(kind: Self::Kind) -> rowan::SyntaxKind {
         kind.into()

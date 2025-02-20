@@ -4,7 +4,10 @@ use gc_arena::{Gc, Mutation, RefLock};
 
 use crate::{bytecode, environment::StackEnvironmentPtr, runtime::userstruct::UserStruct};
 
-use super::value::{Symbol, Value};
+use super::{
+    lambda::Lambda,
+    value::{ConsCell, ContinuationPtr, Symbol, Value},
+};
 
 pub trait FromValue<'gc> {
     fn from_value(value: Value<'gc>) -> Option<Self>
@@ -101,10 +104,18 @@ impl_into_value!(simple f64 => Inexact);
 impl_into_value!(simple bool => Bool);
 impl_into_value!(simple char => Char);
 impl_into_value!(simple StackEnvironmentPtr<'gc> => Environment);
+impl_into_value!(simple Lambda<'gc> => Lambda);
+impl_into_value!(simple ContinuationPtr<'gc> => Continuation);
+impl_into_value!(simple ConsCell<'gc> => Cons);
 // impl_into_value!(simple LambdaPtr<'gc> => Lambda);
 impl<'gc> IntoValue<'gc> for String {
     fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {
         Value::String(Gc::new(mc, RefLock::new(self)))
+    }
+}
+impl<'gc> IntoValue<'gc> for std::sync::Arc<str> {
+    fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {
+        Value::String(Gc::new(mc, RefLock::new(self.to_string())))
     }
 }
 impl<'gc> IntoValue<'gc> for bytecode::Constant {
@@ -113,8 +124,11 @@ impl<'gc> IntoValue<'gc> for bytecode::Constant {
             Self::Symbol(s) => Value::Symbol(Symbol(s)),
             Self::Char(c) => c.into_value(mc),
             Self::Number(i) => i.into_value(mc),
+            Self::Inexact(f) => f.into_value(mc),
             Self::String(s) => s.into_value(mc),
-            Self::Bytevector(bv) => Value::Bytevector(Gc::new(mc, RefLock::new(bv)).into()),
+            Self::Bytevector(bv) => {
+                Value::Bytevector(Gc::new(mc, RefLock::new(bv.to_vec())).into())
+            }
         }
     }
 }

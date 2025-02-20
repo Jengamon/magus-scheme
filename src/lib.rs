@@ -1,4 +1,8 @@
-mod bytecode;
+// NOTE this is just to make the usage of unsafe code a *little* more annoying / granular
+// Gotta sign it in duplicate.
+#![deny(unsafe_code)]
+
+pub mod bytecode;
 pub mod compiler;
 pub mod environment;
 pub mod general_parser;
@@ -6,9 +10,10 @@ pub mod interpreter;
 pub mod lexer;
 mod num;
 pub mod runtime;
-// pub mod treewalk;
-// pub mod treewalk_v2;
+pub mod stdlib;
 
+pub use anyhow;
+pub use fxhash;
 pub use lasso::Rodeo;
 pub use rowan;
 

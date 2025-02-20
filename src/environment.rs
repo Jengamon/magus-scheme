@@ -137,7 +137,7 @@ impl<'gc, V: Collect<'gc>> Environment<'gc, V> {
     }
 
     #[inline]
-    pub fn parent(&self) -> Option<EnvironmentPtr<'gc, V>> {
+    fn parent(&self) -> Option<EnvironmentPtr<'gc, V>> {
         self.parent
     }
 

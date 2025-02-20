@@ -40,7 +40,7 @@ impl Validator for SchemeValidator {
         let lparen_count = line.chars().filter(|c| *c == '(').count();
         let rparen_count = line.chars().filter(|c| *c == ')').count();
 
-        if lparen_count != rparen_count {
+        if lparen_count != rparen_count || line.ends_with(';') {
             reedline::ValidationResult::Incomplete
         } else {
             reedline::ValidationResult::Complete

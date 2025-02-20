@@ -1,12 +1,13 @@
 use core::fmt;
-use magus::{ContainsDatum, Datum, DatumVisitor};
+use magus::{ContainsDatum, Datum, DatumVisitor, GAstNode, GAstToken, MagusSyntaxNode};
+use std::borrow::Cow;
 use yansi::Paint;
 
 struct DatumPrintImpl<'a, 'f> {
     fmt: &'a mut fmt::Formatter<'f>,
 
     result: Option<fmt::Result>,
-    indent: usize,
+    align: usize,
 }
 
 impl<'a, 'f> DatumPrintImpl<'a, 'f> {
@@ -14,7 +15,7 @@ impl<'a, 'f> DatumPrintImpl<'a, 'f> {
         Self {
             fmt,
             result: None,
-            indent: 0,
+            align: 0,
         }
     }
 
@@ -26,138 +27,177 @@ impl<'a, 'f> DatumPrintImpl<'a, 'f> {
     }
 
     fn write_new_line(&mut self) -> fmt::Result {
-        write!(self.fmt, "\n{}", "\t".repeat(self.indent))
+        write!(self.fmt, "\n{}", " ".repeat(self.align))
+    }
+
+    fn identifier_string(identifier: &str) -> Cow<'_, str> {
+        // rough rules for unpiped identifiers
+        if identifier
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || r"!$%&*/:<=>?^_~".contains(c))
+            || ["+", "-"].contains(&identifier)
+            || (identifier.starts_with(['+', '-'])
+                && identifier
+                    .chars()
+                    .skip(1)
+                    .take(1)
+                    .all(|c| c.is_ascii_alphabetic() || r"!$%&*/:<=>?^_~+\-@".contains(c))
+                && identifier
+                    .chars()
+                    .skip(2)
+                    .all(|c| c.is_ascii_alphanumeric() || r"!$%&*/:<=>?^_~+\-.@".contains(c)))
+            || (identifier.starts_with(['+', '-'])
+                && identifier.chars().skip(1).take(1).all(|c| c == '.')
+                && identifier
+                    .chars()
+                    .skip(2)
+                    .take(1)
+                    .all(|c| c.is_ascii_alphabetic() || r"!$%&*/:<=>?^_~+\-.@".contains(c))
+                && identifier
+                    .chars()
+                    .skip(3)
+                    .all(|c| c.is_ascii_alphanumeric() || r"!$%&*/:<=>?^_~+\-.@".contains(c)))
+            || (identifier.starts_with('.')
+                && identifier
+                    .chars()
+                    .skip(1)
+                    .take(1)
+                    .all(|c| c.is_ascii_alphabetic() || r"!$%&*/:<=>?^_~+\-.@".contains(c))
+                && identifier
+                    .chars()
+                    .skip(2)
+                    .all(|c| c.is_ascii_alphanumeric() || r"!$%&*/:<=>?^_~+\-.@".contains(c)))
+        {
+            Cow::Borrowed(identifier)
+        } else {
+            Cow::Owned(format!("|{identifier}|"))
+        }
+    }
+
+    // These formatting procedures are based of the description of how Cyclone formats
+    // Scheme code as laid out here: https://justinethier.github.io/cyclone/docs/Scheme-code-conventions.html
+
+    /// Calculate if a composite type should separate items using newlines
+    fn calc_use_newlines(node: &MagusSyntaxNode) -> bool {
+        node.siblings_with_tokens(magus::rowan::Direction::Next)
+            .skip(1)
+            .find_map(|elem| match elem.kind() {
+                magus::SyntaxKind::LINEEND => Some(true),
+                magus::SyntaxKind::DATUM => Some(false),
+                _ => None,
+            })
+            .unwrap_or(false)
+    }
+
+    /// preserve newlines if a node is preceded by one
+    fn calc_preserve_newline(node: &MagusSyntaxNode) -> bool {
+        node.siblings_with_tokens(magus::rowan::Direction::Prev)
+            .skip(1)
+            .find_map(|elem| match elem.kind() {
+                magus::SyntaxKind::LINEEND => Some(true),
+                magus::SyntaxKind::DATUM
+                | magus::SyntaxKind::START_BYTEVECTOR
+                | magus::SyntaxKind::START_VECTOR => Some(false),
+                _ => None,
+            })
+            .unwrap_or(false)
+    }
+
+    fn write_list(&mut self, list: &magus::List) -> fmt::Result {
+        // Special handling for operators and operands
+        write!(self.fmt, "(")?;
+        let Some(operator) = list.datum().next() else {
+            return write!(self.fmt, ")");
+        };
+        // If the operator is alphanumeric and consists of more than 3 characters
+        // Then align with the second letter, otherwise align with the first
+        let use_newlines = Self::calc_use_newlines(operator.syntax()) && list.datum().count() > 10;
+        let alignment = if use_newlines {
+            1
+        } else if let Some(sym) = operator.as_symbol() {
+            let op_text = sym.syntax().text().to_string();
+            let op_text = Self::identifier_string(op_text.as_str());
+            if op_text.chars().count() > 3
+                && op_text.chars().enumerate().all(|(idx, c)| {
+                    if idx == 0 {
+                        c.is_alphabetic()
+                    } else {
+                        c.is_alphanumeric() || "!$%&*/:<=>?@^_-".contains(c)
+                    }
+                })
+            {
+                2
+            } else {
+                2 + op_text.len()
+            }
+        } else {
+            1
+        };
+        self.align += alignment;
+        self.visit_datum(&operator);
+        for operand in list.datum().skip(1) {
+            let preserve_newline = Self::calc_preserve_newline(operand.syntax());
+            if use_newlines || preserve_newline {
+                self.write_new_line()
+            } else {
+                write!(self.fmt, " ")
+            }?;
+            self.visit_datum(&operand);
+        }
+        if use_newlines {
+            self.write_new_line()?;
+        }
+        self.align -= alignment;
+        write!(self.fmt, ")")
+    }
+
+    fn write_vector(&mut self, vector_start: &'static str, v: &impl ContainsDatum) -> fmt::Result {
+        write!(self.fmt, "{}", vector_start)?;
+        // vectors are all rendered with single space delimit, unless the first datum is followed by a newline,
+        // then all are separated by newlines
+        let Some(first_elem) = v.datum().next() else {
+            // nothing to render, an empty vector
+            return write!(self.fmt, ")");
+        };
+        // Since we are preceded on the same line as the vector start
+        // simply add the length of that to our align (it's all ASCII compatible, so we dont need segmenting)
+        self.align += vector_start.chars().count();
+        self.visit_datum(&first_elem);
+        if self.result.is_some_and(|r| r.is_err()) {
+            return self.result.take().unwrap();
+        }
+        // Figure out if we use spaces or newlines
+        //
+        // Check tokens until we either find a LINEEND (use newlines) or a datum (dont)
+        let use_newlines = Self::calc_use_newlines(first_elem.syntax());
+        for d in v.datum().skip(1) {
+            let preserve_newline = Self::calc_preserve_newline(d.syntax());
+            if use_newlines || preserve_newline {
+                self.write_new_line()
+            } else {
+                write!(self.fmt, " ")
+            }?;
+            self.visit_datum(&d);
+        }
+        if use_newlines {
+            self.write_new_line()?;
+        }
+        self.align -= vector_start.chars().count();
+        write!(self.fmt, ")")
     }
 }
 
 impl DatumVisitor for DatumPrintImpl<'_, '_> {
     fn visit_list(&mut self, list: &magus::List) {
-        self.handle_error(|visitor| {
-            // handle empty list simply
-            if list.datum().count() == 0 {
-                write!(visitor.fmt, "()")?;
-                return Ok(());
-            }
-
-            let list_of_lists = visitor.fmt.alternate()
-                && list
-                    .datum()
-                    .all(|c| c.kind() == Some(magus::DatumKind::List))
-                && !list.has_dot();
-            let non_symbol_list = visitor.fmt.alternate()
-                && list.datum().count() > 5
-                && !list.has_dot()
-                && list.datum().nth(0).unwrap().kind() != Some(magus::DatumKind::Symbol);
-            if list_of_lists {
-                visitor.indent += 1;
-                visitor.write_new_line()?;
-            }
-            write!(visitor.fmt, "(")?;
-            if list_of_lists || non_symbol_list {
-                visitor.indent += 1;
-                visitor.write_new_line()?;
-            }
-
-            // should we newline between each datum?
-            let new_line_between = visitor.fmt.alternate()
-                && (list.datum().count() > 5 || list_of_lists || non_symbol_list)
-                && !list.has_dot();
-            let mut iter = list.datum();
-            // write the first element
-            if let Some(e) = iter.next() {
-                visitor.visit_datum(&e);
-            }
-
-            if new_line_between && !(list_of_lists || non_symbol_list) {
-                visitor.indent += 1;
-            }
-            let len = list.datum().count();
-            for (idx, following) in iter.enumerate() {
-                if new_line_between {
-                    visitor.write_new_line()?;
-                } else {
-                    write!(visitor.fmt, " ")?;
-                }
-                // idx + 1 b/c we skipped the first element when we are enumerating
-                // the iterator
-                // len - 1 is the index of the last valid element
-                if list.has_dot() && idx + 1 == len - 1 {
-                    write!(visitor.fmt, ". ")?;
-                }
-
-                visitor.visit_datum(&following);
-            }
-            if new_line_between {
-                visitor.indent -= 1;
-            }
-            if list_of_lists || non_symbol_list {
-                visitor.write_new_line()?;
-            }
-            write!(visitor.fmt, ")")
-        });
+        self.handle_error(|visitor| visitor.write_list(list));
     }
 
     fn visit_vector(&mut self, vector: &magus::Vector) {
-        self.handle_error(|visitor| {
-            // handle empty vector simply
-            if vector.datum().count() == 0 {
-                write!(visitor.fmt, "#()")?;
-                return Ok(());
-            }
-
-            write!(visitor.fmt, "#(")?;
-            // should we newline between each datum?
-            let new_line_between = visitor.fmt.alternate() && vector.datum().count() > 5;
-            let mut iter = vector.datum();
-            // write the first element
-            if let Some(e) = iter.next() {
-                visitor.visit_datum(&e);
-            }
-            visitor.indent += 1;
-            for following in iter {
-                if new_line_between {
-                    visitor.write_new_line()?;
-                } else {
-                    write!(visitor.fmt, " ")?;
-                }
-
-                visitor.visit_datum(&following);
-            }
-            visitor.indent -= 1;
-            write!(visitor.fmt, ")")
-        });
+        self.handle_error(|visitor| visitor.write_vector("#(", vector));
     }
 
     fn visit_bytevector(&mut self, bytevector: &magus::Bytevector) {
-        self.handle_error(|visitor| {
-            write!(visitor.fmt, "#u8(")?;
-            // should we newline between each datum?
-            let new_line_between = visitor.fmt.alternate() && bytevector.datum().count() > 5;
-            let mut iter = bytevector.bytes();
-            let byte_text = |inp: Option<u8>| {
-                if let Some(byte) = inp {
-                    Paint::new(format!("#x{:02x}", byte)).primary()
-                } else {
-                    Paint::new("#ERR".to_string()).red()
-                }
-            };
-            // write the first element
-            if let Some(e) = iter.next() {
-                write!(visitor.fmt, "{}", byte_text(e))?;
-            }
-            visitor.indent += 1;
-            for following in iter {
-                if new_line_between {
-                    visitor.write_new_line()?;
-                } else {
-                    write!(visitor.fmt, " ")?;
-                }
-
-                write!(visitor.fmt, "{}", byte_text(following))?;
-            }
-            visitor.indent -= 1;
-            write!(visitor.fmt, ")")
-        });
+        self.handle_error(|visitor| visitor.write_vector("#u8(", bytevector));
     }
 
     fn visit_labeled(&mut self, labeled: &magus::LabeledDatum) {
@@ -205,44 +245,11 @@ impl DatumVisitor for DatumPrintImpl<'_, '_> {
     fn visit_symbol(&mut self, symbol: &magus::Symbol) {
         self.handle_error(|visitor| {
             if let Some(identifier) = symbol.identifier(false) {
-                // rough rules for unpiped identifiers
-                if identifier
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || r"!$%&*/:<=>?^_~".contains(c))
-                    || ["+", "-"].contains(&identifier.as_ref())
-                    || (identifier.starts_with(['+', '-'])
-                        && identifier
-                            .chars()
-                            .skip(1)
-                            .take(1)
-                            .all(|c| c.is_ascii_alphabetic() || r"!$%&*/:<=>?^_~+\-@".contains(c))
-                        && identifier.chars().skip(2).all(|c| {
-                            c.is_ascii_alphanumeric() || r"!$%&*/:<=>?^_~+\-.@".contains(c)
-                        }))
-                    || (identifier.starts_with(['+', '-'])
-                        && identifier.chars().skip(1).take(1).all(|c| c == '.')
-                        && identifier
-                            .chars()
-                            .skip(2)
-                            .take(1)
-                            .all(|c| c.is_ascii_alphabetic() || r"!$%&*/:<=>?^_~+\-.@".contains(c))
-                        && identifier.chars().skip(3).all(|c| {
-                            c.is_ascii_alphanumeric() || r"!$%&*/:<=>?^_~+\-.@".contains(c)
-                        }))
-                    || (identifier.starts_with('.')
-                        && identifier
-                            .chars()
-                            .skip(1)
-                            .take(1)
-                            .all(|c| c.is_ascii_alphabetic() || r"!$%&*/:<=>?^_~+\-.@".contains(c))
-                        && identifier.chars().skip(2).all(|c| {
-                            c.is_ascii_alphanumeric() || r"!$%&*/:<=>?^_~+\-.@".contains(c)
-                        }))
-                {
-                    write!(visitor.fmt, "{}", identifier)
-                } else {
-                    write!(visitor.fmt, "|{}|", identifier)
-                }
+                write!(
+                    visitor.fmt,
+                    "{}",
+                    Self::identifier_string(identifier.as_ref())
+                )
             } else {
                 write!(visitor.fmt, "{}", "#ERR".red())
             }

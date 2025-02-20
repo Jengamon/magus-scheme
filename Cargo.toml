@@ -4,14 +4,15 @@ members = [".", "datatest_parse", "magus_repl"]
 
 [workspace.package]
 version = "0.1.0"
-rust-version = "1.80"
+edition = "2024"
+rust-version = "1.85"
 
 [package]
 name = "magus"
 version.workspace = true
 rust-version.workspace = true
-edition = "2021"
-description = "R5RS-scheme implementation in Rust using gc-arena"
+edition.workspace = true
+description = "R7RS-scheme implementation in Rust using gc-arena"
 
 [[test]]
 name = "datatests"

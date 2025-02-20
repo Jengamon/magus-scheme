@@ -121,13 +121,10 @@ impl<'a, 'f> DatumPrintImpl<'a, 'f> {
             .as_ref()
             .and_then(magus::Datum::as_symbol)
         {
-            match symbol
+            matches!(symbol
                 .identifier(false)
                 .as_ref()
-                .map(|ident| ident.as_ref())
-            {
-                Some(ident)
-                    if [
+                .map(|ident| ident.as_ref()), Some(ident) if [
                         "define",
                         "lambda",
                         "define-library",
@@ -136,12 +133,7 @@ impl<'a, 'f> DatumPrintImpl<'a, 'f> {
                         "when",
                         "unless",
                     ]
-                    .contains(&ident) =>
-                {
-                    true
-                }
-                _ => false,
-            }
+                    .contains(&ident))
         } else {
             false
         }

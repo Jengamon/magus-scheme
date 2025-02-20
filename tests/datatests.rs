@@ -1,4 +1,3 @@
-use datatest_parse::parse;
 use datatest_stable::Utf8Path;
 use magus::{general_parser::general_parse, lexer::Token};
 
@@ -114,14 +113,14 @@ fn lexer_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()> 
             Ok(tok) => {
                 let got = format!("[{span:?}] {tok:?}");
                 let expected = tokens.pop();
-                if !expected.is_some_and(|expect| expect.trim() == got) {
+                if expected.is_none_or(|expect| expect.trim() != got) {
                     mismatches.push((expected, got));
                 }
             }
             Err(err) => {
                 let got = format!("[{span:?}] {err}");
                 let expected = errors.pop();
-                if !expected.is_some_and(|expect| expect.trim() == got) {
+                if expected.is_none_or(|expect| expect.trim() != got) {
                     mismatches.push((expected, got));
                 }
             }

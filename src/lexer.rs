@@ -339,7 +339,7 @@ fn read_number(
                             return Ok(ExactReal::Integer {
                                 value: 1,
                                 is_neg: is_neg_state.unwrap(),
-                            })
+                            });
                         }
                         _ => return Err(LexerError::MalformedNumber),
                     }
@@ -356,7 +356,7 @@ fn read_number(
                     Some('0') if !is_imaginary => {
                         return Ok(ExactReal::Inf {
                             is_neg: is_neg_state.unwrap(),
-                        })
+                        });
                     }
                     Some('0') => State::OnDotInfIm,
                     _ => return Err(LexerError::MalformedNumber),
@@ -389,7 +389,7 @@ fn read_number(
                     Some('0') if !is_imaginary => {
                         return Ok(ExactReal::Nan {
                             is_neg: is_neg_state.unwrap(),
-                        })
+                        });
                     }
                     Some('0') => State::OnDotNanIm,
                     _ => return Err(LexerError::MalformedNumber),
@@ -471,7 +471,7 @@ fn read_number(
                             numer: number_state.unwrap_or(0),
                             denom: second_number_state.unwrap_or(0),
                             is_neg: is_neg_state.unwrap_or(false),
-                        })
+                        });
                     }
                     Some('i' | 'I') if is_imaginary => State::FinishImaginaryRational,
                     _ => return Err(LexerError::MalformedNumber),
@@ -482,7 +482,7 @@ fn read_number(
                             numer: number_state.unwrap_or(0),
                             denom: second_number_state.unwrap_or(0),
                             is_neg: is_neg_state.unwrap_or(false),
-                        })
+                        });
                     }
                     _ => return Err(LexerError::MalformedNumber),
                 },
@@ -588,7 +588,7 @@ fn read_number(
                                 exponent: third_number_state.unwrap_or(0),
                                 exponent_neg: exponent_sign_state.unwrap_or(false),
                                 is_neg: is_neg_state.unwrap_or(false),
-                            })
+                            });
                         }
                         Some('i' | 'I') if is_imaginary => State::FinishImaginaryDecimal,
                         _ => return Err(LexerError::MalformedNumber),
@@ -970,7 +970,7 @@ impl Iterator for Lexer<'_> {
         }
 
         match &mut self.mode {
-            Modes::Syntax(ref mut syntax) => {
+            Modes::Syntax(syntax) => {
                 assert!(self.nested_comment_level == 0);
                 match syntax.next() {
                     Some(Ok(s @ SyntaxToken::StartNestedComment)) => {
@@ -982,7 +982,7 @@ impl Iterator for Lexer<'_> {
                     None => None,
                 }
             }
-            Modes::NestedComment(ref mut nc) => {
+            Modes::NestedComment(nc) => {
                 assert!(self.nested_comment_level > 0);
                 match nc.next() {
                     Some(Ok(s @ NestedCommentToken::StartNestedComment)) => {
@@ -1021,10 +1021,10 @@ impl Token {
 
 #[cfg(test)]
 mod tests {
-    use crate::{lexer::SchemeNumber, ExactReal};
+    use crate::{ExactReal, lexer::SchemeNumber};
 
     use super::SyntaxToken;
-    use arbtest::{arbtest, ArbTest};
+    use arbtest::{ArbTest, arbtest};
     use assert2::{assert, let_assert};
 
     #[test]
@@ -1240,7 +1240,10 @@ mod tests {
                             imaginary
                         }))) = SyntaxToken::lexer(&inexact_im_decimal).next()
                     );
-                    assert!(real.is_nan() && imaginary.is_nan(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
+                    assert!(
+                        real.is_nan() && imaginary.is_nan(),
+                        "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip"
+                    );
                 }
                 (ExactReal::Nan { .. }, _) => {
                     let_assert!(
@@ -1249,8 +1252,14 @@ mod tests {
                             imaginary
                         }))) = SyntaxToken::lexer(&inexact_im_decimal).next()
                     );
-                    assert!(real.is_nan(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
-                    assert!(imaginary == im.inexact(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
+                    assert!(
+                        real.is_nan(),
+                        "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip"
+                    );
+                    assert!(
+                        imaginary == im.inexact(),
+                        "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip"
+                    );
                 }
                 (_, ExactReal::Nan { .. }) => {
                     let_assert!(
@@ -1259,8 +1268,14 @@ mod tests {
                             imaginary
                         }))) = SyntaxToken::lexer(&inexact_im_decimal).next()
                     );
-                    assert!(imaginary.is_nan(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
-                    assert!(real == number.inexact(), "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip");
+                    assert!(
+                        imaginary.is_nan(),
+                        "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip"
+                    );
+                    assert!(
+                        real == number.inexact(),
+                        "inexact (real {number:?}, im {im:?}) `{inexact_im_decimal}` does not roundtrip"
+                    );
                 }
                 _ => {
                     assert!(

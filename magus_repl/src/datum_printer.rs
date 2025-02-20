@@ -35,6 +35,11 @@ impl<'a, 'f> DatumPrintImpl<'a, 'f> {
         if identifier
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || r"!$%&*/:<=>?^_~".contains(c))
+            || identifier.chars().take(1).all(|c| c.is_ascii_alphabetic())
+                && identifier
+                    .chars()
+                    .skip(1)
+                    .all(|c| c.is_ascii_alphanumeric() || r"!$%&*/:<=>?^_~+\-@".contains(c))
             || ["+", "-"].contains(&identifier)
             || (identifier.starts_with(['+', '-'])
                 && identifier
@@ -77,8 +82,11 @@ impl<'a, 'f> DatumPrintImpl<'a, 'f> {
     // These formatting procedures are based of the description of how Cyclone formats
     // Scheme code as laid out here: https://justinethier.github.io/cyclone/docs/Scheme-code-conventions.html
 
-    /// Calculate if a composite type should separate items using newlines
-    fn calc_use_newlines(node: &MagusSyntaxNode) -> bool {
+    /// Find if a datum node is followed by a newline or a datum
+    ///
+    /// # Returns
+    /// `true` if followed by newline, `false` otherwise
+    fn followed_by_newline(node: &MagusSyntaxNode) -> bool {
         node.siblings_with_tokens(magus::rowan::Direction::Next)
             .skip(1)
             .find_map(|elem| match elem.kind() {
@@ -89,8 +97,11 @@ impl<'a, 'f> DatumPrintImpl<'a, 'f> {
             .unwrap_or(false)
     }
 
-    /// preserve newlines if a node is preceded by one
-    fn calc_preserve_newline(node: &MagusSyntaxNode) -> bool {
+    /// Find if a datum node is preceded by a newline or a datum
+    ///
+    /// # Returns
+    /// `true` if preceded by newline, `false` otherwise
+    fn preceded_by_newline(node: &MagusSyntaxNode) -> bool {
         node.siblings_with_tokens(magus::rowan::Direction::Prev)
             .skip(1)
             .find_map(|elem| match elem.kind() {
@@ -103,6 +114,39 @@ impl<'a, 'f> DatumPrintImpl<'a, 'f> {
             .unwrap_or(false)
     }
 
+    /// Override the default formatting heuristic (forcing 2 space / 1 space formatting)
+    /// for certain operators
+    fn operator_override(node: &MagusSyntaxNode) -> bool {
+        if let Some(symbol) = magus::Datum::cast(node.clone())
+            .as_ref()
+            .and_then(magus::Datum::as_symbol)
+        {
+            match symbol
+                .identifier(false)
+                .as_ref()
+                .map(|ident| ident.as_ref())
+            {
+                Some(ident)
+                    if [
+                        "define",
+                        "lambda",
+                        "define-library",
+                        "define-syntax",
+                        "begin",
+                        "when",
+                        "unless",
+                    ]
+                    .contains(&ident) =>
+                {
+                    true
+                }
+                _ => false,
+            }
+        } else {
+            false
+        }
+    }
+
     fn write_list(&mut self, list: &magus::List) -> fmt::Result {
         // Special handling for operators and operands
         write!(self.fmt, "(")?;
@@ -111,32 +155,36 @@ impl<'a, 'f> DatumPrintImpl<'a, 'f> {
         };
         // If the operator is alphanumeric and consists of more than 3 characters
         // Then align with the second letter, otherwise align with the first
-        let use_newlines = Self::calc_use_newlines(operator.syntax()) && list.datum().count() > 10;
-        let alignment = if use_newlines {
-            1
-        } else if let Some(sym) = operator.as_symbol() {
-            let op_text = sym.syntax().text().to_string();
-            let op_text = Self::identifier_string(op_text.as_str());
-            if op_text.chars().count() > 3
-                && op_text.chars().enumerate().all(|(idx, c)| {
-                    if idx == 0 {
-                        c.is_alphabetic()
-                    } else {
-                        c.is_alphanumeric() || "!$%&*/:<=>?@^_-".contains(c)
-                    }
-                })
-            {
-                2
+        let newline_operand1 = Self::followed_by_newline(operator.syntax());
+        let alignment = if newline_operand1 || Self::operator_override(operator.syntax()) {
+            if let Some(sym) = operator.as_symbol() {
+                let op_text = sym.syntax().text().to_string();
+                let op_text = Self::identifier_string(op_text.as_str());
+                if op_text.chars().count() > 3
+                    && op_text.chars().enumerate().all(|(idx, c)| {
+                        if idx == 0 {
+                            c.is_alphabetic()
+                        } else {
+                            c.is_alphanumeric() || "!$%&*/:<=>?@^_-".contains(c)
+                        }
+                    })
+                {
+                    2
+                } else {
+                    1
+                }
             } else {
-                2 + op_text.len()
+                1
             }
         } else {
-            1
+            let op_text = operator.syntax().text().to_string();
+            2 + op_text.len()
         };
         self.align += alignment;
+        let use_newlines = newline_operand1 && list.datum().count() > 10;
         self.visit_datum(&operator);
         for operand in list.datum().skip(1) {
-            let preserve_newline = Self::calc_preserve_newline(operand.syntax());
+            let preserve_newline = Self::preceded_by_newline(operand.syntax());
             if use_newlines || preserve_newline {
                 self.write_new_line()
             } else {
@@ -169,9 +217,9 @@ impl<'a, 'f> DatumPrintImpl<'a, 'f> {
         // Figure out if we use spaces or newlines
         //
         // Check tokens until we either find a LINEEND (use newlines) or a datum (dont)
-        let use_newlines = Self::calc_use_newlines(first_elem.syntax());
+        let use_newlines = Self::followed_by_newline(first_elem.syntax());
         for d in v.datum().skip(1) {
-            let preserve_newline = Self::calc_preserve_newline(d.syntax());
+            let preserve_newline = Self::preceded_by_newline(d.syntax());
             if use_newlines || preserve_newline {
                 self.write_new_line()
             } else {

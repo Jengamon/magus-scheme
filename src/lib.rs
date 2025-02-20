@@ -10,6 +10,8 @@ pub mod scheme_macro;
 // pub mod treewalk;
 // pub mod treewalk_v2;
 
+pub use rowan;
+
 pub use general_parser::{gast::*, general_parse, CompoundTermKind, TokenKind};
 pub use num::{ExactReal, SchemeNumber};
 pub use rowan::TextRange;

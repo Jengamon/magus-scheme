@@ -1,5 +1,7 @@
-//! General parsing starts where the lexer dropped of, and handles nested syntax, while
+//! General parsing starts where the lexer dropped off, and handles nested syntax, while
 //! also forming a GAST which is a relatively simple layer on top of a [`rowan`] CST.
+use std::io::Read;
+
 use gast::MagusSyntaxNode;
 use logos::Span;
 use rowan::{GreenNode, GreenNodeBuilder};
@@ -149,7 +151,31 @@ impl GeneralParserError {
     }
 }
 
-/// Lexes to produce a GAst, which is a parse result that can have 0+ errors
+#[derive(thiserror::Error, Debug)]
+pub enum GeneralParseReadError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Utf8(#[from] std::str::Utf8Error),
+}
+
+/// Produce a [`GAst`] from something that implements ['Read`], lossily
+/// decoding as UTF-8
+pub fn general_parse_read(mut source: impl Read) -> Result<GAst, GeneralParseReadError> {
+    let mut bytes = vec![];
+    source.read_to_end(&mut bytes)?;
+    Ok(general_parse(std::str::from_utf8(&bytes)?))
+}
+
+/// Produce a [`GAst`] from something that implements ['Read`], lossily
+/// decoding as UTF-8
+pub fn general_parse_read_lossy(mut source: impl Read) -> std::io::Result<GAst> {
+    let mut bytes = vec![];
+    source.read_to_end(&mut bytes)?;
+    Ok(general_parse(String::from_utf8_lossy(&bytes)))
+}
+
+/// Produce a [`GAst`], which is a parse result that can have 0+ errors
 pub fn general_parse(source: impl AsRef<str>) -> GAst {
     use gast::SyntaxKind::*;
     use rowan::Checkpoint;

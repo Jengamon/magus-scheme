@@ -6,7 +6,7 @@ use std::{
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 use lasso::Rodeo;
 
-use crate::{value::StackValue, value::Symbol};
+use crate::value::{Symbol, ValuePtr};
 
 // Big important typedef
 // pub type StackEnvironment<'gc> = Environment<'gc, StackValue<'gc>>;
@@ -28,7 +28,7 @@ macro_rules! create_environment_pair {
 }
 
 create_environment_pair!(
-    pub Stack => StackValue<'gc>
+    pub Stack => ValuePtr<'gc>
 );
 
 // TODO make more involved, so that this can be the type stored in Value

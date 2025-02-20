@@ -800,7 +800,7 @@ pub enum SyntaxToken {
     #[regex(r#""([^\\"]|\\[abntr"\\xX]|\\[ \n\t\r]+)*""#, process_string)]
     String(Box<str>),
 
-    // The number tower is supported at least by the lexer (and currently is mostly rejected by the general parser)
+    // The number tower is supported by the lexer
     // Same as all the others, the lexer here is a bit more permissive to allow for better errors
     // explicit
     #[regex("(?i)((#[ie])?#b|#b(#[ie])?)[+-]i", priority = 5, callback = |l| read_number(l, 2))]

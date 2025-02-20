@@ -1,5 +1,4 @@
 //! Representation of Scheme values
-mod stack_value;
 
 use core::fmt;
 use std::string::String as StdString;
@@ -19,8 +18,6 @@ use super::{
 };
 
 pub type ValuePtr<'gc> = Gc<'gc, RefLock<Value<'gc>>>;
-
-pub use stack_value::{SourceData, StackValue};
 
 #[derive(Collect, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[collect(require_static)]
@@ -90,6 +87,8 @@ pub enum Value<'gc> {
     // Uniquely our lambda's are typed, it's just that (for now)
     // Scheme code simply marks all parameters as untyped
     // Lambda(LambdaPtr<'gc>),
+    // TODO This can be a "chunk" (compiled code), or a native function
+    // Native functions SHOULD provide typechecking
     Lambda(()),
     // A Scheme-side error
     Error(SchemeErrorPtr<'gc>),
@@ -469,6 +468,11 @@ impl<'gc> From<Gc<'gc, RefLock<Vec<u8>>>> for Bytevector<'gc> {
     }
 }
 
+// TODO Explore Clojure Immutable Vectors and
+// Relaxed Radix Balanced Trees for the backing implementation
+// (note that while these datatypes are immutable, they are immutable from
+// Rust's perspective [using Gc w/o RefLock]. we can still have something like set! "mutate"
+// a value by changing what the pointer at that location is pointing to)
 #[derive(Collect, Clone, Copy, Debug)]
 #[collect(no_drop)]
 pub struct Vector<'gc> {

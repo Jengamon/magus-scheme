@@ -1,4 +1,6 @@
 //! Fuel for the machine
+// Lots of references to `Executor` cuz this is straight lifted from piccolo
+// TODO (eventually) fix up the doc comments, and give credit to piccolo
 
 #[derive(Debug, Clone)]
 pub struct Fuel {
@@ -6,7 +8,6 @@ pub struct Fuel {
     interrupted: bool,
 }
 
-// Lots of references to `Executor` cuz this is straight lifted from piccolo
 impl Fuel {
     pub fn empty() -> Self {
         Self {

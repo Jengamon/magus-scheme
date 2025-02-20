@@ -95,7 +95,7 @@ impl Write for OutputPort {
                 writer.flush()
             } else {
                 Err(std::io::Error::new(
-                    std::io::ErrorKind::BrokenPipe,
+                    std::io::ErrorKind::Other,
                     "output port was poisoned",
                 ))?
             }

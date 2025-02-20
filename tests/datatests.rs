@@ -8,10 +8,17 @@ pub struct DatatestError(Box<Utf8Path>);
 
 fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()> {
     let (data, errs) = datatest_parse::parse(&contents);
-    println!("{data:#?} {errs:?}");
-    if let Some(data) = data {
-        println!("{data}");
-    }
+    let Some(data) = data else {
+        println!(
+            "Failed to parse datatest:\n{}",
+            errs.into_iter()
+                .map(|e| format!("\t- {e}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        Err(DatatestError(Box::from(path)))?
+    };
+    println!("{data}\n\n{data:#?}");
     Ok(())
 }
 

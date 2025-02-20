@@ -32,3 +32,6 @@ arbtest-ci:
 # Meant for CI
 build-wasm: locale-data
     ICU4X_DATA_DIR=$(pwd)/locale_data cargo build --target wasm32-unknown-unknown -p magus
+
+doc:
+    cargo doc --document-private-items --no-deps --open

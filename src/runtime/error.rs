@@ -6,14 +6,14 @@ use rowan::TextRange;
 use crate::{environment::RebindError, value::ResolvedValue};
 
 /// Errors store this to record where they're from
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct StackFrame {
     // what range of text were we processing (or None if external)
     pub range: Option<TextRange>,
     // what was the label of the scope we were in?
-    pub scope_label: Option<Box<str>>,
-    // What source id is this scope from?
-    pub source_id: Option<usize>,
+    pub scope_label: Option<lasso::Spur>,
+    // What source file is this scope from?
+    pub source_filename: Option<lasso::Spur>,
 }
 
 /// Scheme is allowed to check what kind of error
@@ -79,12 +79,12 @@ pub struct SchemeError<'gc> {
 pub type SchemeErrorPtr<'gc> = Gc<'gc, SchemeError<'gc>>;
 
 impl<'gc> SchemeError<'gc> {
-    pub fn display<'s>(
+    pub fn display<'s, R: lasso::Resolver>(
         &'s self,
-        sources: &'s [(&'s str, Option<Box<str>>)],
-    ) -> DisplaySchemeError<'s, 'gc> {
+        resolver: &'s R,
+    ) -> DisplaySchemeError<'s, 'gc, R> {
         DisplaySchemeError {
-            sources,
+            resolver,
             error: self,
         }
     }
@@ -99,8 +99,8 @@ impl fmt::Debug for SchemeError<'_> {
     }
 }
 
-pub struct DisplaySchemeError<'s, 'gc> {
-    sources: &'s [(&'s str, Option<Box<str>>)],
+pub struct DisplaySchemeError<'s, 'gc, R: lasso::Resolver> {
+    resolver: &'s R,
     error: &'s SchemeError<'gc>,
 }
 
@@ -136,7 +136,7 @@ impl fmt::Display for SourceDisplay<'_> {
     }
 }
 
-impl<'gc> fmt::Display for DisplaySchemeError<'_, 'gc> {
+impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let error_count = match &self.error.error_type {
             SchemeErrorType::Compound(c) => c.len(),
@@ -168,26 +168,23 @@ impl<'gc> fmt::Display for DisplaySchemeError<'_, 'gc> {
         // write the backtrace
         write!(f, "\n\nBacktrace:")?;
         for frame in self.error.backtrace.iter().rev() {
-            let file_name = |source_id: Option<usize>| {
+            let file_name = |source_id: Option<lasso::Spur>| {
                 if let Some(sid) = source_id {
-                    self.sources
-                        .get(sid)
-                        .and_then(|s| s.1.as_ref().map(Box::as_ref))
-                        .unwrap_or("<unnamed>")
+                    self.resolver.try_resolve(&sid).unwrap_or("<unnamed>")
                 } else {
                     "<<external>>"
                 }
             };
 
-            let source = |source_id: Option<usize>| {
-                source_id.and_then(|sid| self.sources.get(sid).map(|s| s.0))
+            let source = |source_id: Option<lasso::Spur>| {
+                source_id.and_then(|sid| self.resolver.try_resolve(&sid))
             };
             if let Some(range) = frame.range {
                 write!(
                     f,
                     "\n - {:?} {}[{}{:?}] {}",
                     range,
-                    if let Some(source) = source(frame.source_id) {
+                    if let Some(source) = source(frame.source_filename) {
                         format!(
                             "\"{}\" ",
                             SourceDisplay(&source[range.start().into()..range.end().into()])
@@ -195,12 +192,12 @@ impl<'gc> fmt::Display for DisplaySchemeError<'_, 'gc> {
                     } else {
                         "".to_string()
                     },
-                    file_name(frame.source_id),
+                    file_name(frame.source_filename),
                     range,
                     frame
                         .scope_label
                         .as_ref()
-                        .map(|b| b.as_ref())
+                        .and_then(|sl| self.resolver.try_resolve(sl))
                         .unwrap_or("<<root>>")
                 )?;
             } else {
@@ -210,7 +207,7 @@ impl<'gc> fmt::Display for DisplaySchemeError<'_, 'gc> {
                     frame
                         .scope_label
                         .as_ref()
-                        .map(|b| b.as_ref())
+                        .and_then(|sl| self.resolver.try_resolve(sl))
                         .unwrap_or("<<root>>")
                 )?;
             }

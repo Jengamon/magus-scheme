@@ -18,6 +18,10 @@ description = "R7RS-scheme implementation in Rust using gc-arena"
 name = "datatests"
 harness = false
 
+[[bench]]
+name = "library_name"
+harness = false
+
 [dependencies]
 anyhow = "1.0.91"
 arbitrary = { version = "1", features = ["derive"] }
@@ -38,3 +42,4 @@ arbtest = "0.3.1"
 assert2 = "0.3.15"
 datatest-stable = "0.2.9"
 datatest_parse = { path = "datatest_parse" }
+divan = "0.1.17"

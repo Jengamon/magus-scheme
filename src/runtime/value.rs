@@ -7,9 +7,11 @@ use std::{cell::RefCell, rc::Rc};
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 use lasso::{IntoResolver, RodeoResolver};
 
-use crate::environment::StackEnvironmentPtr;
 use crate::SchemeNumber;
+use crate::bytecode::ChunkPtr;
+use crate::environment::StackEnvironmentPtr;
 
+use super::lambda::Lambda;
 use super::{
     error::SchemeErrorPtr,
     // lambda::LambdaPtr,
@@ -39,6 +41,7 @@ pub enum ValueType {
     UserStruct,
     Transformer,
     Lambda,
+    Continuation,
     Error,
 }
 
@@ -86,10 +89,10 @@ pub enum Value<'gc> {
     Transformer(RuntimeTransformer<'gc>),
     // Uniquely our lambda's are typed, it's just that (for now)
     // Scheme code simply marks all parameters as untyped
-    // Lambda(LambdaPtr<'gc>),
-    // TODO This can be a "chunk" (compiled code), or a native function
-    // Native functions SHOULD provide typechecking
-    Lambda(()),
+    Lambda(Lambda<'gc>),
+    // A continuation is a chunk and program counter
+    // bundled together, and is treated as a callable
+    Continuation(Continuation<'gc>),
     // A Scheme-side error
     Error(SchemeErrorPtr<'gc>),
 }
@@ -146,7 +149,9 @@ impl PartialEq for Value<'_> {
             Value::Environment(_) => todo!(),
             Value::UserStruct(_) => todo!(),
             Value::Transformer(_) => todo!(),
-            Value::Lambda(_) => todo!(),
+            Value::Lambda(lptr) => matches!(other, Value::Lambda(optr) if lptr == optr),
+            Value::Continuation(c) => matches!(other, Value::Continuation(oc) if c == oc),
+
             Value::Error(_) => todo!(),
         }
     }
@@ -172,6 +177,7 @@ impl<'gc> Value<'gc> {
             Value::UserStruct(_) => ValueType::UserStruct,
             Value::Transformer(_) => ValueType::Transformer,
             Value::Lambda(_) => ValueType::Lambda,
+            Value::Continuation(_) => ValueType::Continuation,
             Value::Error(_) => ValueType::Error,
         }
     }
@@ -326,16 +332,18 @@ impl fmt::Display for ResolvedValue<'_, lasso::Spur> {
             Value::Environment(_) => todo!(),
             Value::UserStruct(user) => {
                 let label = user.label().unwrap_or("userdata");
-                write!(f, "<{label} {:p}>", &self.value)
+                write!(f, "#<{label} {:p}>", &self.value)
             }
             Value::Transformer(_) => todo!(),
             // Value::Lambda(lambda) => write!(f, "<lambda {:p}>", *lambda.borrow()),
-            Value::Lambda(()) => write!(f, "<lambda TODO>"),
+            Value::Lambda(lambda) => write!(f, "#<lambda {lambda:p}>"),
+            Value::Continuation(cont) => write!(f, "#<continuation {cont}>"),
             Value::Error(_) => todo!(),
         }
     }
 }
 
+// NOTE this will probably be used to convert a value into a program
 pub trait ValueVisitor<'gc> {
     fn visit_value(&mut self, value: ValuePtr<'gc>) {
         match *value.borrow() {
@@ -358,6 +366,7 @@ pub trait ValueVisitor<'gc> {
             // Value::Error(_err) => todo!(),
             Value::Transformer(_trans) => todo!(),
             Value::Lambda(_lam) => todo!(),
+            Value::Continuation(_cont) => todo!(),
             Value::Error(_err) => todo!(),
         }
     }
@@ -439,12 +448,13 @@ pub enum ValueConvertError {
     UnsupportedNumber(SchemeNumber),
 }
 
+/// The return value of `syntax-rules`
 #[derive(Collect, Clone, Copy)]
 #[collect(no_drop)]
 pub struct RuntimeTransformer<'gc>(pub Gc<'gc, ()>);
 impl core::fmt::Debug for RuntimeTransformer<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<transformer {:p}>", self.0)
+        write!(f, "#<transformer {:p}>", self.0)
     }
 }
 
@@ -457,6 +467,7 @@ impl From<lasso::Spur> for Symbol {
     }
 }
 
+// TODO same as for Vector
 #[derive(Collect, Clone, Copy, Debug)]
 #[collect(no_drop)]
 pub struct Bytevector<'gc> {
@@ -471,12 +482,50 @@ impl<'gc> From<Gc<'gc, RefLock<Vec<u8>>>> for Bytevector<'gc> {
 // TODO Explore Clojure Immutable Vectors and
 // Relaxed Radix Balanced Trees for the backing implementation
 // (note that while these datatypes are immutable, they are immutable from
-// Rust's perspective [using Gc w/o RefLock]. we can still have something like set! "mutate"
-// a value by changing what the pointer at that location is pointing to)
+// Rust's perspective [using Gc w/o RefLock]. we can still have something like vector-set! "mutate"
+// a value by changing what the `vec` pointer is pointing to)
 #[derive(Collect, Clone, Copy, Debug)]
 #[collect(no_drop)]
 pub struct Vector<'gc> {
     pub vec: Gc<'gc, RefLock<Vec<ValuePtr<'gc>>>>,
+}
+
+/// A bytecode chunk and program counter bundled together
+#[derive(Debug, Collect, Clone, Copy)]
+#[collect(no_drop)]
+pub enum Continuation<'gc> {
+    Continue {
+        pc: usize,
+        chunk: ChunkPtr<'gc>,
+    },
+    /// A null continuation causes the program to terminate
+    Null,
+}
+
+impl PartialEq for Continuation<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Continuation::Continue { pc, chunk },
+                Continuation::Continue {
+                    pc: opc,
+                    chunk: ochunk,
+                },
+            ) => pc == opc && Gc::ptr_eq(*chunk, *ochunk),
+            (Continuation::Null, Continuation::Null) => true,
+            _ => false,
+        }
+    }
+}
+impl Eq for Continuation<'_> {}
+
+impl fmt::Display for Continuation<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Continuation::Continue { pc, chunk } => write!(f, "{:p}@{}", chunk, pc),
+            Continuation::Null => write!(f, "terminate"),
+        }
+    }
 }
 
 // Steal a little bit of linked list
@@ -515,6 +564,10 @@ impl<'gc> ConsCell<'gc> {
         false
     }
 
+    /// Returns if a cons cell is circular (self-referential)
+    ///
+    /// # Parameters
+    /// - `self_ptr`: [`ValuePtr`] pointing to this [`ConsCell`]
     pub fn is_circular(&self, self_ptr: ValuePtr<'gc>) -> bool {
         let mut stack = vec![];
         self.is_circular_impl(self_ptr, &mut stack)
@@ -548,6 +601,10 @@ impl<'gc> ConsCell<'gc> {
         true
     }
 
+    /// Returns if a cons cell is a valid param list
+    ///
+    /// # Parameters
+    /// - `self_ptr`: [`ValuePtr`] pointing to this [`ConsCell`]
     pub fn is_param_list(&self, self_ptr: ValuePtr<'gc>) -> bool {
         let mut stack = vec![];
         self.is_param_list_impl(self_ptr, &mut stack)
@@ -555,9 +612,9 @@ impl<'gc> ConsCell<'gc> {
 
     pub fn from_iter<
         T: IntoIterator<
-            Item = ValuePtr<'gc>,
-            IntoIter = impl DoubleEndedIterator<Item = ValuePtr<'gc>>,
-        >,
+                Item = ValuePtr<'gc>,
+                IntoIter = impl DoubleEndedIterator<Item = ValuePtr<'gc>>,
+            >,
     >(
         mc: &Mutation<'gc>,
         null: ValuePtr<'gc>,

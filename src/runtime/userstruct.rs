@@ -3,7 +3,7 @@
 
 use std::hash::{Hash, Hasher};
 
-use gc_arena::{arena::Root, barrier, Collect, Gc, Mutation, Rootable, Static};
+use gc_arena::{Collect, Gc, Mutation, Rootable, Static, arena::Root, barrier};
 
 use super::any::{Any, AnyInner};
 
@@ -37,13 +37,13 @@ impl Hash for UserStruct<'_> {
 }
 
 impl<'gc> UserStruct<'gc> {
-    /// Create a new `UserData` from any GC value.
+    /// Create a new `UserStruct` from any GC value.
     ///
     /// In order to provide safe downcasting, an `R` type must be provided that implements
     /// [`trait@Rootable`]. Usually this type is constructed with the [`macro@Rootable`] macro.
     ///
-    /// Downcasting GC types requires that you provide the **same** `R` type to [`UserData::is`] or
-    /// [`UserData::downcast`], as the type is identified not by the `TypeId` of the value itself,
+    /// Downcasting GC types requires that you provide the **same** `R` type to [`UserStruct::is`] or
+    /// [`UserStruct::downcast`], as the type is identified not by the `TypeId` of the value itself,
     /// but the `TypeId` of the `Rootable` impl (and it must be this way, for soundness). If you
     /// always use the [`macro@Rootable`] macro rather than a custom `Rootable` impl as the `R`
     /// type, then this happens automatically.
@@ -67,14 +67,14 @@ impl<'gc> UserStruct<'gc> {
         ))
     }
 
-    /// Create a new `UserData` type from a non-GC value.
+    /// Create a new `UserStruct` type from a non-GC value.
     ///
-    /// This equivalent to calling [`UserData::new`] with the given value wrapped in the [`Static`]
+    /// This equivalent to calling [`UserStruct::new`] with the given value wrapped in the [`Static`]
     /// wrapper provided by `gc-arena` and the `R` type set to `Static<T>`.
     ///
     /// This is provided as a convenience as an easier API than dealing with the [`trait@Rootable`]
     /// trait. In order to downcast values created with this method, you can use the *static*
-    /// variants of `UserData` methods as a further convenience, like [`UserData::downcast_static`].
+    /// variants of `UserStruct` methods as a further convenience, like [`UserStruct::downcast_static`].
     pub fn new_static<T: 'static>(mc: &Mutation<'gc>, val: T) -> Self {
         Self::new::<Static<T>>(mc, Static(val))
     }
@@ -99,9 +99,9 @@ impl<'gc> UserStruct<'gc> {
         self.0.into_inner()
     }
 
-    /// Check if a `UserData` was created with the type `R` passed to [`UserData::new`].
+    /// Check if a `UserStruct` was created with the type `R` passed to [`UserStruct::new`].
     ///
-    /// `UserData` is identified by the `TypeId` of the [`trait@Rootable`] impl, NOT the type
+    /// `UserStruct` is identified by the `TypeId` of the [`trait@Rootable`] impl, NOT the type
     /// itself. We must do things this way, because GC types are non-'static (so you cannot obtain
     /// their `TypeId` in the first place).
     pub fn is<R>(self) -> bool
@@ -111,16 +111,16 @@ impl<'gc> UserStruct<'gc> {
         self.0.is::<R>()
     }
 
-    /// Check if a `UserData` is of type `T` created with [`UserData::new_static`].
+    /// Check if a `UserStruct` is of type `T` created with [`UserStruct::new_static`].
     ///
     /// This is equivalent to calling `this.is::<Static<T>>()`.
     pub fn is_static<T: 'static>(self) -> bool {
         self.is::<Static<T>>()
     }
 
-    /// Downcast a GC `UserData` and get a reference to it.
+    /// Downcast a GC `UserStruct` and get a reference to it.
     ///
-    /// If [`UserData::is`] returns true for the provided type `R`, then this will return a
+    /// If [`UserStruct::is`] returns true for the provided type `R`, then this will return a
     /// reference to the held type, otherwise it will return `Err(BadUserStructType)`.
     pub fn downcast<R>(self) -> Result<&'gc Root<'gc, R>, BadUserStructType>
     where
@@ -130,7 +130,7 @@ impl<'gc> UserStruct<'gc> {
         self.0.downcast::<R>().ok_or(BadUserStructType)
     }
 
-    /// Downcast the `UserData` and get a reference to it wrapped in [`barrier::Write`].
+    /// Downcast the `UserStruct` and get a reference to it wrapped in [`barrier::Write`].
     ///
     /// If the type matches, this also triggers a write barrier on the held `Gc` pointer, allowing
     /// you to safely mutate the held GC value through mechanisms provided by `gc_arena`.
@@ -149,9 +149,9 @@ impl<'gc> UserStruct<'gc> {
         self.0.downcast_write::<R>(mc).ok_or(BadUserStructType)
     }
 
-    /// Downcast a `'static` `UserData` and get a reference to it.
+    /// Downcast a `'static` `UserStruct` and get a reference to it.
     ///
-    /// If [`UserData::is_static`] returns true for the provided type `T`, then this will return a
+    /// If [`UserStruct::is_static`] returns true for the provided type `T`, then this will return a
     /// reference to the held type, otherwise it will return `Err(BadUserStructType)`.
     ///
     /// This is equivalent to calling `this.downcast::<Static<T>>()` (except this returns a

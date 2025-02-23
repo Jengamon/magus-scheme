@@ -145,7 +145,7 @@ impl<'gc, V: Collect<'gc>> Environment<'gc, V> {
     ///
     /// Both `define` and `set!` are stopped by a shallow freeze, so it
     /// requires intentional manipulation on the Rust side in order to get through
-    /// this freeze (to stop even intentional manipulation, use [`Self::deep_freeze`]).
+    /// this freeze.
     #[inline]
     pub fn freeze(&mut self) {
         self.is_frozen = true;

@@ -2,13 +2,9 @@ use std::convert::Infallible;
 
 use gc_arena::{Gc, Mutation, RefLock};
 
-use crate::{environment::StackEnvironmentPtr, runtime::userstruct::UserStruct};
+use crate::{bytecode, environment::StackEnvironmentPtr, runtime::userstruct::UserStruct};
 
-use super::{
-    // lambda::LambdaPtr,
-    value::Value,
-};
-// use crate::runtime::lambda::Lambda;
+use super::value::{Symbol, Value};
 
 pub trait FromValue<'gc> {
     fn from_value(value: Value<'gc>) -> Option<Self>
@@ -99,6 +95,7 @@ impl_into_value!(number infallible u32);
 impl_into_value!(number infallible i8);
 impl_into_value!(number infallible i16);
 impl_into_value!(number infallible i32);
+impl_into_value!(number infallible isize);
 impl_into_value!(simple i64 => Number);
 impl_into_value!(simple f64 => Inexact);
 impl_into_value!(simple bool => Bool);
@@ -108,5 +105,16 @@ impl_into_value!(simple StackEnvironmentPtr<'gc> => Environment);
 impl<'gc> IntoValue<'gc> for String {
     fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {
         Value::String(Gc::new(mc, RefLock::new(self)))
+    }
+}
+impl<'gc> IntoValue<'gc> for bytecode::Constant {
+    fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {
+        match self {
+            Self::Symbol(s) => Value::Symbol(Symbol(s)),
+            Self::Char(c) => c.into_value(mc),
+            Self::Number(i) => i.into_value(mc),
+            Self::String(s) => s.into_value(mc),
+            Self::Bytevector(bv) => Value::Bytevector(Gc::new(mc, RefLock::new(bv)).into()),
+        }
     }
 }

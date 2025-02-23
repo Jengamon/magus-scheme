@@ -1,7 +1,6 @@
 use core::fmt;
 
 use gc_arena::{Collect, Gc};
-use rowan::TextRange;
 
 use crate::{environment::RebindError, value::ResolvedValue};
 
@@ -9,7 +8,7 @@ use crate::{environment::RebindError, value::ResolvedValue};
 #[derive(Debug, Clone, Copy)]
 pub struct StackFrame {
     // what range of text were we processing (or None if external)
-    pub range: Option<TextRange>,
+    pub range: Option<(usize, usize)>,
     // what was the label of the scope we were in?
     pub scope_label: Option<lasso::Spur>,
     // What source file is this scope from?
@@ -27,18 +26,12 @@ pub enum SchemeErrorType<'gc> {
     /// Rust code produced an error
     #[error("Rust code produced an error: {0}")]
     Rust(#[collect(require_static)] anyhow::Error),
-    /// Rust typecheck produced an error
-    #[error("Rust typecheck produced an error: {0}")]
-    Typecheck(#[collect(require_static)] anyhow::Error),
     /// Rust macro produced an error
     #[error("Rust macro produced an error: {0}")]
     Macro(#[collect(require_static)] anyhow::Error),
     /// Macro was in wrong form
     #[error("bad macro form: {0}")]
     MacroForm(#[collect(require_static)] anyhow::Error),
-    /// Multiple errors have occured
-    #[error("Multiple errors have occured")]
-    Compound(Vec<SchemeErrorPtr<'gc>>),
     /// Attempted to execute an empty list
     #[error("attempted to execute an empty list")]
     Null,
@@ -138,30 +131,10 @@ impl fmt::Display for SourceDisplay<'_> {
 
 impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let error_count = match &self.error.error_type {
-            SchemeErrorType::Compound(c) => c.len(),
-            _ => 1,
-        };
+        write!(f, "error:")?;
 
-        write!(
-            f,
-            "{} error{}:",
-            error_count,
-            if error_count != 1 { "s" } else { "" },
-        )?;
-
-        let mut display_fn = |err: &SchemeError<'gc>| -> fmt::Result {
-            write!(f, " {}", err.error_type)?;
-            match &err.error_type {
-                SchemeErrorType::Compound(errs) => {
-                    for err in errs {
-                        write!(f, "\n- {}", err.error_type)?;
-                    }
-                    Ok(())
-                }
-                _ => Ok(()),
-            }
-        };
+        let mut display_fn =
+            |err: &SchemeError<'gc>| -> fmt::Result { write!(f, " {}", err.error_type) };
 
         display_fn(self.error)?;
 
@@ -185,10 +158,7 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
                     "\n - {:?} {}[{}{:?}] {}",
                     range,
                     if let Some(source) = source(frame.source_filename) {
-                        format!(
-                            "\"{}\" ",
-                            SourceDisplay(&source[range.start().into()..range.end().into()])
-                        )
+                        format!("\"{}\" ", SourceDisplay(&source[range.0..range.1]))
                     } else {
                         "".to_string()
                     },

@@ -2,15 +2,15 @@
 
 use std::{
     ops::Deref,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::{Arc, atomic::AtomicUsize},
 };
 
 use gc_arena::{Collect, Gc, Mutation, RefLock, Rootable};
-use slotmap::{new_key_type, SecondaryMap, SlotMap};
+use slotmap::{SecondaryMap, SlotMap, new_key_type};
 
-use crate::value::{Value, ValuePtr};
+use crate::value::{ConsCell, Value, ValuePtr};
 
-mod thread;
+pub mod thread;
 
 new_key_type! { struct ThreadKey; }
 #[derive(Debug)]
@@ -72,14 +72,23 @@ impl Drop for ThreadHandle {
 #[derive(Debug, Collect)]
 #[collect(no_drop)]
 struct Arena<'gc> {
+    // This has an actual meaning, it is Gc::ptr_eq to mean "a null cons"
     null_value: ValuePtr<'gc>,
+    // These are for convenience
+    true_value: ValuePtr<'gc>,
+    false_value: ValuePtr<'gc>,
+
     threads: ThreadMap<'gc>,
 }
 
 /// Context for execution
+#[derive(Clone, Copy)]
 pub struct Context<'gc> {
-    mc: &'gc Mutation<'gc>,
+    pub mc: &'gc Mutation<'gc>,
     pub thread: thread::ThreadPtr<'gc>,
+    pub null_value: ValuePtr<'gc>,
+    pub true_value: ValuePtr<'gc>,
+    pub false_value: ValuePtr<'gc>,
 }
 
 impl<'gc> Deref for Context<'gc> {
@@ -115,7 +124,9 @@ impl Default for Interpreter {
     fn default() -> Self {
         Self {
             arena: gc_arena::Arena::new(|mc| Arena {
-                null_value: Gc::new(mc, RefLock::new(Value::Void)),
+                null_value: Gc::new(mc, RefLock::new(Value::Cons(ConsCell::empty()))),
+                true_value: Gc::new(mc, RefLock::new(Value::Bool(true))),
+                false_value: Gc::new(mc, RefLock::new(Value::Bool(false))),
                 threads: ThreadMap::new(),
             }),
             key_counts: SecondaryMap::new(),
@@ -162,6 +173,9 @@ impl Interpreter {
             let ctx = Context {
                 mc,
                 thread: *thread,
+                null_value: arena.null_value,
+                true_value: arena.true_value,
+                false_value: arena.false_value,
             };
             (f)(ctx, &mut self.interner);
         })

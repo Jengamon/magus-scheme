@@ -6,13 +6,17 @@ pub mod interpreter;
 pub mod lexer;
 mod num;
 pub mod runtime;
-pub mod scheme_macro;
 // pub mod treewalk;
 // pub mod treewalk_v2;
 
+pub use lasso::Rodeo;
 pub use rowan;
 
-pub use general_parser::{gast::*, general_parse, CompoundTermKind, TokenKind};
+pub use general_parser::{CompoundTermKind, TokenKind, gast::*, general_parse};
 pub use num::{ExactReal, SchemeNumber};
 pub use rowan::TextRange;
-pub use runtime::{any::Any, fuel::Fuel, value};
+pub use runtime::{
+    any::Any,
+    fuel::Fuel,
+    value::{self, Value, ValuePtr, ValueType},
+};

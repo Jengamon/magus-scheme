@@ -11,7 +11,7 @@ test *FLAGS:
     cargo nextest r -E "not test(arbtest)" {{FLAGS}}
 
 test-ci:
-    cargo nextest -Pci r -E "not test(arbtest)"
+    cargo nextest -Pci r -E "not test(arbtest)" -p magus
     cargo nextest -Pci r -E "not test(arbtest)" -p datatest_parse
 
 lexer-test *FLAGS:
@@ -27,7 +27,7 @@ arbtest *FLAGS:
     cargo nextest r -E "test(arbtest)" {{FLAGS}}
 
 arbtest-ci:
-    cargo nextest -Pci r -E "test(arbtest)"
+    cargo nextest -Pci r -E "test(arbtest)" -p magus
 
 # Meant for CI
 build-wasm: locale-data

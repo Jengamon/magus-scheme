@@ -1,3 +1,1 @@
-#!/bin/sh
-rustup-init --profile minimal --default-toolchain stable -y
 . "$HOME/.cargo/env"

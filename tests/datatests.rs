@@ -274,6 +274,7 @@ fn lexer_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()> 
 datatest_stable::harness! {
     {test = general_parser_test, root = "test_data", pattern = r"^.*\.gpd"},
     {test = lexer_test, root = "test_data", pattern = r"^.*\.lxd"},
-    {test = compile_test, root = "test_data", pattern = r"^.*\.csd"},
-    {test = scheme_test, root = "test_data", pattern = r"^.*\.sct"},
+    // disable these tests for now, b/c datatest_stable or nextest don't like when there are no tests
+    // {test = compile_test, root = "test_data", pattern = r"^.*\.csd"},
+    // {test = scheme_test, root = "test_data", pattern = r"^.*\.sct"},
 }

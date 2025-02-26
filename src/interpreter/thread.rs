@@ -33,7 +33,7 @@ enum Execution<'gc> {
     },
 }
 
-impl<'gc> Execution<'gc> {
+impl Execution<'_> {
     fn source_data(&self) -> Option<SourceData> {
         match self {
             Execution::Bytecode { chunk, pc, .. } => chunk.find_label(*pc),
@@ -56,6 +56,8 @@ pub struct ThreadFrame<'gc> {
     args: Box<[ValuePtr<'gc>]>,
     is_exception: bool,
     env: StackEnvironmentPtr<'gc>,
+    // used for multiple returns!
+    bottom: usize,
 }
 
 impl ThreadFrame<'_> {
@@ -79,6 +81,7 @@ impl<'gc> ThreadFrame<'gc> {
                 arity,
                 args: self.args.clone(),
                 handler: self.handler,
+                bottom: self.bottom,
             },
             // The other types of execution are not continuable, so create the "null continuation"
             // which when executed, causes all bytecode frames to end.
@@ -127,6 +130,7 @@ impl<'gc> Thread<'gc> {
                 args: Box::from([]),
                 handler: None,
                 is_exception: false,
+                bottom: 0,
             }],
             error: None,
         }
@@ -164,6 +168,7 @@ impl<'gc> Thread<'gc> {
             args: Box::new([]),
             handler,
             is_exception: false,
+            bottom: self.stack.len(),
         });
     }
 
@@ -310,6 +315,7 @@ impl<'gc> Thread<'gc> {
                     // pop the frame, but in the end always continue
                     // If framepointer is oob, then that means execution of this frame is finished
                     if chunk.code.len() <= *pc {
+                        // TODO We could make this a function, so that native lambdas can use the same code...
                         if frame.is_exception {
                             if let Some(err) = self.error {
                                 if !err.error_type.is_continuable() {
@@ -322,6 +328,14 @@ impl<'gc> Thread<'gc> {
                                 }
                             }
                         }
+                        // TODO Lambdas only return the last value of their body, so this should be
+                        // - Pop the value at top of stack (unless resulting stack is empty, then synthesize Void)
+                        // - drain anything frame.bottom..
+                        // - push the value we popped/synthesized earlier
+                        // Lambdas would use a "values" function to return more than one value.
+                        // Native lambdas support this logic natively (if their Return vec len == 1, that value is unwrapped,
+                        // if 0, return Void, otherwise returns Values)
+                        // FIXME Remember to do the same for native lambdas (so do it as a function)
                         self.frames.pop();
                         continue;
                     }
@@ -427,12 +441,14 @@ impl<'gc> Thread<'gc> {
                                         arity: carity,
                                         handler,
                                         args,
+                                        bottom,
                                     } => {
                                         *chunk = *cchunk;
                                         *pc = *cpc;
                                         *arity = *carity;
                                         frame.handler = *handler;
                                         frame.args = args.clone();
+                                        frame.bottom = *bottom;
                                     }
                                     Continuation::Null => {
                                         while matches!(
@@ -448,8 +464,15 @@ impl<'gc> Thread<'gc> {
                                 }
                             }
                         }
+                        Bytecode::Unpack { amount } => {
+                            // If arity is Exact(1), we look at the top value, and if it is a Values, we error
+                            // (so make sure we only *create* values if there is *more* that 1 value to treat like this)
+                            // otherwise expect a values object the matches the requested arity, and error if it doesn't
+                            // w/o unpacking values
+                            todo!()
+                        }
                         Bytecode::Define { symbol } => {
-                            // Pop the top of stack and store in env
+                            // Pop the top of stack and store in env as a given symbol
                             let value = self
                                 .stack
                                 .pop()

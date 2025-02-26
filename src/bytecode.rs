@@ -5,7 +5,10 @@ use std::{rc::Rc, sync::Arc};
 use fxhash::FxHashMap;
 use gc_arena::{Collect, Gc, Mutation};
 
-use crate::{environment::StackEnvironmentPtr, runtime::lambda::CompiledLambdaPtr};
+use crate::{
+    environment::StackEnvironmentPtr,
+    runtime::lambda::{Arity, CompiledLambdaPtr},
+};
 
 /*
 compiled form is at its root primitive forms:
@@ -58,6 +61,11 @@ pub enum Bytecode {
     /// Call the given lambda, making it a tail call if possible (there are
     /// no more instructions in the current context to execute)
     Call { args: usize },
+    /// Multiple returns are turned into a "values" object, which represent multiple items that were returned by a
+    /// procedure. To work with the items individually, they must be unpacked (and we reuse arity
+    /// to represent how many values were expected to be unpacked onto the stack, so we can revert and error
+    /// if an unexpected amount occurs)
+    Unpack { amount: Arity },
 
     // NOTE These are the "definitive forms" that are
     // theoretically all that's needed to implement the
@@ -99,6 +107,7 @@ impl Bytecode {
             Self::MakeVector { .. } => 1,
             Self::AppendVector { .. } => 1,
             Self::Reference { .. } => 1,
+            Self::Unpack { .. } => 1,
             Self::Call { .. } => 4,
             Self::Define { .. } => 2,
             Self::SetBang { .. } => 2,

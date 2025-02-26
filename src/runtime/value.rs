@@ -23,6 +23,7 @@ pub type ValuePtr<'gc> = Gc<'gc, RefLock<Value<'gc>>>;
 #[derive(Collect, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[collect(require_static)]
 pub enum ValueType {
+    Values,
     Undefined,
     Void,
     Number,
@@ -47,6 +48,9 @@ pub enum ValueType {
 #[derive(Collect, Clone, Copy, Debug)]
 #[collect(no_drop)]
 pub enum Value<'gc> {
+    // Special form of value representing multiple returns
+    // Is generally opaque
+    Values(Gc<'gc, Vec<ValuePtr<'gc>>>),
     // Attempting to access this value is an error
     // (but the binding exists for the purposes of set!)
     // TODO allow syntax-rules special form to define an auxillary macro `undefined`
@@ -92,6 +96,7 @@ pub enum Value<'gc> {
 impl PartialEq for Value<'_> {
     fn eq(&self, other: &Self) -> bool {
         match self {
+            Value::Values(v) => matches!(other, Value::Values(ov) if v == ov),
             Value::Undefined => matches!(other, Value::Undefined),
             Value::Void => matches!(other, Value::Void),
             Value::Number(n) => matches!(other, Value::Number(on) if on == n),
@@ -149,6 +154,7 @@ impl PartialEq for Value<'_> {
 impl<'gc> Value<'gc> {
     pub fn value_type(&self) -> ValueType {
         match self {
+            Value::Values(_) => ValueType::Values,
             Value::Undefined => ValueType::Undefined,
             Value::Void => ValueType::Void,
             Value::Number(_) => ValueType::Number,
@@ -218,7 +224,7 @@ pub struct ResolvedValue<'gc, R: lasso::Resolver> {
     resolver: Rc<R>,
 }
 
-impl<'gc, R: lasso::Resolver> Clone for ResolvedValue<'gc, R> {
+impl<R: lasso::Resolver> Clone for ResolvedValue<'_, R> {
     fn clone(&self) -> Self {
         Self {
             value: self.value,
@@ -344,12 +350,15 @@ impl<K: lasso::Resolver> fmt::Display for ConsPrinter<'_, '_, K> {
 impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.value {
+            Value::Values(v) => {
+                write!(f, "#<values {}>", v.len())
+            }
             Value::Undefined => write!(f, "#<undef>"),
             Value::Void => write!(f, "#<void>"),
             Value::Number(n) => write!(f, "{n}"),
             Value::Inexact(fp) => write!(f, "{fp}"),
             Value::String(s) => write!(f, "\"{}\"", s.borrow().replace('\"', "\\\"")),
-            Value::Symbol(sym) => write!(f, "'{}", self.resolver.resolve(&sym.0.into())),
+            Value::Symbol(sym) => write!(f, "'{}", self.resolver.resolve(&sym.0)),
             Value::Bool(b) => write!(f, "#{}", if b { "t" } else { "f" }),
             Value::Char(c) => write!(f, "#\\{c}"),
             Value::Vector(ref vec) => {
@@ -461,6 +470,7 @@ pub enum Continuation<'gc> {
         arity: Arity,
         handler: Option<Lambda<'gc>>,
         args: Box<[ValuePtr<'gc>]>,
+        bottom: usize,
     },
     /// A null continuation causes the program to pop frames until it hits
     /// a native lambda frame
@@ -478,6 +488,7 @@ impl PartialEq for Continuation<'_> {
                     arity,
                     handler,
                     args,
+                    bottom,
                 },
                 Continuation::Continue {
                     pc: opc,
@@ -485,6 +496,7 @@ impl PartialEq for Continuation<'_> {
                     arity: oarity,
                     handler: ohandler,
                     args: oargs,
+                    bottom: obottom,
                 },
             ) => {
                 pc == opc
@@ -492,6 +504,7 @@ impl PartialEq for Continuation<'_> {
                     && arity == oarity
                     && handler == ohandler
                     && args == oargs
+                    && bottom == obottom
             }
             (Continuation::Null, Continuation::Null) => true,
             _ => false,

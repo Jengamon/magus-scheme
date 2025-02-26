@@ -1,17 +1,30 @@
 image: alpine/edge
+oauth: pages.sr.ht/PAGES:RW
+# We use rustup and manually install Rust for each step, b/c the rust
+# package doesn't update that quickly
 packages:
-  - rust
-  - cargo
+  - rustup
   - just
-  - cargo-nextest
+  - mdbook
+  - hut
 sources:
   - git@git.sr.ht:~jangermad/magus
 secrets:
   - b3a02cf9-8da6-4caa-a4c9-833027656007
+environment:
+  site: jangermad.srht.site/magus
 tasks:
+  - copy-to-buildenv: "cat magus/.buildenv | tee -a ~/.buildenv"
+  - install-nextest: cargo install cargo-nextest
   - run-tests: |
       cd magus
       just test-ci
   - run-arbtests: |
       cd magus
       just arbtest-ci
+  - package-book: |
+      cd magus
+      mdbook build
+      tar -cvz book > ../site.tar.gz
+  - upload: |
+      hut pages publish -d $site site.tar.gz

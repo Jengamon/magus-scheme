@@ -30,7 +30,7 @@ fxhash = "0.2.1"
 gc-arena = { git = "https://github.com/kyren/gc-arena", rev = "d18259e33bd360beb6f8e07a86fc774512aec965" }
 icu_casemap = "1.5.1"
 lasso = { version = "0.7.2" }
-logos = { version = "0.14.1" }
+logos = { version = "0.15" }
 paste = "1.0.15"
 # petgraph = "0.6.5"
 rowan = "0.16"
@@ -43,3 +43,4 @@ assert2 = "0.3.15"
 datatest-stable = "0.3.2"
 datatest_parse = { path = "datatest_parse" }
 divan = "0.1.17"
+rstest = "0.24.0"

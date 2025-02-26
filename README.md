@@ -41,9 +41,8 @@ It consists of 2 parts:
 - Compiler
 - VM/Treewalk
 
-- [ ] compiler can interpret Rust-side macros
+- [x] compiler can interpret Rust-side macros
 - [ ] compiler can interpret Scheme-side macros
-- [ ] treewalk can interpret code
 - [ ] compiler can produce VM bytecode
 - [ ] vm can interpret code
 
@@ -98,3 +97,18 @@ If I were to define in `hygiene.scm`:
 ;; but if *above* that line, you defined `x`, it would work and the
 ;; value would be overwritten by (the number you passed in + 1)
 ```
+
+## Formatter
+
+Soooo to make code look nice we should do this, taking advantage of the CST we use.
+We can model it after the one currently in REPL (which is modelled after https://justinethier.github.io/cyclone/docs/Scheme-code-conventions.html).
+
+## Linter
+
+Due to technicallities of our stack, we try to error where we can, but invalid-*looking* code is allow through like:
+```scheme
+(define x (list #xah))
+```
+b/c it's *technically* not invalid. We should lint code like this (taking advantage of CST~) (the formatter simply makes
+the code follow these lint rules) (essentially linter is suggestions, while formatter
+changes code to match suggestions)

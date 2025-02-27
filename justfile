@@ -2,7 +2,7 @@ repl *FLAGS:
     cargo run -p magus_repl -- {{FLAGS}}
 
 clear-locale-data:
-    rm -Rf locale_data
+    rm -rf locale_data
 
 locale-data: clear-locale-data
     icu4x-datagen --keys none --locales und --format mod --out locale_data
@@ -11,8 +11,9 @@ test *FLAGS:
     cargo nextest r -E "not test(arbtest)" {{FLAGS}}
 
 test-ci:
-    cargo nextest -Pci r -E "not test(arbtest)" -p magus
-    cargo nextest -Pci r -E "not test(arbtest)" -p datatest_parse
+    cargo nextest -Pci r -p magus
+    cargo nextest -Pci r -p datatest_parse
+    cargo nextest -Pci r -p magus --ignore-default-filter -E "test(arbtest)"
 
 lexer-test *FLAGS:
     cargo nextest r -E "test(lxd)" {{FLAGS}}
@@ -25,9 +26,6 @@ scheme-test *FLAGS:
 
 arbtest *FLAGS:
     cargo nextest r -E "test(arbtest)" {{FLAGS}}
-
-arbtest-ci:
-    cargo nextest -Pci r -E "test(arbtest)" -p magus
 
 # Meant for CI
 build-wasm: locale-data

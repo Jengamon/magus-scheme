@@ -12,10 +12,12 @@ tasks:
   - run-rustup: |
       rustup-init --profile minimal --default-toolchain stable -y
       cat magus/.buildenv | tee -a ~/.buildenv
-  - install-nextest: curl -LsSf https://get.nexte.st/latest/linux-musl | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+  - install-deps: |
+      curl -LsSf https://get.nexte.st/latest/linux-musl | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+      cargo install icu_datagen
   - run-tests: |
       cd magus
       just test-ci
-  - run-arbtests: |
+  - build-wasm: |
       cd magus
-      just arbtest-ci
+      just build-wasm

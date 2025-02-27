@@ -36,6 +36,8 @@ Scheme-impls)
 pub enum Bytecode {
     /// Push the null cons to the stack
     PushNull,
+    /// Push a void value to the stack
+    PushVoid,
     /// Push to stack a constant value at a given index of the constant table
     PushConst { index: usize },
     /// Push a boolean value to stack
@@ -48,12 +50,10 @@ pub enum Bytecode {
     FetchRest,
     /// Pop the top 2 arguments from the stack and make a cons cell out of them
     /// (fails if either of the 2 arguments are undefined)
-    MakeCons,
+    MakePair,
     /// Make a vector (popping from stack), using the amount specified as the number of
     /// items
     MakeVector { length: usize },
-    /// Add the amount of items to the end of a vector (which must be below all the items)
-    AppendVector { length: usize },
     /// Look up the symbol in the stack environment, and push the result to
     /// stack (if not found or not a symbol, errors)
     Reference { symbol: lasso::Spur },
@@ -66,6 +66,12 @@ pub enum Bytecode {
     /// to represent how many values were expected to be unpacked onto the stack, so we can revert and error
     /// if an unexpected amount occurs)
     Unpack { amount: Arity },
+
+    // Holes are the way to make self-referential datatypes
+    /// Creates a hole for self-reference
+    MakeHole { id: usize },
+    /// Pop the top of the stack as the value of a hole, and clear the hole.
+    FillHole { id: usize },
 
     // NOTE These are the "definitive forms" that are
     // theoretically all that's needed to implement the
@@ -80,8 +86,7 @@ pub enum Bytecode {
     SetBang { symbol: lasso::Spur },
     /// Branching instruction
     ///
-    /// Jump forward by a certain number of instructions
-    /// if the value popped from the top of the stack is false (any other
+    /// Jump forward by a certain number of instructions if the value popped from the top of the stack is false (any other
     /// value is considered true)
     If { jump: usize },
 
@@ -98,14 +103,16 @@ impl Bytecode {
     pub fn cost(&self) -> i32 {
         match self {
             Self::PushNull => 1,
+            Self::PushVoid => 1,
             Self::PushConst { .. } => 1,
             Self::PushBool { .. } => 1,
             Self::PushLambda { .. } => 1,
             Self::FetchArg { .. } => 1,
             Self::FetchRest { .. } => 1,
-            Self::MakeCons => 1,
+            Self::MakePair => 1,
+            Self::MakeHole { .. } => 1,
+            Self::FillHole { .. } => 1,
             Self::MakeVector { .. } => 1,
-            Self::AppendVector { .. } => 1,
             Self::Reference { .. } => 1,
             Self::Unpack { .. } => 1,
             Self::Call { .. } => 4,

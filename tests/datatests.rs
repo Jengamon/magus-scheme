@@ -62,7 +62,7 @@ fn compile_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()
         let includer = NullIncluder;
         let programs =
             (format!("{path}.scm"), data.source()).parse_program(mc, &mut interner, false)?;
-        let mut compiler = Compiler::new(mc, &mut interner);
+        let mut compiler = Compiler::new(mc);
         match compiler.compile(mc, &mut interner, &test_world, &includer, programs) {
             Ok(chunk) => {
                 let chunk_debug = format!("{chunk:#?}");
@@ -275,6 +275,6 @@ datatest_stable::harness! {
     {test = general_parser_test, root = "test_data", pattern = r"^.*\.gpd"},
     {test = lexer_test, root = "test_data", pattern = r"^.*\.lxd"},
     // disable these tests for now, b/c datatest_stable or nextest don't like when there are no tests
-    // {test = compile_test, root = "test_data", pattern = r"^.*\.csd"},
+    {test = compile_test, root = "test_data", pattern = r"^.*\.csd"},
     // {test = scheme_test, root = "test_data", pattern = r"^.*\.sct"},
 }

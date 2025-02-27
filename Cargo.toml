@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = [".", "datatest_parse", "magus_repl"]
+members = [".", "datatest_parse", "magus_format", "magus_repl"]
 
 [workspace.package]
 version = "0.1.0"

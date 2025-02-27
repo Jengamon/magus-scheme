@@ -133,6 +133,21 @@ pub enum ExactReal {
     },
 }
 
+impl ExactReal {
+    /// Can this exact number be determined to be 0?
+    pub fn is_zero(self) -> bool {
+        matches!(
+            self,
+            ExactReal::Integer { value: 0, .. }
+                | ExactReal::Decimal {
+                    base: 0,
+                    post_dot: 0,
+                    ..
+                }
+        ) || matches!(self, ExactReal::Rational { numer: 0, denom, ..} if denom != 0)
+    }
+}
+
 impl<'a> Arbitrary<'a> for ExactReal {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(match u.int_in_range(0..=4)? {

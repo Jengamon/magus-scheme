@@ -347,18 +347,32 @@ impl<K: lasso::Resolver> fmt::Display for ConsPrinter<'_, '_, K> {
     }
 }
 
+/// Checks if a given symbol is a valid unpiped Scheme identifier
+fn is_valid_scheme_identifier(s: &str) -> bool {
+    if !s.is_ascii() || s.chars().any(|c| !c.is_ascii_graphic()) {
+        // Scheme identifiers must be in ASCII (and not whitespace)
+        return false;
+    }
+
+    // TODO add refinements, as we are currently too permissive atm
+    true
+}
+
 impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.value {
             Value::Values(v) => {
-                write!(f, "#<values {}>", v.len())
+                write!(f, "#<values count={}>", v.len())
             }
             Value::Undefined => write!(f, "#<undef>"),
             Value::Void => write!(f, "#<void>"),
             Value::Number(n) => write!(f, "{n}"),
             Value::Inexact(fp) => write!(f, "{fp}"),
             Value::String(s) => write!(f, "\"{}\"", s.borrow().replace('\"', "\\\"")),
-            Value::Symbol(sym) => write!(f, "'{}", self.resolver.resolve(&sym.0)),
+            Value::Symbol(sym) if is_valid_scheme_identifier(self.resolver.resolve(&sym.0)) => {
+                write!(f, "'{}", self.resolver.resolve(&sym.0))
+            }
+            Value::Symbol(sym) => write!(f, "'|{}|", self.resolver.resolve(&sym.0)),
             Value::Bool(b) => write!(f, "#{}", if b { "t" } else { "f" }),
             Value::Char(c) => write!(f, "#\\{c}"),
             Value::Vector(ref vec) => {

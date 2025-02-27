@@ -35,6 +35,13 @@ pub enum LambdaReturn<'gc> {
     ///
     /// `[call-end]`
     Return(Vec<ValuePtr<'gc>>),
+    /// Call a continuation
+    ///
+    /// `[call-end]`
+    Continue {
+        cont: Continuation<'gc>,
+        args: Vec<ValuePtr<'gc>>,
+    },
     /// Raise the given value as an error
     ///
     /// `[call-end]`
@@ -47,10 +54,6 @@ pub enum LambdaReturn<'gc> {
     /// `[call-end]`
     Propagate(SchemeErrorPtr<'gc>),
 
-    /// Call a continuation
-    ///
-    /// `[call-end]`
-    Continue { cont: Continuation<'gc> },
     /// Call a given lambda, and push the values it returns onto the stack
     Call {
         lambda: Lambda<'gc>,
@@ -145,7 +148,6 @@ pub trait NativeLambda: std::fmt::Debug + Collectable {
         err: SchemeErrorPtr<'gc>,
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
         let _ = (ctx, args);
-        // used to mark unhandled errors, will set the error (like Raise) unless already set
         Ok(LambdaReturn::Propagate(err))
     }
 

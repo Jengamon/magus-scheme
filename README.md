@@ -4,9 +4,11 @@ Build status: [![builds.sr.ht status](https://builds.sr.ht/~jangermad/magus/comm
 
 So we are targeting R5RS and R7RS as we please. In general:
 - R7RS has case-sensitivity. since we already wrote the code, might as well use it...
-- R7RS has a module system + `include`. we don't need that, so we won't
-- R7RS has a library system. this is nopen't we are not doing that.
+- ~~R7RS has a module system + `include`. we don't need that, so we won't~~ I actually love the module system
+- ~~R7RS has a library system. this is nopen't we are not doing that.~~ Nah libs are great.
 - R5RS has no error handling. we want error handling.
+
+(So now we are basically R7RS)
 
 So while it is correct to say we are *some* form of Scheme, we aren't going to be
 hardlining any specific implementation. (But I do want to add the Racket syntax-parameter
@@ -20,18 +22,19 @@ There are 2 parts of the frontend:
 - Lexer
 - General Parser
 
-The formal syntax of R5RS is encoded in the lexer and general parser, where the lexer handles things that can be
+The formal syntax of Scheme is encoded in the lexer and general parser, where the lexer handles things that can be
 recognized by regular expressions (identifiers, numbers, strings, etc.) while the general parser handles things
 that can't be (nested comments, datum, datum comments, bytevectors, vectors) (anything that requires pairing).
-(we are case-sensitive as influenced by R7RS)
+
+(Currently the only number type of the tower that is unsupported by the lexer are polar numbers)
 
 This forms the GAST which is just a representation of what a given file *literally* contains. (these should map to a backing CST from `rowan`).
 
 No macro interpretation is done at this point (and special forms are handled by this layer).
 
-A World defines *all* modules that can possibly exist. A script is only allowed to import libraries defined by modules from its World.
-(In fact, any value is able to be shared between runtimes if they share the same World. This is to
-make implementing Scheme macros easier \[I hope...])
+A World defines *all* native modules that can possibly exist.
+A script is only allowed to import libraries defined by modules from its World, or defined locally (by `define-library`)
+in their script (or include) on the same `Compiler`.
 
 ### Runtime
 
@@ -39,15 +42,10 @@ The runtime is responsible for reading and executing on a World's GAst.
 
 It consists of 2 parts:
 - Compiler
-- VM/Treewalk
+- VM
 
-- [x] compiler can interpret Rust-side macros
-- [ ] compiler can interpret Scheme-side macros
-- [ ] compiler can produce VM bytecode
-- [ ] vm can interpret code
-
-Scheme-defined macros are have their results executed in the environment where the macros was originally declared,
-so the result of the compiler must have a way to specifying different environments for code to be executed in.
+- [x] compiler can produce VM bytecode
+- [x] vm can interpret code
 
 #### Compiler
 It is the job of the compiler to:
@@ -59,7 +57,6 @@ It takes in a World, and a filename, and returns code that can be ran on an inte
 #### VM/Treewalk
 
 VM is an interpreter that relies on the compiler converting code into bytecode before it can execute.
-Treewalk is one that only needs macros to be interpreted by the compiler to get the resulting code.
 
 ## Numbers
 
@@ -67,6 +64,8 @@ Numbers are of particular interest to Schemers, and I'm happy to say that we sup
 all forms of numbers (and with how we store them, the Scheme `ieee-float` feature). However,
 we currently do not have a runtime that supports numbers beyond exact integers (for my purposes,
 this is fine).
+
+**UPDATE** (2025-03-01): We don't actually support polar numbers. We should, eventually.
 
 ### IMPL NOTES
 

@@ -86,14 +86,14 @@ pub struct Arena<'gc> {
 }
 
 impl<'gc> Arena<'gc> {
-    pub fn create_chunk_handle(
-        &mut self,
-        mc: &Mutation<'gc>,
-        chunk: bytecode::Chunk<'gc>,
-    ) -> ChunkHandle {
+    fn create_chunk_handle(&mut self, chunk: bytecode::ChunkPtr<'gc>) -> ChunkHandle {
         let knob = Arc::new(());
-        let key = self.stash.chunks.insert(Gc::new(mc, chunk));
+        let key = self.stash.chunks.insert(chunk);
         ChunkHandle { _knob: knob, key }
+    }
+
+    pub fn get_chunk(&self, handle: &ChunkHandle) -> Option<bytecode::ChunkPtr<'gc>> {
+        self.stash.chunks.get(handle.key).copied()
     }
 
     pub fn stash_value(&mut self, value: ValuePtr<'gc>) -> ValueHandle {
@@ -239,18 +239,22 @@ impl Interpreter {
     pub fn new_compiler(&mut self) -> CompilerHandle {
         let knob = Arc::new(());
         self.arena.mutate_root(|mc, arena| {
-            let new_compiler = compiler::Compiler::new(mc, &mut self.interner);
+            let new_compiler = compiler::Compiler::new(mc);
             let key = arena.stash.compilers.insert(new_compiler);
             self.compiler_knobs.insert(key, knob.clone());
             CompilerHandle { _knob: knob, key }
         })
     }
 
-    pub fn compiler_context<T>(
+    pub fn compiler_context<E>(
         &mut self,
         handle: &CompilerHandle,
-        func: impl FnOnce(&Mutation<'_>, &mut compiler::Compiler<'_>, &mut lasso::Rodeo) -> T,
-    ) -> T {
+        func: impl for<'a> FnOnce(
+            &Mutation<'a>,
+            &mut compiler::Compiler<'a>,
+            &mut lasso::Rodeo,
+        ) -> Result<bytecode::ChunkPtr<'a>, E>,
+    ) -> Result<ChunkHandle, E> {
         self.check_for_dropped();
         self.arena.mutate_root(|mc, arena| {
             let compiler = arena
@@ -258,11 +262,12 @@ impl Interpreter {
                 .compilers
                 .get_mut(handle.key)
                 .expect("compiler was dropped when a handle still exists");
-            (func)(mc, compiler, &mut self.interner)
+            let chunk = (func)(mc, compiler, &mut self.interner)?;
+            Ok(arena.create_chunk_handle(chunk))
         })
     }
 
-    pub fn create_thread(&mut self, code: &ChunkHandle) -> ThreadHandle {
+    pub fn new_thread(&mut self, code: &ChunkHandle) -> ThreadHandle {
         let knob = Arc::new(());
         self.arena.mutate_root(|mc, arena| {
             let chunk = arena
@@ -280,10 +285,23 @@ impl Interpreter {
         })
     }
 
+    pub fn new_empty_thread(&mut self) -> ThreadHandle {
+        let knob = Arc::new(());
+        self.arena.mutate_root(|mc, arena| {
+            let new_thread = thread::Thread::default();
+            let key = arena
+                .stash
+                .threads
+                .insert(Gc::new(mc, RefLock::new(new_thread)));
+            self.thread_knobs.insert(key, knob.clone());
+            ThreadHandle { key, _knob: knob }
+        })
+    }
+
     pub fn enter(
         &mut self,
         handle: &ThreadHandle,
-        func: impl FnOnce(Context<'_>, &mut Arena<'_>, &mut lasso::Rodeo),
+        func: impl for<'a> FnOnce(Context<'a>, &mut Arena<'a>, &mut lasso::Rodeo),
     ) {
         self.check_for_dropped();
         self.arena.mutate_root(|mc, arena| {
@@ -300,6 +318,29 @@ impl Interpreter {
                 false_value: arena.false_value,
             };
             (func)(ctx, arena, &mut self.interner);
+        })
+    }
+
+    pub fn try_enter<T>(
+        &mut self,
+        handle: &ThreadHandle,
+        func: impl for<'a> FnOnce(Context<'a>, &mut Arena<'a>, &mut lasso::Rodeo) -> T,
+    ) -> T {
+        self.check_for_dropped();
+        self.arena.mutate_root(|mc, arena| {
+            let thread = arena
+                .stash
+                .threads
+                .get(handle.key)
+                .expect("thread was dropped when a handle still exists");
+            let ctx = Context {
+                mc,
+                thread: *thread,
+                null_value: arena.null_value,
+                true_value: arena.true_value,
+                false_value: arena.false_value,
+            };
+            (func)(ctx, arena, &mut self.interner)
         })
     }
 }

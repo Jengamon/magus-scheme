@@ -137,8 +137,9 @@ impl<'gc, V: Collect<'gc>> Environment<'gc, V> {
     }
 
     #[inline]
-    fn parent(&self) -> Option<EnvironmentPtr<'gc, V>> {
-        self.parent
+    // pub(crate) fn reparent(&mut self, new_parent: Option<EnvironmentPtr<'gc, V>>) {
+    pub fn reparent(&mut self, new_parent: Option<EnvironmentPtr<'gc, V>>) {
+        self.parent = new_parent;
     }
 
     /// Freezes this particular copy of the environment.

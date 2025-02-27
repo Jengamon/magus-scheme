@@ -3,7 +3,6 @@ use gc_arena::{Collect, Gc, Mutation, RefLock};
 use crate::{
     Fuel, Value,
     bytecode::{Bytecode, ChunkPtr, SourceData},
-    compiler::World,
     environment::{StackEnvironment, StackEnvironmentPtr},
     runtime::{
         convert::IntoValue,
@@ -79,7 +78,7 @@ pub struct ThreadFrame<'gc> {
     // dynamic-wind before and after
     dynamic_wind: DynamicWind<'gc>,
     args: Box<[ValuePtr<'gc>]>,
-    is_exception: bool,
+    exception: Option<SchemeErrorPtr<'gc>>,
     env: StackEnvironmentPtr<'gc>,
     // used for multiple returns!
     bottom: usize,
@@ -109,7 +108,8 @@ impl PartialEq for ThreadFrame<'_> {
             && self.handler == other.handler
             && self.dynamic_wind == other.dynamic_wind
             && self.args == other.args
-            && self.is_exception == other.is_exception
+            && (matches!((self.exception, other.exception), (Some(se), Some(oe)) if Gc::ptr_eq(se, oe))
+                || self.exception.is_none() && other.exception.is_none())
             && Gc::ptr_eq(self.env, other.env)
             && self.bottom == other.bottom
     }
@@ -168,18 +168,19 @@ impl<'gc> Iterator for StackExpander<'gc> {
 pub type ThreadPtr<'gc> = Gc<'gc, RefLock<Thread<'gc>>>;
 pub type Stack<'gc> = Vec<ValuePtr<'gc>>;
 /// Runs all code
-#[derive(Debug, Collect)]
+#[derive(Debug, Collect, Default)]
 #[collect(no_drop)]
 pub struct Thread<'gc> {
     stack: Stack<'gc>,
     frames: Vec<ThreadFrame<'gc>>,
     error: Option<SchemeErrorPtr<'gc>>,
+    // used in the creation of self-referential datastructures and recursive structures
+    holes: fxhash::FxHashMap<usize, ValuePtr<'gc>>,
 }
 
 impl<'gc> Thread<'gc> {
     pub fn new(mc: &Mutation<'gc>, chunk: ChunkPtr<'gc>) -> Self {
         Self {
-            stack: vec![],
             frames: vec![ThreadFrame {
                 execution: Execution::Bytecode {
                     chunk,
@@ -193,11 +194,28 @@ impl<'gc> Thread<'gc> {
                 args: Box::from([]),
                 handler: None,
                 dynamic_wind: None,
-                is_exception: false,
+                exception: None,
                 bottom: 0,
             }],
-            error: None,
+            ..Default::default()
         }
+    }
+
+    /// Creates a frame of evaluation for the given lambda
+    pub fn call(
+        &mut self,
+        lambda: Lambda<'gc>,
+        error_handler: Option<Lambda<'gc>>,
+        args: &[ValuePtr<'gc>],
+    ) -> Result<(), LambdaException> {
+        // Push args to stack
+        for arg in args {
+            self.stack.push(*arg);
+        }
+        self.call_lambda(lambda, args.len(), false)?;
+        // Install error handler (if any)
+        self.frames.last_mut().unwrap().handler = error_handler;
+        Ok(())
     }
 
     /// Creates a frame of evaluation for included code
@@ -207,7 +225,7 @@ impl<'gc> Thread<'gc> {
         &mut self,
         mc: &Mutation<'gc>,
         chunk: ChunkPtr<'gc>,
-        handler: Option<Lambda<'gc>>,
+        error_handler: Option<Lambda<'gc>>,
         tail: bool,
     ) {
         let execution = Execution::Bytecode {
@@ -218,6 +236,8 @@ impl<'gc> Thread<'gc> {
 
         if tail {
             if let Some(last) = self.frames.last_mut() {
+                // Adjust the frame's parent to point to *this* chunk's import env
+                last.env.borrow_mut(mc).reparent(Some(chunk.import_env));
                 last.execution = execution;
                 return;
             }
@@ -230,11 +250,26 @@ impl<'gc> Thread<'gc> {
                 RefLock::new(StackEnvironment::new(mc, Some(chunk.import_env))),
             ),
             args: Box::new([]),
-            handler,
+            handler: error_handler,
             dynamic_wind: None,
-            is_exception: false,
+            exception: None,
             bottom: self.stack.len(),
         });
+    }
+
+    /// Resets execution state & stack
+    pub fn reset(&mut self) {
+        self.reset_error();
+        self.frames.clear();
+        self.holes.clear();
+        self.stack.clear();
+        debug_assert!(self.is_finished());
+    }
+
+    /// Clears error
+    #[inline]
+    pub fn reset_error(&mut self) {
+        let _ = self.error.take();
     }
 
     /// When a thread has no frames, then it is considered to be finished.
@@ -254,8 +289,9 @@ impl<'gc> Thread<'gc> {
             Err(err)
         } else {
             // no actually we want to reverse this stack to preserve source order
+            // and actually only return the value at the top of the stack (if it's Value::Values, then it can be more than 1~)
             Ok(StackExpander {
-                stack: self.stack.iter().copied().rev().collect(),
+                stack: self.stack.iter().copied().rev().take(1).collect(),
                 encountered_values: Vec::new(),
                 in_progress: None,
             })
@@ -265,6 +301,11 @@ impl<'gc> Thread<'gc> {
     // Defined on &mut rather than &self for lambda denial
     pub fn env(&mut self) -> Option<StackEnvironmentPtr<'gc>> {
         Self::current_env(&self.frames)
+    }
+
+    // Ditto
+    pub fn envs(&mut self) -> impl Iterator<Item = StackEnvironmentPtr<'gc>> {
+        self.frames.iter().map(|f| f.env)
     }
 
     fn current_env(frames: &[ThreadFrame<'gc>]) -> Option<StackEnvironmentPtr<'gc>> {
@@ -287,10 +328,44 @@ impl<'gc> Thread<'gc> {
         self.error
     }
 
-    fn make_backtrace(
-        frames: &[ThreadFrame<'gc>],
-        interner: &mut lasso::Rodeo,
-    ) -> Vec<StackFrame<'gc>> {
+    /// Handles things that happen at the end of a frame, as well as returning it's value
+    /// and adjusting the execution stack.
+    ///
+    /// This should be the last thing done on a step before looping back to fuelcheck.
+    fn handle_frame_end(&mut self, ctx: &Context<'gc>) {
+        let Some(frame) = self.frames.last_mut() else {
+            unreachable!("[ICE] no frame present");
+        };
+
+        if let Some(err) = frame.exception {
+            if !err.error_type.is_continuable() {
+                let index = self.error_handler_frame_index().unwrap();
+                self.frames.drain(index..);
+                self.error = Some(Gc::new(
+                    ctx,
+                    SchemeError {
+                        backtrace: Self::make_backtrace(&self.frames),
+                        error_type: SchemeErrorType::HandlerFailed(Gc::new(
+                            ctx,
+                            err.error_type.clone(),
+                        )),
+                    },
+                ));
+            }
+        }
+        // TODO Lambdas only return the last value of their body, so this should be
+        // - Pop the value at top of stack (unless resulting stack is empty, then synthesize Void)
+        // - drain anything frame.bottom..
+        // - push the value we popped/synthesized earlier
+        // Lambdas would use a "values" function to return more than one value.
+        // Native lambdas support this logic natively (if their Return vec len == 1, that value is unwrapped,
+        // if 0, return Void, otherwise returns Values)
+        // FIXME Remember to do the same for native lambdas (so do it as a function)
+        // TODO If dynamic-wind is present. call the after
+        self.frames.pop();
+    }
+
+    fn make_backtrace(frames: &[ThreadFrame<'gc>]) -> Vec<StackFrame<'gc>> {
         frames
             .iter()
             .rev()
@@ -312,8 +387,9 @@ impl<'gc> Thread<'gc> {
         args: usize,
         tail: bool,
     ) -> Result<(), LambdaException> {
-        // TODO Remember the Value::Values counts for more than 1 value
-        // (when calling a lambda, Values are implicitly unpacked)
+        // TODO First argument is lowest on the stack
+        // TODO Remember the Value::Values counts for 1 value!!!, so no special handling
+        // Only as output of the entire system is it special
         todo!()
     }
 
@@ -354,7 +430,6 @@ impl<'gc> Thread<'gc> {
         &mut self,
         ctx: Context<'gc>,
         interner: &mut lasso::Rodeo,
-        world: &World,
         includer: &dyn Includer,
         fuel: &mut Fuel,
     ) {
@@ -363,7 +438,7 @@ impl<'gc> Thread<'gc> {
                 self.error = Some(Gc::new(
                     &ctx,
                     SchemeError {
-                        backtrace: Self::make_backtrace(&self.frames, interner),
+                        backtrace: Self::make_backtrace(&self.frames),
                         error_type: $err,
                     },
                 ));
@@ -377,7 +452,7 @@ impl<'gc> Thread<'gc> {
 
             if let Some(err) = self.error {
                 // Find an error handler and set it up to run (if not handling one)
-                if !self.frames.last().unwrap().is_exception {
+                if self.frames.last().unwrap().exception.is_none() {
                     if let Some(handler) = self.error_handler() {
                         if let Err(_err) = self.call_lambda(handler, 1, true) {
                             // not a valid handler, so *take* it
@@ -390,7 +465,7 @@ impl<'gc> Thread<'gc> {
                             continue;
                         }
                         // mark frame as exception
-                        self.frames.last_mut().unwrap().is_exception = true;
+                        self.frames.last_mut().unwrap().exception = self.error.take();
                         continue;
                     } else {
                         // execution ends with this error
@@ -409,33 +484,9 @@ impl<'gc> Thread<'gc> {
             // handle execution
             match &mut frame.execution {
                 Execution::Bytecode { chunk, pc, arity } => {
-                    // TODO If erroring, check if frame defines a handler. If so, jump to that handler, if not,
-                    // pop the frame, but in the end always continue
                     // If framepointer is oob, then that means execution of this frame is finished
                     if chunk.code.len() <= *pc {
-                        // TODO We could make this a function, so that native lambdas can use the same code...
-                        if frame.is_exception {
-                            if let Some(err) = self.error {
-                                if !err.error_type.is_continuable() {
-                                    let index = self.error_handler_frame_index().unwrap();
-                                    self.frames.drain(index..);
-                                    make_error!(SchemeErrorType::HandlerFailed(Gc::new(
-                                        &ctx,
-                                        err.error_type.clone()
-                                    )));
-                                }
-                            }
-                        }
-                        // TODO Lambdas only return the last value of their body, so this should be
-                        // - Pop the value at top of stack (unless resulting stack is empty, then synthesize Void)
-                        // - drain anything frame.bottom..
-                        // - push the value we popped/synthesized earlier
-                        // Lambdas would use a "values" function to return more than one value.
-                        // Native lambdas support this logic natively (if their Return vec len == 1, that value is unwrapped,
-                        // if 0, return Void, otherwise returns Values)
-                        // FIXME Remember to do the same for native lambdas (so do it as a function)
-                        // TODO If dynamic-wind is present. call the after
-                        self.frames.pop();
+                        self.handle_frame_end(&ctx);
                         continue;
                     }
                     macro_rules! advance_to_next_inst {
@@ -449,6 +500,10 @@ impl<'gc> Thread<'gc> {
                     match inst {
                         Bytecode::PushNull => {
                             self.stack.push(ctx.null_value);
+                            advance_to_next_inst!();
+                        }
+                        Bytecode::PushVoid => {
+                            self.stack.push(Gc::new(&ctx, RefLock::new(Value::Void)));
                             advance_to_next_inst!();
                         }
                         Bytecode::PushBool { bool } => {
@@ -517,7 +572,54 @@ impl<'gc> Thread<'gc> {
                                 )));
                             }
                         }
+                        Bytecode::MakePair => {
+                            if self.stack.len() < 2 {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            }
+
+                            todo!();
+                        }
+                        Bytecode::MakeHole { id } => {
+                            // create an undefined value
+                            let val = Gc::new(&ctx, RefLock::new(Value::Undefined));
+                            // mark as a hole
+                            if self.holes.contains_key(&id) {
+                                make_error!(SchemeErrorType::AlreadyDefinedHole(id));
+                                continue;
+                            }
+                            self.holes.insert(id, val);
+                            self.stack.push(val);
+                            advance_to_next_inst!();
+                        }
+                        Bytecode::FillHole { id } => {
+                            // get the value at the top of the stack, and make the requisite hole if defined equal to the value
+                            let Some(value) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+
+                            if let Some(hole_ptr) = self.holes.get(&id) {
+                                *hole_ptr.borrow_mut(&ctx) = *value.borrow();
+                                self.holes.remove(&id);
+                                advance_to_next_inst!();
+                            } else {
+                                make_error!(SchemeErrorType::UndefinedHole(id));
+                            }
+                        }
+                        Bytecode::Duplicate => {
+                            let Some(value) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+
+                            self.stack.push(value);
+                            self.stack.push(value);
+                            advance_to_next_inst!();
+                        }
                         Bytecode::Call { args } => {
+                            // TODO Check for holes, if present, abort
+
                             let Some(val) = self.stack.pop() else {
                                 make_error!(SchemeErrorType::NonCallable);
                                 continue;
@@ -534,16 +636,6 @@ impl<'gc> Thread<'gc> {
                                     };
                                 }
                                 Value::Continuation(c) => {
-                                    // FIXME a continuation isn't a copy of all this state, but a reference to the stack
-                                    // Make this accurate by making a continuation an index refering to a frame's position
-                                    // on the frame stack (frames now have a lot more data, so a continuation can be an opaque
-                                    // usize)
-                                    //
-                                    // This should fix this split between Continue and Null, and treat native and bytecode
-                                    // frames as the same from the perspective of continuations, a desirable property. this also means that
-                                    // the ThreadFrame is no longer responsible for creating the continuation, the Thread is
-                                    // so when making a call, give an immutable reference to native lambdas
-
                                     // TODO Make sure to add before and after calls on *top* of the native call for all
                                     // frames that are left
                                     // with all befores below all afters , e.g.:
@@ -552,6 +644,8 @@ impl<'gc> Thread<'gc> {
                                     // [n after(f2) after(f1) before(f1) before(f2)]
                                     // (which is reversed call order, because stack)
                                     // n can be a native frame or nothing (null continuation means "go to first native call below this")
+
+                                    // FIXME Make this a function so native lambdas can do this easily too.
                                     todo!("continuation handling")
                                 }
                                 _ => {
@@ -568,10 +662,10 @@ impl<'gc> Thread<'gc> {
                         }
                         Bytecode::Define { symbol } => {
                             // Pop the top of stack and store in env as a given symbol
-                            let value = self
-                                .stack
-                                .pop()
-                                .unwrap_or_else(|| Gc::new(&ctx, RefLock::new(Value::Undefined)));
+                            let Some(value) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
                             if current_env
                                 .unwrap()
                                 .borrow_mut(&ctx)
@@ -580,6 +674,35 @@ impl<'gc> Thread<'gc> {
                             {
                                 make_error!(SchemeErrorType::FrozenDefine);
                                 continue;
+                            }
+
+                            advance_to_next_inst!();
+                        }
+                        Bytecode::SetBang { symbol } => {
+                            // Pop the top of stack and store in env as a given symbol
+                            let Some(value) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+                            if current_env
+                                .unwrap()
+                                .borrow_mut(&ctx)
+                                .rebind(&ctx, symbol, value, interner)
+                                .is_err()
+                            {
+                                make_error!(SchemeErrorType::FrozenDefine);
+                                continue;
+                            }
+
+                            advance_to_next_inst!();
+                        }
+                        Bytecode::If { jump } => {
+                            let Some(value) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+                            if *value.borrow() == Value::Bool(false) {
+                                *pc += jump;
                             }
 
                             advance_to_next_inst!();
@@ -601,7 +724,6 @@ impl<'gc> Thread<'gc> {
 #[cfg(test)]
 mod tests {
     use gc_arena::{Gc, RefLock, arena};
-    use lasso::Interner;
     use rstest::{fixture, rstest};
 
     use crate::{
@@ -646,7 +768,7 @@ mod tests {
                 )
                 .expect("failed to define cowl");
             // manual compilation of "cowl\n(define ram 3)\nram"
-            // FIXME Get compiler working so that this becomes a datatest
+            // TODO Convert this into a thread (full execution) datatest
             let chunk = bytecode::Chunk::new(
                 mc,
                 [
@@ -688,7 +810,7 @@ mod tests {
             while !thread.borrow().is_finished() && run_cost < 1000 {
                 thread
                     .borrow_mut(&ctx)
-                    .step(ctx, &mut interner, world, includer, &mut fuel);
+                    .step(ctx, &mut interner, includer, &mut fuel);
                 run_cost += INITIAL_FUEL - fuel.remaining();
                 dbg!(run_cost);
                 fuel.refill(1000, INITIAL_FUEL);

@@ -6,9 +6,10 @@ use gc_arena::{Collect, Gc, RefLock, unsize};
 
 use crate::{
     Value,
-    bytecode::{Bytecode, Chunk},
+    bytecode::{Bytecode, Chunk, Constant},
     compiler::{
-        ArcSyntax, Compiler, Module, ProgramData, ProgramPtr, Syntax, SyntaxContext, SyntaxReturn,
+        ArcSyntax, Compiler, ListHead, Module, ProgramData, ProgramPtr, Syntax, SyntaxContext,
+        SyntaxReturn,
     },
     environment::StackEnvironmentPtr,
     runtime::{
@@ -29,10 +30,9 @@ impl Syntax for Define {
         ctx: &mut SyntaxContext<'_, 'gc>,
         compiler: &mut Compiler<'gc>,
         _import_env: StackEnvironmentPtr<'gc>,
-        // TODO Chunk lambdas
         args: &[ProgramPtr<'gc>],
     ) -> anyhow::Result<SyntaxReturn<'gc>> {
-        // FIXME Make a "base" error, and remove the ad-hocness of these impls
+        // FIXME Make a "base" error, and remove the ad-hocness of these impls (maybe? I like them ad-hoc rn)
         if args.len() != 2 {
             return Err(anyhow::anyhow!("define must be given exactly 2 arguments"));
         }
@@ -62,9 +62,41 @@ impl Syntax for Define {
                 .compile_code(ctx, value)?
                 .into_bytecode()
                 .into_iter()
-                .chain(std::iter::once(Bytecode::Define { symbol: *name }))
+                .chain([Bytecode::Define { symbol: *name }, Bytecode::PushVoid])
                 .collect(),
         ))
+    }
+}
+
+#[derive(Debug)]
+pub struct SetBang;
+
+impl Syntax for SetBang {
+    fn evaluate<'gc>(
+        &self,
+        ctx: &mut SyntaxContext<'_, 'gc>,
+        compiler: &mut Compiler<'gc>,
+        import_env: StackEnvironmentPtr<'gc>,
+        args: &[ProgramPtr<'gc>],
+    ) -> anyhow::Result<SyntaxReturn<'gc>> {
+        let _ = (ctx, compiler, import_env, args);
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+pub struct If;
+
+impl Syntax for If {
+    fn evaluate<'gc>(
+        &self,
+        ctx: &mut SyntaxContext<'_, 'gc>,
+        compiler: &mut Compiler<'gc>,
+        import_env: StackEnvironmentPtr<'gc>,
+        args: &[ProgramPtr<'gc>],
+    ) -> anyhow::Result<SyntaxReturn<'gc>> {
+        let _ = (ctx, compiler, import_env, args);
+        todo!()
     }
 }
 
@@ -76,10 +108,7 @@ impl Syntax for Lambda {
         &self,
         ctx: &mut SyntaxContext<'_, 'gc>,
         compiler: &mut Compiler<'gc>,
-        // (technically a misnomer, as it isn't really that but an environment
-        // whose parent is the import environment)
         import_env: StackEnvironmentPtr<'gc>,
-        // TODO Chunk lambdas
         args: &[ProgramPtr<'gc>],
     ) -> anyhow::Result<SyntaxReturn<'gc>> {
         if args.is_empty() {
@@ -143,6 +172,110 @@ impl Syntax for Lambda {
     }
 }
 
+#[derive(Debug)]
+pub struct Quote;
+
+impl Syntax for Quote {
+    fn evaluate<'gc>(
+        &self,
+        ctx: &mut SyntaxContext<'_, 'gc>,
+        _compiler: &mut Compiler<'gc>,
+        _import_env: StackEnvironmentPtr<'gc>,
+        args: &[ProgramPtr<'gc>],
+    ) -> anyhow::Result<SyntaxReturn<'gc>> {
+        if args.len() != 1 {
+            return Err(anyhow::anyhow!("quote expects exactly 1 argument"));
+        }
+
+        fn quote_program<'gc>(
+            ptr: ProgramPtr<'gc>,
+            ctx: &mut SyntaxContext<'_, 'gc>,
+            labels: &mut HashSet<usize>,
+        ) -> anyhow::Result<Vec<Bytecode>> {
+            macro_rules! constant_eval {
+                ($e:expr => $f:ident) => {
+                    vec![Bytecode::PushConst {
+                        index: ctx.push_constant(Constant::$f($e)),
+                    }]
+                };
+            }
+
+            Ok(match &ptr.data {
+                ProgramData::Integer(i) => constant_eval!(*i => Number),
+                ProgramData::Inexact(f) => constant_eval!(*f => Inexact),
+                ProgramData::String(s) => {
+                    constant_eval!(Arc::from(ctx.interner.resolve(s)) => String)
+                }
+                ProgramData::Symbol(s) => {
+                    constant_eval!(*s => Symbol)
+                }
+                ProgramData::Bool(b) => {
+                    vec![Bytecode::PushBool { bool: *b }]
+                }
+                ProgramData::Char(c) => {
+                    constant_eval!(*c => Char)
+                }
+                ProgramData::Labeled { label, item } => {
+                    labels.insert(*label);
+
+                    let mut code = quote_program(*item, ctx, labels)?;
+                    code.push(Bytecode::Duplicate);
+                    code.push(Bytecode::FillHole { id: *label });
+                    code
+                }
+                ProgramData::LabelRef(label) => {
+                    if !labels.contains(label) {
+                        return Err(anyhow::anyhow!("undefined label reference {label}"));
+                    }
+                    vec![Bytecode::MakeHole { id: *label }]
+                }
+                ProgramData::EmptyList => vec![Bytecode::PushNull],
+                ProgramData::List { head, body } => {
+                    let mut data = vec![Bytecode::PushNull];
+                    for it in body.iter().rev() {
+                        data.extend(quote_program(*it, ctx, labels)?);
+                        data.push(Bytecode::MakePair);
+                    }
+                    match head {
+                        ListHead::Program(p) => {
+                            data.extend(quote_program(*p, ctx, labels)?);
+                        }
+                        ListHead::Import => {
+                            let import = ctx.interner.get_or_intern_static("import");
+                            data.push(Bytecode::PushConst {
+                                index: ctx.push_constant(Constant::Symbol(import)),
+                            });
+                        }
+                        ListHead::DefineLibrary => {
+                            let define_library =
+                                ctx.interner.get_or_intern_static("define-library");
+                            data.push(Bytecode::PushConst {
+                                index: ctx.push_constant(Constant::Symbol(define_library)),
+                            });
+                        }
+                    };
+                    data.push(Bytecode::MakePair);
+                    data
+                }
+                ProgramData::DottedList { pre_dot, dot } => {
+                    debug_assert!(!pre_dot.is_empty());
+                    let mut data = quote_program(*dot, ctx, labels)?;
+                    for it in pre_dot.iter().rev() {
+                        data.extend(quote_program(*it, ctx, labels)?);
+                        data.push(Bytecode::MakePair);
+                    }
+                    data
+                }
+            })
+        }
+
+        // Used for evaluating labeled datum
+        let mut labels = HashSet::default();
+        let code = quote_program(args[0], ctx, &mut labels)?;
+        Ok(SyntaxReturn::Code(Box::from(code.as_slice())))
+    }
+}
+
 #[derive(Collect, Debug)]
 #[collect(require_static)]
 pub struct CallCc;
@@ -191,6 +324,9 @@ impl Module for Base {
             "call/cc",
             "define",
             "lambda",
+            "quote",
+            "set!",
+            "if",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -214,10 +350,13 @@ impl Module for Base {
         }
     }
 
-    fn primitive(&self, interner: &mut lasso::Rodeo, symbol: lasso::Spur) -> Option<ArcSyntax> {
+    fn syntax(&self, interner: &mut lasso::Rodeo, symbol: lasso::Spur) -> Option<ArcSyntax> {
         match interner.resolve(&symbol) {
             "define" => Some(Arc::new(Define { self_sym: symbol })),
             "lambda" => Some(Arc::new(Lambda)),
+            "set!" => Some(Arc::new(SetBang)),
+            "if" => Some(Arc::new(If)),
+            "quote" => Some(Arc::new(Quote)),
             _ => None,
         }
     }

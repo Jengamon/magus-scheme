@@ -802,6 +802,9 @@ pub enum SyntaxToken {
 
     // The number tower is supported by the lexer
     // Same as all the others, the lexer here is a bit more permissive to allow for better errors
+    // TODO Turns out we were missing 1 syntax: polar numbers. I won't do it rn, as I want a better way of
+    // doing all this below. It might be simple to add, but I don't actually need it as I don't currently
+    // support complex numbers, but before marking this project as done, that should be in.
     // explicit
     #[regex("(?i)((#[ie])?#b|#b(#[ie])?)[+-]i", priority = 5, callback = |l| read_number(l, 2))]
     #[regex("(?i)((#[ie])?#o|#o(#[ie])?)[+-]i", priority = 5, callback = |l| read_number(l, 8))]

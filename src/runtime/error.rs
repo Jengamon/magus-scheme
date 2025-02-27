@@ -4,6 +4,7 @@ use std::rc::Rc;
 use gc_arena::{Collect, Gc};
 
 use crate::{
+    bytecode::Bytecode,
     interpreter::thread::{Execution, LambdaException},
     value::ResolvedValue,
 };
@@ -63,6 +64,12 @@ pub enum SchemeErrorType<'gc> {
         #[collect(require_static)]
         LambdaException,
     ),
+    #[error("hole {0} was already defined")]
+    AlreadyDefinedHole(usize),
+    #[error("hole {0} was not defined")]
+    UndefinedHole(usize),
+    #[error("instruction expected more values: {0:?}")]
+    NoValue(#[collect(require_static)] Bytecode),
 }
 
 impl SchemeErrorType<'_> {
@@ -107,38 +114,6 @@ pub struct DisplaySchemeError<'s, 'gc, R: lasso::Resolver> {
     error: &'s SchemeError<'gc>,
 }
 
-struct SourceDisplay<'a>(&'a str);
-impl fmt::Display for SourceDisplay<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut prev_is_space = false;
-        for c in self.0.chars() {
-            let emit = match c {
-                '\t' => None,
-                c if c.is_whitespace() => Some(' '),
-
-                c => Some(c),
-            };
-
-            match emit {
-                Some(' ') if prev_is_space => {}
-                Some(' ') => {
-                    prev_is_space = true;
-                    write!(f, " ")?;
-                }
-                Some(c) => {
-                    prev_is_space = false;
-                    write!(f, "{c}")?;
-                }
-                None => {
-                    prev_is_space = false;
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
 impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "error:")?;
@@ -168,7 +143,7 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
                     "\n - {:?} {}[{}{:?}] {}",
                     range,
                     if let Some(source) = source(frame.source_filename) {
-                        format!("\"{}\" ", SourceDisplay(&source[range.0..range.1]))
+                        format!("\"{}\" ", source,)
                     } else {
                         "".to_string()
                     },

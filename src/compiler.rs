@@ -1,7 +1,3 @@
-// This is the IR format that is compiled into Chunks.
-//
-// It is convertable to and from StackValues as well as Datum
-
 use core::fmt;
 use std::{
     collections::{HashMap, HashSet},
@@ -14,13 +10,15 @@ use fxhash::FxHashMap;
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 
 use crate::{
-    ContainsDatum, DatumVisitor, GAstNode, ValuePtr,
+    ValuePtr,
     bytecode::{Bytecode, Chunk, ChunkPtr, Constant, SourceData},
     environment::{Environment, StackEnvironmentPtr},
-    general_parser::GeneralParserError,
     interpreter::Includer,
     runtime::lambda::CompiledLambdaPtr,
 };
+
+mod program_parsers;
+pub use program_parsers::GeneralParseErrors;
 
 /// Values that can be at the head of a list
 #[derive(Debug, Collect, Clone, Copy)]
@@ -215,84 +213,6 @@ pub trait ParseProgram {
     ) -> Result<Vec<ProgramPtr<'gc>>, Self::Error>;
 }
 
-#[derive(thiserror::Error, Debug)]
-pub struct GeneralParseErrors(Box<[GeneralParserError]>);
-impl fmt::Display for GeneralParseErrors {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "failed to parse code:")?;
-
-        for err in &self.0 {
-            writeln!(f, "  - {err} ({err:?})")?;
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum StringProgramError {
-    #[error(transparent)]
-    GeneralParse(#[from] GeneralParseErrors),
-    #[error(transparent)]
-    GAst(#[from] GAstProgramError),
-}
-impl<T: AsRef<str>, SN: AsRef<str>> ParseProgram for (SN, T) {
-    type Error = StringProgramError;
-    fn parse_program<'gc>(
-        self,
-        mc: &Mutation<'gc>,
-        interner: &mut lasso::Rodeo,
-        case_insensitive: bool,
-    ) -> Result<Vec<ProgramPtr<'gc>>, Self::Error> {
-        let (source_name, source) = self;
-        let gast = crate::general_parse(source);
-        if !gast.errors().is_empty() {
-            return Err(GeneralParseErrors(gast.into_errors().into()))?;
-        }
-
-        Ok((
-            source_name,
-            crate::Module::cast(gast.syntax()).expect("ICE: top-level code cannot be Module"),
-        )
-            .parse_program(mc, interner, case_insensitive)?)
-    }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum GAstProgramError {}
-impl<SN: AsRef<str>> ParseProgram for (SN, crate::Module) {
-    type Error = GAstProgramError;
-    fn parse_program<'gc>(
-        self,
-        mc: &Mutation<'gc>,
-        interner: &mut lasso::Rodeo,
-        case_insensitive: bool,
-    ) -> Result<Vec<ProgramPtr<'gc>>, Self::Error> {
-        let (source_name, module) = self;
-
-        struct ProgramVisitor<'a, 'gc> {
-            mc: &'a Mutation<'gc>,
-            interner: &'a mut lasso::Rodeo,
-            case_insensitive: bool,
-            ptr: Option<Result<ProgramPtr<'gc>, GAstProgramError>>,
-        }
-        impl DatumVisitor for ProgramVisitor<'_, '_> {}
-
-        let mut programs = vec![];
-        for d in module.datum() {
-            let mut visitor = ProgramVisitor {
-                mc,
-                interner,
-                case_insensitive,
-                ptr: None,
-            };
-            visitor.visit_datum(dbg!(&d));
-            programs.push(visitor.ptr.expect("null program")?);
-        }
-
-        Ok(programs)
-    }
-}
 // TODO impl IntoProgram for GAst types (Module, Datum, etc.)
 
 /*
@@ -395,10 +315,7 @@ pub trait Syntax: std::fmt::Debug {
         &self,
         ctx: &mut SyntaxContext<'_, 'gc>,
         compiler: &mut Compiler<'gc>,
-        // (technically a misnomer, as it isn't really that but an environment
-        // whose parent is the import environment)
         import_env: StackEnvironmentPtr<'gc>,
-        // TODO Chunk lambdas
         args: &[ProgramPtr<'gc>],
     ) -> anyhow::Result<SyntaxReturn<'gc>>;
 }
@@ -451,7 +368,7 @@ macro_rules! library_name {
 pub trait Module {
     /// all symbols defined by this module (used when *everything* is imported)
     fn all_symbols(&self, interner: &mut lasso::Rodeo) -> HashSet<lasso::Spur>;
-    fn primitive(&self, interner: &mut lasso::Rodeo, symbol: lasso::Spur) -> Option<ArcSyntax> {
+    fn syntax(&self, interner: &mut lasso::Rodeo, symbol: lasso::Spur) -> Option<ArcSyntax> {
         let _ = (interner, symbol);
         None
     }
@@ -573,7 +490,7 @@ pub enum Arg {
     Rest,
 }
 
-#[derive(thiserror::Error, Debug, Clone)]
+#[derive(thiserror::Error, Debug)]
 pub enum CompileError {
     #[error("a label was encountered in code")]
     Labeled(Option<SourceData>),
@@ -585,6 +502,10 @@ pub enum CompileError {
     DottedList(Option<SourceData>),
     #[error("a macro encountered an error: {0}")]
     Macro(Arc<anyhow::Error>, Option<SourceData>),
+    #[error(transparent)]
+    ImportSet(#[from] ImportSetError),
+    #[error(transparent)]
+    Import(#[from] ImportError),
 }
 
 #[derive(Debug, Clone)]
@@ -596,28 +517,67 @@ pub enum ImportSet {
         set: Arc<ImportSet>,
         symbols: Arc<[lasso::Spur]>,
     },
-    // TODO other import specs: except, prefix, rename
+    Except {
+        set: Arc<ImportSet>,
+        symbols: Arc<[lasso::Spur]>,
+    },
+    // TODO other import specs: prefix, rename
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum ImportSetError<'gc> {
-    #[error("{0} is not an import set")]
-    NotImportSet(DisplayableProgram<'gc, lasso::RodeoResolver>),
-    #[error("{0} is not a valid library name")]
-    InvalidLibraryName(DisplayableProgram<'gc, lasso::RodeoResolver>),
+pub enum ImportSetError {
+    #[error("not an import set")]
+    NotImportSet(Option<SourceData>),
+    #[error("not a valid library name")]
+    InvalidLibraryName(Option<SourceData>),
+    #[error("not a symbol")]
+    NotASymbol(Option<SourceData>),
 }
 impl ImportSet {
-    fn as_library_name(ptr: ProgramPtr<'_>) -> Option<LibraryName> {
+    fn as_library_name_item(ptr: ProgramPtr<'_>) -> Option<LibraryNameItem> {
+        match ptr.data {
+            ProgramData::Integer(i) if i >= 0 => Some(LibraryNameItem::Integer(i as u64)),
+            ProgramData::Symbol(s) => Some(LibraryNameItem::Identifier(s)),
+            _ => None,
+        }
+    }
+
+    fn as_library_name(ptr: ProgramPtr<'_>, interner: &mut lasso::Rodeo) -> Option<LibraryName> {
         // We allow creating the empty library name as a "secret from code" module (as we compile
         // imports from code, we reject code imports from the '() module, which the Rust side
         // is completely fine with)
-        todo!()
+
+        match &ptr.data {
+            ProgramData::List { head, body } => {
+                let mut parts = vec![];
+                match head {
+                    ListHead::Program(p) => {
+                        parts.push(Self::as_library_name_item(*p)?);
+                    }
+                    ListHead::Import => {
+                        parts.push(LibraryNameItem::Identifier(
+                            interner.get_or_intern_static("import"),
+                        ));
+                    }
+                    ListHead::DefineLibrary => {
+                        parts.push(LibraryNameItem::Identifier(
+                            interner.get_or_intern_static("define-library"),
+                        ));
+                    }
+                };
+                for p in body {
+                    parts.push(Self::as_library_name_item(*p)?);
+                }
+                Some(LibraryName(Arc::from(parts.as_slice())))
+            }
+            _ => None,
+        }
     }
 
     pub fn convert<'gc>(
-        interner: &mut lasso::Rodeo,
         ptr: ProgramPtr<'gc>,
-    ) -> Result<Self, ImportSetError<'gc>> {
+        interner: &mut lasso::Rodeo,
+    ) -> Result<Self, ImportSetError> {
         let only = interner.get_or_intern_static("only");
         let except = interner.get_or_intern_static("except");
         let prefix = interner.get_or_intern_static("prefix");
@@ -625,14 +585,49 @@ impl ImportSet {
 
         match &ptr.data {
             ProgramData::List { head, body } => match head {
-                ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == only) => {
-                    // read first body param as an import set, and the rest *must* be symbols
-                    todo!()
-                }
-                ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == except) =>
+                ListHead::Program(p)
+                    if matches!(&p.data, ProgramData::Symbol(s) if *s == only)
+                        && body.len() >= 2 =>
                 {
                     // read first body param as an import set, and the rest *must* be symbols
-                    todo!()
+                    let source = ImportSet::convert(body[0], interner)?;
+                    let symbols = body
+                        .iter()
+                        .skip(1)
+                        .map(|p| match &p.data {
+                            ProgramData::Symbol(s) => Ok(*s),
+                            _ => Err(ImportSetError::NotASymbol(p.source)),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(ImportSet::Only {
+                        set: Arc::new(source),
+                        symbols: Arc::from(symbols.as_slice()),
+                    })
+                }
+                ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == only) => {
+                    Err(ImportSetError::NotImportSet(ptr.source))
+                }
+                ListHead::Program(p)
+                    if matches!(&p.data, ProgramData::Symbol(s) if *s == except)
+                        && body.len() > 2 =>
+                {
+                    // read first body param as an import set, and the rest *must* be symbols
+                    let source = ImportSet::convert(body[0], interner)?;
+                    let symbols = body
+                        .iter()
+                        .skip(1)
+                        .map(|p| match &p.data {
+                            ProgramData::Symbol(s) => Ok(*s),
+                            _ => Err(ImportSetError::NotASymbol(p.source)),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(ImportSet::Except {
+                        set: Arc::new(source),
+                        symbols: Arc::from(symbols.as_slice()),
+                    })
+                }
+                ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == except) => {
+                    Err(ImportSetError::NotImportSet(ptr.source))
                 }
                 ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == prefix) =>
                 {
@@ -646,24 +641,23 @@ impl ImportSet {
                     todo!()
                 }
                 ListHead::Program(p)
-                    if matches!(&p.data, ProgramData::Symbol(_) | ProgramData::Integer(_)) =>
+                    if matches!(&p.data, ProgramData::Symbol(_) | ProgramData::Integer(_))
+                        && body.iter().all(|p| {
+                            matches!(&p.data, ProgramData::Symbol(_) | ProgramData::Integer(_))
+                        }) =>
                 {
-                    Ok(Self::Name(Self::as_library_name(*p).ok_or(
-                        ImportSetError::InvalidLibraryName(Program::display(
-                            *p,
-                            interner.clone().into_resolver(),
-                        )),
-                    )?))
+                    Ok(Self::Name(
+                        Self::as_library_name(ptr, interner)
+                            .ok_or(ImportSetError::InvalidLibraryName(ptr.source))?,
+                    ))
                 }
-                _ => Err(ImportSetError::NotImportSet(Program::display(
-                    ptr,
-                    interner.clone().into_resolver(),
-                ))),
+                ListHead::Import | ListHead::DefineLibrary => Ok(Self::Name(
+                    Self::as_library_name(ptr, interner)
+                        .ok_or(ImportSetError::InvalidLibraryName(ptr.source))?,
+                )),
+                _ => Err(ImportSetError::NotImportSet(ptr.source)),
             },
-            _ => Err(ImportSetError::NotImportSet(Program::display(
-                ptr,
-                interner.clone().into_resolver(),
-            ))),
+            _ => Err(ImportSetError::NotImportSet(ptr.source)),
         }
     }
 }
@@ -692,7 +686,16 @@ impl<'gc> LibraryDeclaration<'gc> {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum ImportError {}
+pub enum ImportError {
+    #[error("invalid library import")]
+    InvalidImport,
+    #[error("library not found")]
+    LibraryNotFound(LibraryName),
+    #[error("invalid name in module")]
+    InvalidModule,
+    #[error("failed to define symbol")]
+    FailedToDefine(lasso::Spur),
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum DefineLibraryError {
@@ -705,7 +708,7 @@ pub enum DefineLibraryError {
 }
 
 impl<'gc> Compiler<'gc> {
-    pub fn new(mc: &Mutation<'gc>, interner: &mut lasso::Rodeo) -> Self {
+    pub fn new(mc: &Mutation<'gc>) -> Self {
         Self {
             local_world: LocalWorld::default(),
             syntax_items: Default::default(),
@@ -746,17 +749,38 @@ impl<'gc> Compiler<'gc> {
                     if matches!(
                         p.data,
                         ProgramData::List {
-                            head: ListHead::Import | ListHead::DefineLibrary,
+                            head: ListHead::Import,
                             ..
                         }
                     ) =>
                 {
                     // import code, so read carefully
+                    let program = programs.next().unwrap();
+                    let ProgramData::List { body, .. } = &program.data else {
+                        unreachable!();
+                    };
+
+                    let sets: Result<Vec<_>, _> = body
+                        .iter()
+                        .map(|p| ImportSet::convert(*p, interner))
+                        .collect();
+
+                    for set in sets? {
+                        self.import(mc, interner, world, &set, true)?;
+                    }
+                }
+                Some(p)
+                    if matches!(
+                        p.data,
+                        ProgramData::List {
+                            head: ListHead::DefineLibrary,
+                            ..
+                        }
+                    ) =>
+                {
+                    // define-library code, so read carefully
                     let _program = programs.next().unwrap();
-                    // Convert the list heads into our internal type
-                    // the body of Import become import sets,
-                    // TODO When importing things, make sure to check is_valid when the import set comes from code!!
-                    // the bodies of define-library become library declarations
+                    // TODO the bodies of define-library become library declarations
                 }
                 _ => break,
             }
@@ -871,16 +895,109 @@ impl<'gc> Compiler<'gc> {
     }
 
     /// Interpret an import set in the current environment
+    ///
+    /// # Parameters
+    /// - `mc`
+    /// - `interner`
+    /// - `world`
+    /// - `import_set`
+    /// - `from_code`: denotes an import set as being from code rather than from Rust
     pub fn import(
         &mut self,
         mc: &Mutation<'gc>,
         interner: &mut lasso::Rodeo,
         world: &World,
         import_set: &ImportSet,
+        from_code: bool,
     ) -> Result<(), ImportError> {
         // - import: reads import sets, then searches local world (once implemented), then world, for the requisite module
         //   and importing the names as defined by spec
-        todo!()
+        // TODO Lookup in local libraries first
+        // then if failed, look up in World
+
+        fn get_library_name(imp: &ImportSet) -> Option<LibraryName> {
+            match imp {
+                ImportSet::Name(ln) => Some(ln.clone()),
+                ImportSet::Only { set, .. } => get_library_name(set.as_ref()),
+                ImportSet::Except { set, .. } => get_library_name(set.as_ref()),
+            }
+        }
+
+        macro_rules! import_lib {
+            (full $library_name:expr) => {
+                    if let Some(modl) = world.library($library_name) {
+                        for symbol in modl.all_symbols(interner) {
+                            // try  to import as a syntax, then as a value, and fail the module if
+                            // a name doesn't exist
+                            if let Some(syntax) = modl.syntax(interner, symbol) {
+                                // Define a macro in scope
+                                self.define_macro(symbol, syntax);
+                            } else if let Some(val) = modl.value(mc, interner.resolve(&symbol)) {
+                                // freeze a module imported value (TODO check how this actually impacts things)
+                                self._current_env()
+                                    .borrow_mut(mc)
+                                    .define(mc, symbol, val, true).map_err(|_| ImportError::FailedToDefine(symbol))?;
+                            } else {
+                                Err(ImportError::InvalidModule)?
+                            }
+                        }
+                        Ok(())
+                    } else {
+                        Err(ImportError::LibraryNotFound($library_name.clone()))
+                    }
+            };
+            (only $set:expr, $symbols:expr) => {
+                {
+                    let Some(library_name) = get_library_name($set) else {
+                        unreachable!("[ICE] import set did not specify a library name");
+                    };
+                    if let Some(modl) = world.library(&library_name) {
+                        for symbol in $symbols.iter().copied() {
+                        dbg!(&symbol);
+                            // try  to import as a syntax, then as a value, and fail the module if
+                            // a name doesn't exist
+                            if let Some(syntax) = modl.syntax(interner, symbol) {
+                                // Define a macro in scope
+                                self.define_macro(symbol, syntax);
+                            } else if let Some(val) = modl.value(mc, interner.resolve(&symbol)) {
+                                // freeze a module imported value (TODO check how this actually impacts things)
+                                self._current_env()
+                                    .borrow_mut(mc)
+                                    .define(mc, symbol, val, true).map_err(|_| ImportError::FailedToDefine(symbol))?;
+                            } else {
+                                Err(ImportError::InvalidModule)?
+                            }
+                        }
+                        Ok(())
+                    } else {
+                        Err(ImportError::LibraryNotFound(library_name.clone()))
+                    }
+                }
+            };
+        }
+
+        if from_code {
+            match import_set {
+                ImportSet::Name(library_name) if library_name.is_valid() => {
+                    import_lib!(full library_name)
+                }
+                ImportSet::Only { set, symbols } => {
+                    import_lib!(only set, symbols)
+                }
+                ImportSet::Except { set, symbols } => todo!(),
+                _ => Err(ImportError::InvalidImport),
+            }
+        } else {
+            match import_set {
+                ImportSet::Name(library_name) => {
+                    import_lib!(full library_name)
+                }
+                ImportSet::Only { set, symbols } => {
+                    import_lib!(only set, symbols)
+                }
+                ImportSet::Except { set, symbols } => todo!(),
+            }
+        }
     }
 
     /// Interpret a library definition into a given LocalWorld
@@ -1073,7 +1190,7 @@ impl<'gc> Compiler<'gc> {
         self.syntax_items.get(&symbol).cloned()
     }
 
-    pub fn define_macro(&mut self, symbol: lasso::Spur, primitive: ArcSyntax) {
+    pub fn define_macro(&mut self, symbol: lasso::Spur, syntax: ArcSyntax) {
         self.variables_defined.remove(&symbol);
         self.argument_scope.args = self
             .argument_scope
@@ -1085,7 +1202,7 @@ impl<'gc> Compiler<'gc> {
         if self.argument_scope.rest.is_some_and(|r| r == symbol) {
             self.argument_scope.rest.take();
         }
-        self.syntax_items.insert(symbol, primitive);
+        self.syntax_items.insert(symbol, syntax);
     }
 
     pub fn define_variable(&mut self, symbol: lasso::Spur) {

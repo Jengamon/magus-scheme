@@ -612,30 +612,10 @@ dependencies = [
 [[package]]
 name = "gc-arena"
 version = "0.5.3"
-source = "git+https://github.com/kyren/gc-arena?rev=5a7534b883b703f23cfb8c3cfdf033460aa77ea9#5a7534b883b703f23cfb8c3cfdf033460aa77ea9"
-dependencies = [
- "gc-arena-derive 0.5.3 (git+https://github.com/kyren/gc-arena?rev=5a7534b883b703f23cfb8c3cfdf033460aa77ea9)",
- "sptr",
-]
-
-[[package]]
-name = "gc-arena"
-version = "0.5.3"
 source = "git+https://github.com/kyren/gc-arena?rev=d18259e33bd360beb6f8e07a86fc774512aec965#d18259e33bd360beb6f8e07a86fc774512aec965"
 dependencies = [
- "gc-arena-derive 0.5.3 (git+https://github.com/kyren/gc-arena?rev=d18259e33bd360beb6f8e07a86fc774512aec965)",
+ "gc-arena-derive",
  "sptr",
-]
-
-[[package]]
-name = "gc-arena-derive"
-version = "0.5.3"
-source = "git+https://github.com/kyren/gc-arena?rev=5a7534b883b703f23cfb8c3cfdf033460aa77ea9#5a7534b883b703f23cfb8c3cfdf033460aa77ea9"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
- "synstructure",
 ]
 
 [[package]]
@@ -1028,11 +1008,10 @@ dependencies = [
  "datatest_parse",
  "divan",
  "fxhash",
- "gc-arena 0.5.3 (git+https://github.com/kyren/gc-arena?rev=d18259e33bd360beb6f8e07a86fc774512aec965)",
+ "gc-arena",
  "icu_casemap",
  "lasso",
  "logos",
- "magus-syntax",
  "paste",
  "rowan",
  "rstest",
@@ -1041,29 +1020,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "magus-format"
+version = "0.1.0"
+
+[[package]]
 name = "magus-repl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
  "codesnake",
- "gc-arena 0.5.3 (git+https://github.com/kyren/gc-arena?rev=5a7534b883b703f23cfb8c3cfdf033460aa77ea9)",
  "magus",
  "reedline",
  "yansi",
-]
-
-[[package]]
-name = "magus-syntax"
-version = "0.1.0"
-dependencies = [
- "arbitrary",
- "arbtest",
- "assert2",
- "icu_casemap",
- "logos",
- "rowan",
- "thiserror 2.0.11",
 ]
 
 [[package]]

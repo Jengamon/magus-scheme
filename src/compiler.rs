@@ -353,7 +353,6 @@ impl<'gc> std::ops::Deref for SyntaxContext<'_, 'gc> {
     }
 }
 
-trait Collectable {}
 pub trait Transformer<'gc>: Syntax {}
 impl<'gc, T: Syntax + Collect<'gc>> Transformer<'gc> for T {}
 

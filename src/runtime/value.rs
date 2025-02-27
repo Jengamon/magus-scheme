@@ -7,10 +7,10 @@ use std::{cell::RefCell, rc::Rc};
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 use lasso::IntoResolver;
 
-use crate::bytecode::ChunkPtr;
 use crate::environment::StackEnvironmentPtr;
+use crate::interpreter::thread::ThreadFrame;
 
-use super::lambda::{Arity, Lambda};
+use super::lambda::Lambda;
 use super::{
     error::SchemeErrorPtr,
     // lambda::LambdaPtr,
@@ -457,68 +457,35 @@ pub struct Vector<'gc> {
     pub vec: Gc<'gc, RefLock<Vec<ValuePtr<'gc>>>>,
 }
 
+// FIXME make this a struct of usize (stack index) and a ThreadPtr (a "brand")
+// (the brand will keep us from trying to execute a continuation on the wrong thread)
+// FIXME FIXME Racket is very helpful. (from a racket manual) We start by formulating a representation of the context.
+// An evaluation context will be represented as a continuation: a list of frames, where a frame is a single flat evaluation context,
+// i.e. either a conditional or application context with no nested evaluation context inside (the hole will be represented by []).
+// Conceptually, the continuation is a stack of actions that remain to be done.
+// It’s also easy to see that continuations and evaluation contexts are inter-convertible: the inner-most part of an evaluation context is the first frame of a continuation; the outer-most part of the context corresponds to the final frame of a continuation; an empty context is represented by an empty list of frames.
+//
+// So a continuation is the entire frame state from a point in time. When we sub in frames, if a frame has a handler, and !Gc::ptr_eq to the
+// frame in its position, then we handle any dynamic-wind handlers it may have.
 /// A bytecode chunk and program counter bundled together
-#[derive(Debug, Collect, Clone)]
+#[derive(Debug, Collect, Clone, PartialEq, Eq)]
 #[collect(no_drop)]
-pub enum Continuation<'gc> {
-    /// Makes the calling from a bytecode frame with the thread state
-    /// of the continuation source
-    Continue {
-        pc: usize,
-        chunk: ChunkPtr<'gc>,
-        #[collect(require_static)]
-        arity: Arity,
-        handler: Option<Lambda<'gc>>,
-        args: Box<[ValuePtr<'gc>]>,
-        bottom: usize,
-    },
-    /// A null continuation causes the program to pop frames until it hits
-    /// a native lambda frame
-    Null,
+pub struct Continuation<'gc> {
+    frames: Rc<[ThreadFrame<'gc>]>,
 }
 pub type ContinuationPtr<'gc> = Gc<'gc, Continuation<'gc>>;
 
-impl PartialEq for Continuation<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Continuation::Continue {
-                    pc,
-                    chunk,
-                    arity,
-                    handler,
-                    args,
-                    bottom,
-                },
-                Continuation::Continue {
-                    pc: opc,
-                    chunk: ochunk,
-                    arity: oarity,
-                    handler: ohandler,
-                    args: oargs,
-                    bottom: obottom,
-                },
-            ) => {
-                pc == opc
-                    && Gc::ptr_eq(*chunk, *ochunk)
-                    && arity == oarity
-                    && handler == ohandler
-                    && args == oargs
-                    && bottom == obottom
-            }
-            (Continuation::Null, Continuation::Null) => true,
-            _ => false,
+impl<'gc> Continuation<'gc> {
+    pub(crate) fn new(frames: impl IntoIterator<Item = ThreadFrame<'gc>>) -> Self {
+        Self {
+            frames: Rc::from(frames.into_iter().collect::<Vec<_>>().as_slice()),
         }
     }
 }
-impl Eq for Continuation<'_> {}
 
 impl fmt::Display for Continuation<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Continuation::Continue { pc, chunk, .. } => write!(f, "{chunk:p}@{pc}"),
-            Continuation::Null => write!(f, "terminate"),
-        }
+        write!(f, "{self:p} ({})", self.frames.len())
     }
 }
 

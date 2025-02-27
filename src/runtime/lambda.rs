@@ -9,7 +9,10 @@ use crate::{
     bytecode::ChunkPtr,
     compiler::World,
     environment::StackEnvironmentPtr,
-    interpreter::{Context, Includer, thread::ThreadFrame},
+    interpreter::{
+        Context, Includer,
+        thread::{Thread, ThreadFrame},
+    },
 };
 
 use super::{error::SchemeErrorPtr, value::Continuation};
@@ -22,6 +25,8 @@ pub enum LambdaError {
     #[error(transparent)]
     Continuable(anyhow::Error),
 }
+
+pub type DynamicWind<'gc> = Option<(Lambda<'gc>, Lambda<'gc>)>;
 
 /// Possible things a lambda can return
 /// If something marked `[call-end]` is returned, the lambda will not be called again.
@@ -50,6 +55,7 @@ pub enum LambdaReturn<'gc> {
     Call {
         lambda: Lambda<'gc>,
         args: Vec<ValuePtr<'gc>>,
+        dynamic_wind: DynamicWind<'gc>,
     },
     /// Call a given lambda, as a return value
     ///
@@ -57,6 +63,7 @@ pub enum LambdaReturn<'gc> {
     TailCall {
         lambda: Lambda<'gc>,
         args: Vec<ValuePtr<'gc>>,
+        dynamic_wind: DynamicWind<'gc>,
     },
     /// Set an exception handler for this frame
     ///
@@ -81,6 +88,8 @@ impl<'gc, T: Collect<'gc>> Collectable for T {}
 
 pub struct NativeLambdaContext<'a, 'gc> {
     pub self_ptr: NativeLambdaPtr<'gc>,
+    /// Since we are in a borrow of the Thread, don't use ctx.thread, use this field instead
+    pub thread_ref: &'a Thread<'gc>,
     pub ctx: Context<'gc>,
     pub stack: &'a [ValuePtr<'gc>],
     pub interner: &'a mut lasso::Rodeo,

@@ -98,12 +98,19 @@ If I were to define in `hygiene.scm`:
 ;; value would be overwritten by (the number you passed in + 1)
 ```
 
-## Formatter
+## Improve UX
+
+Make code prettier. As a prerequisite for this, spin out the lexer and general parser together into their own crate.
+The below operations should be provided by a single executable (as they are pretty similar in goal).
+
+### Formatter
 
 Soooo to make code look nice we should do this, taking advantage of the CST we use.
 We can model it after the one currently in REPL (which is modelled after https://justinethier.github.io/cyclone/docs/Scheme-code-conventions.html).
 
-## Linter
+The idea is to have this and then have the repl use this to display code instead (so preserving comments)
+
+### Linter
 
 Due to technicallities of our stack, we try to error where we can, but invalid-*looking* code is allow through like:
 ```scheme

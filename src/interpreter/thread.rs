@@ -8,7 +8,7 @@ use crate::{
     runtime::{
         convert::IntoValue,
         error::{SchemeError, SchemeErrorPtr, SchemeErrorType, StackFrame},
-        lambda::{Arity, Lambda, NativeLambdaPtr},
+        lambda::{Arity, DynamicWind, Lambda, NativeLambdaPtr},
     },
     value::{ConsCell, Continuation, ValuePtr},
 };
@@ -16,9 +16,9 @@ use crate::{
 use super::{Context, Includer};
 
 /// A thread's execution state can either be interpreting bytecode or running a native function or macro
-#[derive(Debug, Collect, Clone)]
+#[derive(Debug, Collect, Clone, Copy)]
 #[collect(no_drop)]
-enum Execution<'gc> {
+pub enum Execution<'gc> {
     Bytecode {
         chunk: ChunkPtr<'gc>,
         #[collect(require_static)]
@@ -27,9 +27,6 @@ enum Execution<'gc> {
     },
     Native {
         native: NativeLambdaPtr<'gc>,
-        // when this frame is created, the stack's length goes here. this prevents native lambdas
-        // from seeing any value below this
-        bottom: usize,
     },
 }
 
@@ -42,6 +39,31 @@ impl Execution<'_> {
     }
 }
 
+impl PartialEq for Execution<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Execution::Bytecode { chunk, arity, pc } => {
+                let Self::Bytecode {
+                    chunk: ochunk,
+                    arity: oarity,
+                    pc: opc,
+                } = other
+                else {
+                    return false;
+                };
+                Gc::ptr_eq(*chunk, *ochunk) && arity == oarity && pc == opc
+            }
+            Execution::Native { native } => {
+                let Self::Native { native: onative } = other else {
+                    return false;
+                };
+                Gc::ptr_eq(*native, *onative)
+            }
+        }
+    }
+}
+impl Eq for Execution<'_> {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExecutionKind {
     Bytecode { pc: usize },
@@ -52,7 +74,10 @@ pub enum ExecutionKind {
 #[collect(no_drop)]
 pub struct ThreadFrame<'gc> {
     execution: Execution<'gc>,
+    // error handler
     handler: Option<Lambda<'gc>>,
+    // dynamic-wind before and after
+    dynamic_wind: DynamicWind<'gc>,
     args: Box<[ValuePtr<'gc>]>,
     is_exception: bool,
     env: StackEnvironmentPtr<'gc>,
@@ -71,30 +96,25 @@ impl ThreadFrame<'_> {
 }
 
 impl<'gc> ThreadFrame<'gc> {
-    /// Make a continuation
-    pub fn continuation(&self) -> Continuation<'gc> {
-        match self.execution {
-            Execution::Bytecode { chunk, pc, arity } => Continuation::Continue {
-                // a continuation of something is the *next* thing it would do
-                pc: pc + 1,
-                chunk,
-                arity,
-                args: self.args.clone(),
-                handler: self.handler,
-                bottom: self.bottom,
-            },
-            // The other types of execution are not continuable, so create the "null continuation"
-            // which when executed, causes all bytecode frames to end.
-            _ => Continuation::Null,
-        }
-    }
-
     pub fn env(&self, mc: &Mutation<'gc>) -> StackEnvironmentPtr<'gc> {
         let mut env = *self.env.borrow();
         env.freeze();
         Gc::new(mc, RefLock::new(env))
     }
 }
+
+impl PartialEq for ThreadFrame<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.execution == other.execution
+            && self.handler == other.handler
+            && self.dynamic_wind == other.dynamic_wind
+            && self.args == other.args
+            && self.is_exception == other.is_exception
+            && Gc::ptr_eq(self.env, other.env)
+            && self.bottom == other.bottom
+    }
+}
+impl Eq for ThreadFrame<'_> {}
 
 #[derive(Debug, thiserror::Error, Clone)]
 pub enum LambdaException {
@@ -172,6 +192,7 @@ impl<'gc> Thread<'gc> {
                 ),
                 args: Box::from([]),
                 handler: None,
+                dynamic_wind: None,
                 is_exception: false,
                 bottom: 0,
             }],
@@ -210,6 +231,7 @@ impl<'gc> Thread<'gc> {
             ),
             args: Box::new([]),
             handler,
+            dynamic_wind: None,
             is_exception: false,
             bottom: self.stack.len(),
         });
@@ -265,8 +287,11 @@ impl<'gc> Thread<'gc> {
         self.error
     }
 
-    fn make_backtrace(&self, interner: &mut lasso::Rodeo) -> Vec<StackFrame> {
-        self.frames
+    fn make_backtrace(
+        frames: &[ThreadFrame<'gc>],
+        interner: &mut lasso::Rodeo,
+    ) -> Vec<StackFrame<'gc>> {
+        frames
             .iter()
             .rev()
             .map(|f| {
@@ -274,7 +299,7 @@ impl<'gc> Thread<'gc> {
                 StackFrame {
                     source_filename: sd.map(|sd| sd.source_id),
                     range: sd.map(|sd| sd.range),
-                    scope_label: Some(interner.get_or_intern(format!("{:?}", f.kind()))),
+                    execution: f.execution,
                 }
             })
             .collect()
@@ -287,7 +312,30 @@ impl<'gc> Thread<'gc> {
         args: usize,
         tail: bool,
     ) -> Result<(), LambdaException> {
+        // TODO Remember the Value::Values counts for more than 1 value
+        // (when calling a lambda, Values are implicitly unpacked)
         todo!()
+    }
+
+    /// Create a continuation that can be called at a later time (on this thread)
+    /// to jump execution to what would happen after this point
+    ///
+    /// # Parameters
+    /// - `is_tail`: will exclude the current frame if true.
+    pub fn create_continuation(&self, is_tail: bool) -> Continuation<'gc> {
+        let mut frames_copy = if !is_tail {
+            self.frames.clone()
+        } else {
+            self.frames[..self.frames.len() - 1].to_vec()
+        };
+        // Adjust the last to actually be the continuation (if bytecode frame)
+        if let Some(Execution::Bytecode { pc, .. }) =
+            frames_copy.last_mut().map(|f| &mut f.execution)
+        {
+            *pc += 1;
+        };
+
+        Continuation::new(frames_copy)
     }
 
     fn error_handler(&self) -> Option<Lambda<'gc>> {
@@ -315,7 +363,7 @@ impl<'gc> Thread<'gc> {
                 self.error = Some(Gc::new(
                     &ctx,
                     SchemeError {
-                        backtrace: self.make_backtrace(interner),
+                        backtrace: Self::make_backtrace(&self.frames, interner),
                         error_type: $err,
                     },
                 ));
@@ -386,6 +434,7 @@ impl<'gc> Thread<'gc> {
                         // Native lambdas support this logic natively (if their Return vec len == 1, that value is unwrapped,
                         // if 0, return Void, otherwise returns Values)
                         // FIXME Remember to do the same for native lambdas (so do it as a function)
+                        // TODO If dynamic-wind is present. call the after
                         self.frames.pop();
                         continue;
                     }
@@ -484,31 +533,27 @@ impl<'gc> Thread<'gc> {
                                         continue;
                                     };
                                 }
-                                Value::Continuation(c) => match &*c {
-                                    Continuation::Continue {
-                                        pc: cpc,
-                                        chunk: cchunk,
-                                        arity: carity,
-                                        handler,
-                                        args,
-                                        bottom,
-                                    } => {
-                                        *chunk = *cchunk;
-                                        *pc = *cpc;
-                                        *arity = *carity;
-                                        frame.handler = *handler;
-                                        frame.args = args.clone();
-                                        frame.bottom = *bottom;
-                                    }
-                                    Continuation::Null => {
-                                        while matches!(
-                                            self.frames.last().map(|f| f.kind()),
-                                            Some(ExecutionKind::Bytecode { .. })
-                                        ) {
-                                            self.frames.pop();
-                                        }
-                                    }
-                                },
+                                Value::Continuation(c) => {
+                                    // FIXME a continuation isn't a copy of all this state, but a reference to the stack
+                                    // Make this accurate by making a continuation an index refering to a frame's position
+                                    // on the frame stack (frames now have a lot more data, so a continuation can be an opaque
+                                    // usize)
+                                    //
+                                    // This should fix this split between Continue and Null, and treat native and bytecode
+                                    // frames as the same from the perspective of continuations, a desirable property. this also means that
+                                    // the ThreadFrame is no longer responsible for creating the continuation, the Thread is
+                                    // so when making a call, give an immutable reference to native lambdas
+
+                                    // TODO Make sure to add before and after calls on *top* of the native call for all
+                                    // frames that are left
+                                    // with all befores below all afters , e.g.:
+                                    // if two dynamic-wind lambdas are to be exited [n f1 ... f2]
+                                    // then the frame stack should look like
+                                    // [n after(f2) after(f1) before(f1) before(f2)]
+                                    // (which is reversed call order, because stack)
+                                    // n can be a native frame or nothing (null continuation means "go to first native call below this")
+                                    todo!("continuation handling")
+                                }
                                 _ => {
                                     make_error!(SchemeErrorType::NonCallable);
                                 }
@@ -542,8 +587,9 @@ impl<'gc> Thread<'gc> {
                         _ => todo!(),
                     }
                 }
-                Execution::Native { native, bottom } => {
+                Execution::Native { native } => {
                     // TODO Remeber to check when [call-end] a native call to check for non-continuable errors
+                    // TODO Remember to handle dynamic-wind properly when processing LambdaReturn::Continue
                     fuel.consume(Self::NATIVE_COST);
                     todo!("native code")
                 }
@@ -614,6 +660,10 @@ mod tests {
                     Reference {
                         symbol: interner.get_or_intern_static("ram"),
                     },
+                    // This triggers an error! yay~ todo moke this to a lambda actually
+                    // Reference {
+                    //     symbol: interner.get_or_intern_static("nuban"),
+                    // },
                 ],
                 [Constant::Number(3)],
                 [],
@@ -622,18 +672,18 @@ mod tests {
             );
 
             let thread = Gc::new(mc, RefLock::new(Thread::new(mc, chunk)));
-            thread
-                .borrow_mut(mc)
-                .env()
-                .unwrap()
-                .borrow_mut(mc)
-                .define(
-                    mc,
-                    interner.get_or_intern_static("cowl"),
-                    32.into_value(mc).into_ptr(mc),
-                    false,
-                )
-                .expect("failed to define `cowl`");
+            // thread
+            //     .borrow_mut(mc)
+            //     .env()
+            //     .unwrap()
+            //     .borrow_mut(mc)
+            //     .define(
+            //         mc,
+            //         interner.get_or_intern_static("cowl"),
+            //         32.into_value(mc).into_ptr(mc),
+            //         false,
+            //     )
+            //     .expect("failed to define `cowl`");
             let ctx = Context::new_test_context(mc, thread);
             while !thread.borrow().is_finished() && run_cost < 1000 {
                 thread

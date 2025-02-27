@@ -15,7 +15,6 @@ use crate::{
         convert::IntoValue,
         lambda::{self, NativeLambda},
     },
-    value::Continuation,
 };
 
 #[derive(Debug)]
@@ -88,6 +87,7 @@ impl Syntax for Lambda {
         }
         let arg_list = args[0];
         // FIXME make sure that arg_list is a list of symbols (or dotted list of symbols)
+        // FIXME use / provide a Formals parser (that takes a program as input)
         let symbols = match &arg_list.data {
             // the None below should actually be an error
             _ => None::<(Box<[lasso::Spur]>, Option<lasso::Spur>)>,
@@ -158,13 +158,7 @@ impl NativeLambda for CallCc {
         args: &[crate::ValuePtr<'gc>],
     ) -> Result<lambda::LambdaReturn<'gc>, lambda::LambdaError> {
         // get the continuation of the stack frame right above us
-        let cont = ctx
-            .frames
-            .iter()
-            .rev()
-            .nth(1)
-            .map(|f| f.continuation())
-            .unwrap_or(Continuation::Null);
+        let cont = ctx.thread_ref.create_continuation(true);
 
         let Some(Value::Lambda(lambda)) = args.first().map(|p| *p.borrow()) else {
             return Err(
@@ -182,6 +176,7 @@ impl NativeLambda for CallCc {
         Ok(lambda::LambdaReturn::TailCall {
             lambda,
             args: vec![Gc::new(&ctx, cont).into_value(&ctx).into_ptr(&ctx)],
+            dynamic_wind: None,
         })
     }
 }

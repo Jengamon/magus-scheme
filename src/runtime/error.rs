@@ -3,16 +3,21 @@ use std::rc::Rc;
 
 use gc_arena::{Collect, Gc};
 
-use crate::{interpreter::thread::LambdaException, value::ResolvedValue};
+use crate::{
+    interpreter::thread::{Execution, LambdaException},
+    value::ResolvedValue,
+};
 
 /// Errors store this to record where they're from
-#[derive(Debug, Clone, Copy)]
-pub struct StackFrame {
+#[derive(Debug, Clone, Copy, Collect)]
+#[collect(no_drop)]
+pub struct StackFrame<'gc> {
     // what range of text were we processing (or None if external)
     pub range: Option<(usize, usize)>,
-    // what was the label of the scope we were in?
-    pub scope_label: Option<lasso::Spur>,
+    // what was executing on this frame?
+    pub execution: Execution<'gc>,
     // What source file is this scope from?
+    #[collect(require_static)]
     pub source_filename: Option<lasso::Spur>,
 }
 
@@ -71,8 +76,7 @@ impl SchemeErrorType<'_> {
 #[derive(Collect)]
 #[collect(no_drop)]
 pub struct SchemeError<'gc> {
-    #[collect(require_static)]
-    pub backtrace: Vec<StackFrame>,
+    pub backtrace: Vec<StackFrame<'gc>>,
     pub error_type: SchemeErrorType<'gc>,
 }
 pub type SchemeErrorPtr<'gc> = Gc<'gc, SchemeError<'gc>>;
@@ -170,21 +174,21 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
                     },
                     file_name(frame.source_filename),
                     range,
-                    frame
-                        .scope_label
-                        .as_ref()
-                        .and_then(|sl| self.resolver.try_resolve(sl))
-                        .unwrap_or("<<root>>")
+                    match frame.execution {
+                        Execution::Bytecode { chunk, pc, .. } =>
+                            format!("<<code {chunk:p}@({pc})>>"),
+                        Execution::Native { native, .. } => format!("<<native {native:p}>>"),
+                    }
                 )?;
             } else {
                 write!(
                     f,
-                    "\n - <<external>> {}",
-                    frame
-                        .scope_label
-                        .as_ref()
-                        .and_then(|sl| self.resolver.try_resolve(sl))
-                        .unwrap_or("<<root>>")
+                    "\n - <<synthesized>> {}",
+                    match frame.execution {
+                        Execution::Bytecode { chunk, pc, .. } =>
+                            format!("<<code {chunk:p}@({pc})>>"),
+                        Execution::Native { native, .. } => format!("<<native {native:p}>>"),
+                    }
                 )?;
             }
         }

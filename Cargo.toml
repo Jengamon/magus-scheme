@@ -25,7 +25,6 @@ harness = false
 [dependencies]
 anyhow = "1.0.91"
 arbitrary = { version = "1", features = ["derive"] }
-either = "1.13.0"
 fxhash = "0.2.1"
 gc-arena = { git = "https://github.com/kyren/gc-arena", rev = "d18259e33bd360beb6f8e07a86fc774512aec965" }
 icu_casemap = "1.5.1"
@@ -35,7 +34,7 @@ paste = "1.0.15"
 # petgraph = "0.6.5"
 rowan = "0.16"
 slotmap = "1.0.7"
-thiserror = "1.0.63"
+thiserror = "2"
 
 [dev-dependencies]
 arbtest = "0.3.1"

@@ -14,10 +14,9 @@ tasks:
       cat magus/.buildenv | tee -a ~/.buildenv
   - install-deps: |
       curl -LsSf https://get.nexte.st/latest/linux-musl | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
-      cargo install icu_datagen
   - run-tests: |
       cd magus
       just test-ci
   - build-wasm: |
       cd magus
-      just build-wasm
+      just build-wasm-ci

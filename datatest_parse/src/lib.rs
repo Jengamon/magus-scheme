@@ -40,7 +40,7 @@ impl Display for DatatestFile {
             let mut handled = HashSet::new();
             while let Some((k, (st, sp))) = comments
                 .iter()
-                .find(|(si, _)| **si <= idx && !handled.contains(*si))
+                .find(|(si, _)| (**si).saturating_sub(1) <= idx && !handled.contains(*si))
             {
                 writeln!(f, ";{st}")?;
                 idx = sp.end;

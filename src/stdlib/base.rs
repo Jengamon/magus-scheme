@@ -95,8 +95,65 @@ impl Syntax for If {
         import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
     ) -> anyhow::Result<SyntaxReturn<'gc>> {
-        let _ = (ctx, compiler, import_env, args);
-        todo!()
+        let (mut code, mut consequent_code, alternate_code) = if args.len() == 2 {
+            // (test) (consequenent) form: on false, jump and push void
+            let test = args[0];
+            let consequent = args[1];
+            // get code for the "test" expression
+            let code = compiler
+                .compile_code(ctx, test)?
+                .into_bytecode()
+                .into_iter()
+                .collect::<Vec<_>>();
+            let consequent_code = compiler
+                .compile_code(ctx, consequent)?
+                .into_bytecode()
+                .into_iter()
+                .collect::<Vec<_>>();
+            let alternate_code = vec![Bytecode::PushVoid];
+
+            (code, consequent_code, alternate_code)
+        } else if args.len() == 3 {
+            // (test) (consequenent) (alternate) form: on false, jump and run (alternate)
+            let test = args[0];
+            let consequent = args[1];
+            let alternate = args[2];
+            // get code for the "test" expression
+            let code = compiler
+                .compile_code(ctx, test)?
+                .into_bytecode()
+                .into_iter()
+                .collect::<Vec<_>>();
+            let consequent_code = compiler
+                .compile_code(ctx, consequent)?
+                .into_bytecode()
+                .into_iter()
+                .collect::<Vec<_>>();
+            let alternate_code = compiler
+                .compile_code(ctx, alternate)?
+                .into_bytecode()
+                .into_iter()
+                .collect::<Vec<_>>();
+
+            (code, consequent_code, alternate_code)
+        } else {
+            return Err(anyhow::anyhow!("if needs 2 or 3 arguments"));
+        };
+
+        // patch in jumps depending on these code chunk sizes
+        consequent_code.push(Bytecode::Jump {
+            jump: alternate_code.len(),
+        });
+        code.push(Bytecode::If {
+            jump: consequent_code.len(),
+        });
+
+        Ok(SyntaxReturn::Code(
+            code.into_iter()
+                .chain(consequent_code)
+                .chain(alternate_code)
+                .collect(),
+        ))
     }
 }
 
@@ -293,10 +350,13 @@ impl NativeLambda for CallCc {
         // get the continuation of the stack frame right above us
         let cont = ctx.thread_ref.create_continuation(true);
 
-        let Some(Value::Lambda(lambda)) = args.first().map(|p| *p.borrow()) else {
-            return Err(
-                anyhow::anyhow!("call-with-current-continuation must be given a lambda").into(),
-            );
+        let arg = args.first();
+        let Some(Value::Lambda(lambda)) = arg.map(|p| *p.borrow()) else {
+            return Err(anyhow::anyhow!(
+                "call-with-current-continuation must be given a lambda, was given {:?}",
+                arg.map(|p| p.borrow().value_type())
+            )
+            .into());
         };
 
         if ctx.get_arity(self, lambda).is_satisfied(1) {

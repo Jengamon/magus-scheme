@@ -453,12 +453,18 @@ pub struct ArgumentScope {
     rest: Option<lasso::Spur>,
 }
 
-slotmap::new_key_type! { pub struct TransformerKey; }
+slotmap::new_key_type! {
+pub struct TransformerKey;
+pub struct ProgramKey;
+}
 /// Compiler Stash
 #[derive(Debug, Default)]
 pub struct Stash<'gc> {
+    // TODO Include a knob system to automatically drop unused transfomers and programs
     transformers: slotmap::SlotMap<TransformerKey, TransformerPtr<'gc>>,
+    programs: slotmap::SlotMap<ProgramKey, ProgramPtr<'gc>>,
 }
+// TODO Allow storing and accessing these
 #[allow(unsafe_code)]
 unsafe impl<'gc> Collect<'gc> for Stash<'gc> {
     fn trace<T: gc_arena::collect::Trace<'gc>>(&self, cc: &mut T) {
@@ -471,6 +477,7 @@ unsafe impl<'gc> Collect<'gc> for Stash<'gc> {
         }
 
         trace_slotmap!(transformers);
+        trace_slotmap!(programs);
     }
 }
 
@@ -503,7 +510,7 @@ pub struct Compiler<'gc> {
     env_ptr: usize,
 
     // stash that can be used by macros to store things
-    stash: Stash<'gc>,
+    pub stash: Stash<'gc>,
 }
 #[derive(Debug, Clone, Copy)]
 pub struct Checkpoint(usize);
@@ -599,8 +606,8 @@ impl ImportSet {
         }
     }
 
-    pub fn convert<'gc>(
-        ptr: ProgramPtr<'gc>,
+    pub fn convert(
+        ptr: ProgramPtr<'_>,
         interner: &mut lasso::Rodeo,
     ) -> Result<Self, ImportSetError> {
         let only = interner.get_or_intern_static("only");

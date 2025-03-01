@@ -1,9 +1,10 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashSet};
 
 use anyhow::Context;
 use clap::Parser;
 use codesnake::{Block, CodeWidth, Label, LineIndex};
 use magus::{
+    bytecode::Bytecode,
     compiler::{LibraryName, ParseProgram, World},
     environment::StackEnvironment,
     gc_arena::{Gc, RefLock},
@@ -15,7 +16,7 @@ use reedline::{
     FileBackedHistory, Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus,
     PromptViMode, Reedline, Signal, Validator,
 };
-use yansi::Paint;
+use yansi::{Condition, Paint};
 
 mod datum_printer;
 
@@ -27,6 +28,8 @@ struct Cli {
 }
 
 fn main() -> anyhow::Result<()> {
+    yansi::whenever(Condition::TTY_AND_COLOR);
+
     let args = Cli::parse();
     if let Some(file) = args.file {
         if file == "-" {
@@ -149,10 +152,32 @@ fn execute(
     match chunk {
         Ok(chunk) => {
             let mut fuel = Fuel::with(1_000_000);
-            interpreter.enter(thread, |ctx, arena, interner| {
+            interpreter.run(thread, |ctx, arena, interner| {
                 let Some(chunk) = arena.get_chunk(&chunk) else {
                     unreachable!()
                 };
+                // TODO Make an actual debugger view?
+                dbg!(&chunk.constants);
+                // expose what each spur means
+                let mut shown = HashSet::new();
+                for code in chunk.code.iter() {
+                    match code {
+                        Bytecode::Reference { symbol } if !shown.contains(symbol) => {
+                            shown.insert(*symbol);
+                            println!("{symbol:?} -> `{}`", interner.resolve(symbol));
+                        }
+                        Bytecode::Define { symbol } if !shown.contains(symbol) => {
+                            shown.insert(*symbol);
+                            println!("{symbol:?} -> `{}`", interner.resolve(symbol));
+                        }
+                        Bytecode::SetBang { symbol } if !shown.contains(symbol) => {
+                            shown.insert(*symbol);
+                            println!("{symbol:?} -> `{}`", interner.resolve(symbol));
+                        }
+                        _ => {}
+                    }
+                }
+                dbg!(&chunk.code);
                 let thread = ctx.thread;
                 {
                     let mut thread = thread.borrow_mut(&ctx);
@@ -173,7 +198,7 @@ fn execute(
                         frame_env.borrow_mut(&ctx).reparent(Some(chunk.import_env));
                     }
                     thread.step(ctx, interner, &NullIncluder, &mut fuel);
-                    dbg!(&thread);
+                    // dbg!(&thread);
                     if let Some(res) = thread.result() {
                         match res {
                             Ok(res) => {
@@ -190,6 +215,7 @@ fn execute(
                         }
                     };
                     thread.reset_error();
+                    thread.clear_stack();
                 }
             });
         }
@@ -254,7 +280,19 @@ fn repl() -> anyhow::Result<()> {
             .expect("failed to define scheme base module");
         world
     };
-    let stashed_env = interpreter.try_enter(&thread, |ctx, arena, _| {
+    // import (scheme base)
+    interpreter.enter(|mc, arena, interner| {
+        let Some(compiler) = arena.compiler_mut(&compiler) else {
+            unreachable!()
+        };
+        let import_set = magus::compiler::ImportSet::Name(LibraryName::from_iter(
+            library_name!(interner => scheme base),
+        ));
+        compiler
+            .import(mc, interner, &world, &import_set, false)
+            .unwrap();
+    });
+    let stashed_env = interpreter.try_run(&thread, |ctx, arena, _| {
         // Create a shared environment between prompts (excluding macros for now)
         arena.stash_value(
             Value::Environment(Gc::new(

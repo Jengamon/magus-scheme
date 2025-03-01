@@ -49,7 +49,10 @@ fn compile_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()
     let err_output = data.errors.join("\n");
     let debug_output = data.processed.join("\n");
 
-    // Compile the source to run the test
+    if debug_output.is_empty() && err_output.trim().is_empty() {
+        Err(anyhow::anyhow!("no expectation").context(DatatestError(Box::from(path))))?;
+    }
+
     let mut interner = lasso::Rodeo::new();
     let mut test_world = World::default();
     test_world.insert(
@@ -68,13 +71,15 @@ fn compile_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()
                 let chunk_debug = format!("{chunk:#?}");
                 chunk_text = Some(chunk_debug.clone());
                 error_text = None;
+                // Compile the source to run the test
                 if !debug_output.is_empty() && debug_output.trim() != chunk_debug.trim() {
                     return Err(anyhow::anyhow!(
                         "expected chunk:\n{debug_output}\n\ncompilation result:\n{chunk_debug}"
                     ));
                 } else if !err_output.trim().is_empty() {
                     return Err(anyhow::anyhow!(
-                        "expected an error, but compilation succeeded"
+                        "expected an error, but compilation succeeded\n\n{}",
+                        chunk_text.as_ref().unwrap(),
                     ));
                 }
             }
@@ -86,7 +91,10 @@ fn compile_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()
                         "expected error:\n{err_output}\n\ncompilation result:\n{e}"
                     ));
                 } else if !debug_output.trim().is_empty() {
-                    return Err(anyhow::anyhow!("expected a chunk, but compilation failed"));
+                    return Err(anyhow::anyhow!(
+                        "expected a chunk, but compilation failed:\n\n{}",
+                        error_text.as_ref().unwrap()
+                    ));
                 }
             }
         };

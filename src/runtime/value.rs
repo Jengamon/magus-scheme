@@ -41,6 +41,7 @@ pub enum ValueType {
     UserStruct,
     Lambda,
     Continuation,
+    Promise,
     Error,
 }
 
@@ -87,6 +88,13 @@ pub enum Value<'gc> {
     // A continuation is a chunk and program counter
     // bundled together, and is treated as a callable
     Continuation(ContinuationPtr<'gc>),
+    // Used by (scheme lazy) to implement call-by-need
+    // you can think of this as a thunk lambda (a lambda with no args)
+    // where the execution result is memoized (so that multiple calls to "force" it will
+    // always result in the same value, which is calculated in the environment where it was forced
+    // for the first time)
+    // Basically should be just a chunk without the import_env
+    Promise(()),
     // A Scheme-side error
     Error(SchemeErrorPtr<'gc>),
 }
@@ -145,7 +153,7 @@ impl PartialEq for Value<'_> {
             Value::UserStruct(_) => todo!(),
             Value::Lambda(lptr) => matches!(other, Value::Lambda(optr) if lptr == optr),
             Value::Continuation(c) => matches!(other, Value::Continuation(oc) if c == oc),
-
+            Value::Promise(_) => todo!(),
             Value::Error(_) => todo!(),
         }
     }
@@ -172,6 +180,7 @@ impl<'gc> Value<'gc> {
             Value::UserStruct(_) => ValueType::UserStruct,
             Value::Lambda(_) => ValueType::Lambda,
             Value::Continuation(_) => ValueType::Continuation,
+            Value::Promise(_) => ValueType::Promise,
             Value::Error(_) => ValueType::Error,
         }
     }
@@ -293,8 +302,10 @@ impl<K: lasso::Resolver> fmt::Display for ConsPrinter<'_, '_, K> {
         match self.cons {
             ConsInner::Cons(cons) => {
                 match cons.car.map(|p| *p.borrow()) {
-                    Some(Value::Cons(car)) => todo!(),
-                    Some(Value::Vector(cdr)) => todo!(),
+                    Some(Value::Cons(cons)) => {
+                        write!(f, "{cons:?}")?;
+                    }
+                    Some(Value::Vector(vec)) => todo!(),
                     Some(value) => {
                         // this value is *definitely* not self-referential, so it's ok to
                         // use ResolvedValue
@@ -311,7 +322,9 @@ impl<K: lasso::Resolver> fmt::Display for ConsPrinter<'_, '_, K> {
                     None => {}
                 };
                 match cons.cdr.map(|p| *p.borrow()) {
-                    Some(Value::Cons(cdr)) => todo!(),
+                    Some(Value::Cons(cons)) => {
+                        write!(f, "{cons:?}")?;
+                    }
                     Some(Value::Vector(cdr)) => todo!(),
                     Some(value) => {
                         // this value is *definitely* not self-referential, so it's ok to
@@ -434,6 +447,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
             // Value::Lambda(lambda) => write!(f, "<lambda {:p}>", *lambda.borrow()),
             Value::Lambda(lambda) => write!(f, "#<lambda {lambda:p}>"),
             Value::Continuation(cont) => write!(f, "#<continuation {cont}>"),
+            Value::Promise(_) => todo!(),
             Value::Error(e) => write!(f, "{}", e.display(self.resolver.as_ref())),
         }
     }

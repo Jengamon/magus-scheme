@@ -89,6 +89,10 @@ pub enum Bytecode {
     /// Jump forward by a certain number of instructions if the value popped from the top of the stack is false (any other
     /// value is considered true)
     If { jump: usize },
+    /// Jump forward a certain number of instructions
+    ///
+    /// Used for `if` on the true branch
+    Jump { jump: usize },
 
     /// Duplicate the reference to the value at the top of the stack
     Duplicate,
@@ -119,6 +123,7 @@ impl Bytecode {
             Self::Define { .. } => 2,
             Self::SetBang { .. } => 2,
             Self::If { .. } => 2,
+            Self::Jump { .. } => 2,
             Self::Duplicate => 1,
             // Self::Pop => 1,
             // Self::Return => 4,

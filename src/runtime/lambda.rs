@@ -7,7 +7,6 @@ use gc_arena::{Collect, Gc, Mutation, RefLock};
 use crate::{
     Fuel, ValuePtr,
     bytecode::ChunkPtr,
-    compiler::World,
     environment::StackEnvironmentPtr,
     interpreter::{
         Context, Includer,
@@ -30,6 +29,7 @@ pub type DynamicWind<'gc> = Option<(Lambda<'gc>, Lambda<'gc>)>;
 
 /// Possible things a lambda can return
 /// If something marked `[call-end]` is returned, the lambda will not be called again.
+#[derive(Debug)]
 pub enum LambdaReturn<'gc> {
     /// Return the given values, pushing them to the stack
     ///
@@ -96,7 +96,6 @@ pub struct NativeLambdaContext<'a, 'gc> {
     pub ctx: Context<'gc>,
     pub stack: &'a [ValuePtr<'gc>],
     pub interner: &'a mut lasso::Rodeo,
-    pub world: &'a World,
     pub includer: &'a dyn Includer,
     pub fuel: &'a mut Fuel,
     pub env: StackEnvironmentPtr<'gc>,
@@ -151,10 +150,11 @@ pub trait NativeLambda: std::fmt::Debug + Collectable {
         Ok(LambdaReturn::Propagate(err))
     }
 
-    /// Create a version of self that will continue where this function
+    /// Create a version of `self` that will continue off where this function
     /// was called for this lambda (used in continuation impl)
     ///
-    /// `None` signifies that this lambda has no continuation
+    /// `None` signifies that this lambda can simply have its pointer
+    /// copied as a continuation (it does not mutate `self`)
     fn continuation(&self) -> Option<Self>
     where
         Self: Sized,

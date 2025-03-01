@@ -248,6 +248,49 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
                 )))
             }
 
+            fn visit_bool(&mut self, bool: &crate::Boolean) {
+                let Some(boolv) = bool.bool() else {
+                    self.ptr = Some(Err(GAstProgramError::Unparseable(
+                        bool.syntax().text_range(),
+                    )));
+                    return;
+                };
+
+                self.ptr = Some(Ok(Gc::new(
+                    self.mc,
+                    Program::new(ProgramData::Bool(boolv), source_data!(self, bool)),
+                )))
+            }
+
+            fn visit_char(&mut self, char: &crate::Character) {
+                let Some(charv) = char.char() else {
+                    self.ptr = Some(Err(GAstProgramError::Unparseable(
+                        char.syntax().text_range(),
+                    )));
+                    return;
+                };
+
+                self.ptr = Some(Ok(Gc::new(
+                    self.mc,
+                    Program::new(ProgramData::Char(charv), source_data!(self, char)),
+                )))
+            }
+
+            fn visit_string(&mut self, string: &crate::StringToken) {
+                let Some(stringv) = string.string() else {
+                    self.ptr = Some(Err(GAstProgramError::Unparseable(
+                        string.syntax().text_range(),
+                    )));
+                    return;
+                };
+                let spur = self.interner.get_or_intern(&stringv);
+
+                self.ptr = Some(Ok(Gc::new(
+                    self.mc,
+                    Program::new(ProgramData::String(spur), source_data!(self, string)),
+                )))
+            }
+
             fn visit_list(&mut self, list: &crate::List) {
                 // This is the "most fun" one....
                 // so for lists, we have to first check the head, if it is import
@@ -338,7 +381,8 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
                 case_insensitive,
                 ptr: None,
             };
-            visitor.visit_datum(dbg!(&d));
+            // dbg!(&d);
+            visitor.visit_datum(&d);
             programs.push(visitor.ptr.expect("null program")?);
         }
 

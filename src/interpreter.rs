@@ -105,6 +105,17 @@ impl<'gc> Arena<'gc> {
     pub fn get_value(&self, handle: &ValueHandle) -> Option<ValuePtr<'gc>> {
         self.stash.values.get(handle.key).copied()
     }
+
+    pub fn compiler(&self, handle: &CompilerHandle) -> Option<&compiler::Compiler<'gc>> {
+        self.stash.compilers.get(handle.key)
+    }
+
+    pub fn compiler_mut(
+        &mut self,
+        handle: &CompilerHandle,
+    ) -> Option<&mut compiler::Compiler<'gc>> {
+        self.stash.compilers.get_mut(handle.key)
+    }
 }
 
 /// Context for execution
@@ -212,18 +223,22 @@ impl Interpreter {
 
             for key in threads_to_drop {
                 arena.stash.threads.remove(key);
+                self.thread_knobs.remove(key);
             }
 
             for key in compilers_to_drop {
                 arena.stash.compilers.remove(key);
+                self.compiler_knobs.remove(key);
             }
 
             for key in chunks_to_drop {
                 arena.stash.chunks.remove(key);
+                arena.chunk_knobs.remove(key);
             }
 
             for key in values_to_drop {
                 arena.stash.values.remove(key);
+                arena.value_knobs.remove(key);
             }
         })
     }
@@ -300,6 +315,25 @@ impl Interpreter {
 
     pub fn enter(
         &mut self,
+        func: impl for<'a> FnOnce(&Mutation<'a>, &mut Arena<'a>, &mut lasso::Rodeo),
+    ) {
+        self.check_for_dropped();
+        self.arena.mutate_root(|mc, arena| {
+            (func)(mc, arena, &mut self.interner);
+        })
+    }
+
+    pub fn try_enter<T>(
+        &mut self,
+        func: impl for<'a> FnOnce(&Mutation<'a>, &mut Arena<'a>, &mut lasso::Rodeo) -> T,
+    ) -> T {
+        self.check_for_dropped();
+        self.arena
+            .mutate_root(|mc, arena| (func)(mc, arena, &mut self.interner))
+    }
+
+    pub fn run(
+        &mut self,
         handle: &ThreadHandle,
         func: impl for<'a> FnOnce(Context<'a>, &mut Arena<'a>, &mut lasso::Rodeo),
     ) {
@@ -321,7 +355,7 @@ impl Interpreter {
         })
     }
 
-    pub fn try_enter<T>(
+    pub fn try_run<T>(
         &mut self,
         handle: &ThreadHandle,
         func: impl for<'a> FnOnce(Context<'a>, &mut Arena<'a>, &mut lasso::Rodeo) -> T,

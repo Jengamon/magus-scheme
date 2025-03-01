@@ -7,7 +7,10 @@ use crate::{
     runtime::{
         convert::IntoValue,
         error::{SchemeError, SchemeErrorPtr, SchemeErrorType, StackFrame},
-        lambda::{Arity, DynamicWind, Lambda, NativeLambdaPtr},
+        lambda::{
+            Arity, DynamicWind, Lambda, LambdaError, LambdaReturn, NativeLambdaContext,
+            NativeLambdaPtr,
+        },
     },
     value::{ConsCell, Continuation, ValuePtr},
 };
@@ -34,6 +37,19 @@ impl Execution<'_> {
         match self {
             Execution::Bytecode { chunk, pc, .. } => chunk.find_label(*pc),
             _ => None,
+        }
+    }
+}
+
+impl<'gc> Execution<'gc> {
+    fn from_lambda(lambda: Lambda<'gc>) -> Self {
+        match lambda {
+            Lambda::Native(gc) => Self::Native { native: gc },
+            Lambda::Compiled(gc) => Self::Bytecode {
+                chunk: gc.chunk,
+                arity: gc.arity,
+                pc: 0,
+            },
         }
     }
 }
@@ -204,6 +220,7 @@ impl<'gc> Thread<'gc> {
     /// Creates a frame of evaluation for the given lambda
     pub fn call(
         &mut self,
+        mc: &Mutation<'gc>,
         lambda: Lambda<'gc>,
         error_handler: Option<Lambda<'gc>>,
         args: &[ValuePtr<'gc>],
@@ -212,7 +229,7 @@ impl<'gc> Thread<'gc> {
         for arg in args {
             self.stack.push(*arg);
         }
-        self.call_lambda(lambda, args.len(), false)?;
+        self.call_lambda(mc, lambda, args.len(), false)?;
         // Install error handler (if any)
         self.frames.last_mut().unwrap().handler = error_handler;
         Ok(())
@@ -260,9 +277,8 @@ impl<'gc> Thread<'gc> {
     /// Resets execution state & stack
     pub fn reset(&mut self) {
         self.reset_error();
+        self.clear_stack();
         self.frames.clear();
-        self.holes.clear();
-        self.stack.clear();
         debug_assert!(self.is_finished());
     }
 
@@ -270,6 +286,14 @@ impl<'gc> Thread<'gc> {
     #[inline]
     pub fn reset_error(&mut self) {
         let _ = self.error.take();
+    }
+
+    /// Clears stack
+    #[inline]
+    pub fn clear_stack(&mut self) {
+        self.stack.clear();
+        // holes only really matter to stack values, so, drop all holes
+        self.holes.clear();
     }
 
     /// When a thread has no frames, then it is considered to be finished.
@@ -337,6 +361,9 @@ impl<'gc> Thread<'gc> {
             unreachable!("[ICE] no frame present");
         };
 
+        // used later
+        let bottom = frame.bottom;
+        // handle exception frame interaction with non-continuable errors
         if let Some(err) = frame.exception {
             if !err.error_type.is_continuable() {
                 let index = self.error_handler_frame_index().unwrap();
@@ -353,6 +380,7 @@ impl<'gc> Thread<'gc> {
                 ));
             }
         }
+
         // TODO Lambdas only return the last value of their body, so this should be
         // - Pop the value at top of stack (unless resulting stack is empty, then synthesize Void)
         // - drain anything frame.bottom..
@@ -360,6 +388,13 @@ impl<'gc> Thread<'gc> {
         // Lambdas would use a "values" function to return more than one value.
         // Native lambdas support this logic natively (if their Return vec len == 1, that value is unwrapped,
         // if 0, return Void, otherwise returns Values)
+        let ret_val = self.stack.pop();
+        self.stack.drain(bottom..);
+        if let Some(ret) = ret_val {
+            self.stack.push(ret);
+        } else {
+            self.stack.push(Value::Void.into_ptr(ctx));
+        }
         // FIXME Remember to do the same for native lambdas (so do it as a function)
         // TODO If dynamic-wind is present. call the after
         self.frames.pop();
@@ -383,14 +418,46 @@ impl<'gc> Thread<'gc> {
     /// Sets up the call to a lambda
     fn call_lambda(
         &mut self,
+        mc: &Mutation<'gc>,
         lambda: Lambda<'gc>,
         args: usize,
-        tail: bool,
+        is_tail: bool,
     ) -> Result<(), LambdaException> {
         // TODO First argument is lowest on the stack
         // TODO Remember the Value::Values counts for 1 value!!!, so no special handling
         // Only as output of the entire system is it special
-        todo!()
+        if !lambda.arity().is_satisfied(args) {
+            return Err(LambdaException::MismatchedArity {
+                expected: lambda.arity(),
+                got: args,
+            });
+        }
+        if self.stack.len() < args {
+            todo!("not enough args")
+        };
+        let args: Vec<_> = self.stack.drain(self.stack.len() - args..).collect();
+        let new_frame = ThreadFrame {
+            bottom: self.stack.len(),
+            execution: Execution::from_lambda(lambda),
+            handler: None,
+            dynamic_wind: None,
+            args: Box::from(args.as_slice()),
+            exception: None,
+            env: Gc::new(
+                mc,
+                RefLock::new(StackEnvironment::new(mc, Self::current_env(&self.frames))),
+            ),
+        };
+
+        if is_tail {
+            if let Some(frame) = self.frames.last_mut() {
+                *frame = new_frame;
+                return Ok(());
+            }
+        }
+
+        self.frames.push(new_frame);
+        Ok(())
     }
 
     /// Create a continuation that can be called at a later time (on this thread)
@@ -454,7 +521,7 @@ impl<'gc> Thread<'gc> {
                 // Find an error handler and set it up to run (if not handling one)
                 if self.frames.last().unwrap().exception.is_none() {
                     if let Some(handler) = self.error_handler() {
-                        if let Err(_err) = self.call_lambda(handler, 1, true) {
+                        if let Err(_err) = self.call_lambda(&ctx, handler, 1, true) {
                             // not a valid handler, so *take* it
                             let index = self.error_handler_frame_index().unwrap();
                             self.frames[index].handler.take();
@@ -492,6 +559,13 @@ impl<'gc> Thread<'gc> {
                     macro_rules! advance_to_next_inst {
                         () => {
                             *pc += 1;
+                        };
+                        ($frame:expr) => {
+                            if let Some(Execution::Bytecode { pc, .. }) =
+                                $frame.map(|f| &mut f.execution)
+                            {
+                                *pc += 1;
+                            }
                         };
                     }
                     // The core of execution
@@ -573,12 +647,17 @@ impl<'gc> Thread<'gc> {
                             }
                         }
                         Bytecode::MakePair => {
+                            dbg!(&self.stack);
                             if self.stack.len() < 2 {
                                 make_error!(SchemeErrorType::NoValue(inst));
                                 continue;
                             }
 
-                            todo!();
+                            let car = self.stack.pop();
+                            let cdr = self.stack.pop();
+                            self.stack
+                                .push(Value::Cons(ConsCell { car, cdr }).into_ptr(&ctx));
+                            advance_to_next_inst!();
                         }
                         Bytecode::MakeHole { id } => {
                             // create an undefined value
@@ -618,8 +697,6 @@ impl<'gc> Thread<'gc> {
                             advance_to_next_inst!();
                         }
                         Bytecode::Call { args } => {
-                            // TODO Check for holes, if present, abort
-
                             let Some(val) = self.stack.pop() else {
                                 make_error!(SchemeErrorType::NonCallable);
                                 continue;
@@ -629,7 +706,10 @@ impl<'gc> Thread<'gc> {
                                 Value::Lambda(l) => {
                                     let pc = *pc;
                                     let code_len = chunk.code.len();
-                                    if let Err(err) = self.call_lambda(l, args, pc + 1 >= code_len)
+                                    // advance to next inst *before* pushing lambda
+                                    advance_to_next_inst!();
+                                    if let Err(err) =
+                                        self.call_lambda(&ctx, l, args, pc + 1 >= code_len)
                                     {
                                         make_error!(SchemeErrorType::LambdaException(err));
                                         continue;
@@ -707,6 +787,11 @@ impl<'gc> Thread<'gc> {
 
                             advance_to_next_inst!();
                         }
+                        Bytecode::Jump { jump } => {
+                            *pc += jump;
+
+                            advance_to_next_inst!();
+                        }
                         _ => todo!(),
                     }
                 }
@@ -714,7 +799,119 @@ impl<'gc> Thread<'gc> {
                     // TODO Remeber to check when [call-end] a native call to check for non-continuable errors
                     // TODO Remember to handle dynamic-wind properly when processing LambdaReturn::Continue
                     fuel.consume(Self::NATIVE_COST);
-                    todo!("native code")
+                    // Make all our data fixed and nice to borrow
+                    let native = *native;
+                    let Some(frame) = self.frames.last() else {
+                        unreachable!()
+                    };
+                    let args = frame.args.as_ref();
+                    let lctx = NativeLambdaContext {
+                        self_ptr: native,
+                        ctx,
+                        stack: &self.stack[frame.bottom..],
+                        interner,
+                        includer,
+                        fuel,
+                        env: frame.env,
+                        frames: &self.frames,
+                        thread_ref: self,
+                    };
+                    let res = if let Some(err) = self.error {
+                        // Let native code interfere with errors
+                        native.borrow_mut(lctx.ctx.mc).error(lctx, args, err)
+                    } else {
+                        native.borrow_mut(lctx.ctx.mc).run(lctx, args)
+                    };
+                    // rebind frame to be mutable
+                    let Some(frame) = self.frames.last_mut() else {
+                        unreachable!()
+                    };
+                    // now interpret the result!
+                    match res {
+                        Ok(LambdaReturn::Return(vals)) => {
+                            if vals.len() == 1 {
+                                self.stack.push(vals[0]);
+                            } else if vals.is_empty() {
+                                self.stack.push(Value::Void.into_ptr(&ctx));
+                            } else {
+                                self.stack
+                                    .push(Value::Values(Gc::new(&ctx, vals)).into_ptr(&ctx));
+                            }
+                            self.handle_frame_end(&ctx);
+                        }
+                        Ok(LambdaReturn::Continue { cont, args }) => todo!(),
+                        Ok(LambdaReturn::Raise {
+                            error,
+                            is_continuable,
+                        }) => {
+                            if is_continuable {
+                                make_error!(SchemeErrorType::RaiseContinuable(
+                                    error
+                                        .borrow()
+                                        .resolve_into(interner.clone(), ctx.null_value)
+                                ));
+                            } else {
+                                make_error!(SchemeErrorType::Raise(
+                                    error
+                                        .borrow()
+                                        .resolve_into(interner.clone(), ctx.null_value)
+                                ));
+                            }
+                            self.handle_frame_end(&ctx);
+                        }
+                        Ok(LambdaReturn::Propagate(err)) => {
+                            // TODO Check if same error
+                            // If not, store the current error in the new error irritants
+                            self.error = Some(err);
+                            self.handle_frame_end(&ctx);
+                        }
+                        Ok(LambdaReturn::Call {
+                            lambda,
+                            args,
+                            dynamic_wind,
+                        }) => {
+                            let args_len = args.len();
+                            self.stack.extend(args);
+                            if let Err(err) = self.call_lambda(&ctx, lambda, args_len, false) {
+                                make_error!(SchemeErrorType::LambdaException(err));
+                                continue;
+                            };
+                            // Set dynamic wind
+                            self.frames.last_mut().unwrap().dynamic_wind = dynamic_wind;
+                        }
+                        Ok(LambdaReturn::TailCall {
+                            lambda,
+                            args,
+                            dynamic_wind,
+                        }) => {
+                            let args_len = args.len();
+                            self.stack.extend(args);
+                            if let Err(err) = self.call_lambda(&ctx, lambda, args_len, true) {
+                                make_error!(SchemeErrorType::LambdaException(err));
+                                continue;
+                            };
+                            // Set dynamic wind
+                            self.frames.last_mut().unwrap().dynamic_wind = dynamic_wind;
+                            self.handle_frame_end(&ctx);
+                        }
+                        Ok(LambdaReturn::SetExceptionHandler(handler)) => {
+                            frame.handler = Some(handler);
+                        }
+                        Err(e) => {
+                            // TODO Add current error to new error irritants if present
+                            match e {
+                                LambdaError::Continuable(ce) => {
+                                    make_error!(SchemeErrorType::RustContinuable(
+                                        std::rc::Rc::new(ce)
+                                    ));
+                                }
+                                LambdaError::NonContinuable(e) => {
+                                    make_error!(SchemeErrorType::Rust(std::rc::Rc::new(e)));
+                                }
+                            }
+                            self.handle_frame_end(&ctx);
+                        }
+                    }
                 }
             }
         }
@@ -729,7 +926,6 @@ mod tests {
     use crate::{
         Fuel,
         bytecode::{self, Bytecode::*, Constant},
-        compiler::World,
         environment::Environment,
         interpreter::{Context, Includer, NullIncluder},
         runtime::convert::IntoValue,
@@ -738,18 +934,14 @@ mod tests {
     use super::Thread;
 
     #[fixture]
-    fn empty_world() -> World {
-        World::default()
-    }
-
-    #[fixture]
     fn null_includer() -> impl Includer {
         NullIncluder
     }
 
     #[rstest]
-    fn thread_definition(empty_world: World, null_includer: impl Includer) {
-        let world = &empty_world;
+    fn thread_definition(null_includer: impl Includer) {
+        // No world is needed anymore if the compiler is unused
+        // let world = &empty_world;
         let includer = &null_includer;
 
         let mut interner = lasso::Rodeo::new();

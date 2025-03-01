@@ -140,15 +140,9 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
             if let Some(range) = frame.range {
                 write!(
                     f,
-                    "\n - {:?} {}[{}{:?}] {}",
+                    "\n - {:?} {}: {}",
                     range,
-                    if let Some(source) = source(frame.source_filename) {
-                        format!("\"{}\" ", source,)
-                    } else {
-                        "".to_string()
-                    },
                     file_name(frame.source_filename),
-                    range,
                     match frame.execution {
                         Execution::Bytecode { chunk, pc, .. } =>
                             format!("<<code {chunk:p}@({pc})>>"),

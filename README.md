@@ -44,8 +44,9 @@ It consists of 2 parts:
 - Compiler
 - VM
 
+TODO List
 - [x] compiler can produce VM bytecode
-- [x] vm can interpret code
+- [-] vm can interpret code
 
 #### Compiler
 It is the job of the compiler to:

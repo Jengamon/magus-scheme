@@ -1,3 +1,4 @@
+alias compat := compatibility-report
 repl *FLAGS:
     cargo run -p magus-repl -- {{FLAGS}}
 
@@ -35,3 +36,6 @@ build-wasm-ci:
 
 doc:
     cargo doc --document-private-items --no-deps --open
+
+compatibility-report:
+    nu gen_compatibility_doc.nu > COMPATIBILITY.md

@@ -275,6 +275,7 @@ impl<'gc> std::ops::Deref for SyntaxContext<'_, 'gc> {
 
 pub trait Transformer<'gc>: Syntax {}
 impl<'gc, T: Syntax + Collect<'gc>> Transformer<'gc> for T {}
+pub type TransformerPtr<'gc> = Gc<'gc, dyn Transformer<'gc>>;
 
 /// The result of a syntax evaluation
 pub enum SyntaxReturn<'gc> {
@@ -294,7 +295,7 @@ impl<'gc> SyntaxReturn<'gc> {
         }
     }
 
-    pub fn into_transformer(self) -> Option<Gc<'gc, dyn Transformer<'gc>>> {
+    pub fn into_transformer(self) -> Option<TransformerPtr<'gc>> {
         match self {
             Self::Code(_) => None,
             Self::Transformer(trans) => Some(trans),
@@ -452,6 +453,27 @@ pub struct ArgumentScope {
     rest: Option<lasso::Spur>,
 }
 
+slotmap::new_key_type! { pub struct TransformerKey; }
+/// Compiler Stash
+#[derive(Debug, Default)]
+pub struct Stash<'gc> {
+    transformers: slotmap::SlotMap<TransformerKey, TransformerPtr<'gc>>,
+}
+#[allow(unsafe_code)]
+unsafe impl<'gc> Collect<'gc> for Stash<'gc> {
+    fn trace<T: gc_arena::collect::Trace<'gc>>(&self, cc: &mut T) {
+        macro_rules! trace_slotmap {
+            ($field:ident) => {
+                for value in self.$field.values() {
+                    value.trace(cc);
+                }
+            };
+        }
+
+        trace_slotmap!(transformers);
+    }
+}
+
 // Compiles Programs into Chunks
 #[derive(Debug, Collect)]
 #[collect(no_drop)]
@@ -479,6 +501,9 @@ pub struct Compiler<'gc> {
     environments: Vec<StackEnvironmentPtr<'gc>>,
     // which environment to use
     env_ptr: usize,
+
+    // stash that can be used by macros to store things
+    stash: Stash<'gc>,
 }
 #[derive(Debug, Clone, Copy)]
 pub struct Checkpoint(usize);
@@ -718,6 +743,7 @@ impl<'gc> Compiler<'gc> {
             // The very first environment pointer is always the default environment
             environments: vec![Gc::new(mc, RefLock::new(Environment::new(mc, None)))],
             env_ptr: 0,
+            stash: Stash::default(),
         }
     }
 

@@ -8,7 +8,7 @@ use magus::{
     environment::StackEnvironment,
     gc_arena::{Gc, RefLock},
     general_parser::GeneralParserError,
-    interpreter::{Interpreter, NullIncluder, ThreadHandle, ValueHandle},
+    interpreter::{CompilerHandle, Interpreter, NullIncluder, ThreadHandle, ValueHandle},
     library_name, stdlib, ContainsDatum, Fuel, GAstNode, Module, Value,
 };
 use reedline::{
@@ -124,6 +124,7 @@ fn compile(source: impl AsRef<str>) -> Result<Module, Vec<GeneralParserError>> {
 fn execute(
     module: &Module,
     interpreter: &mut Interpreter,
+    compiler: &CompilerHandle,
     thread: &ThreadHandle,
     stashed_env: Option<&ValueHandle>,
     world: &World,
@@ -137,11 +138,10 @@ fn execute(
         println!("{:#}", datum_printer::DisplayDatum(&datum));
     }
 
-    let compiler = interpreter.new_compiler();
     // Run the code in through our compiler to get a chunk,
     // then execute that chunk on a new thread
     let chunk: Result<_, anyhow::Error> =
-        interpreter.compiler_context(&compiler, |mc, compiler, interner| {
+        interpreter.compiler_context(compiler, |mc, compiler, interner| {
             let programs = ("repl.scm", module).parse_program(mc, interner, false)?;
             Ok(compiler.compile(mc, interner, world, &NullIncluder, programs)?)
         });
@@ -206,9 +206,10 @@ fn execute_file(path: impl AsRef<std::path::Path>) -> anyhow::Result<()> {
     match compile(&source) {
         Ok(module) => {
             let mut interpreter = Interpreter::default();
+            let compiler = interpreter.new_compiler();
             let thread = interpreter.new_empty_thread();
             let world = World::default();
-            execute(&module, &mut interpreter, &thread, None, &world);
+            execute(&module, &mut interpreter, &compiler, &thread, None, &world);
         }
         Err(errors) => {
             let idx = LineIndex::new(&source);
@@ -241,6 +242,7 @@ fn repl() -> anyhow::Result<()> {
 
     // compiler setup
     let mut interpreter = Interpreter::default();
+    let compiler = interpreter.new_compiler();
     let thread = interpreter.new_empty_thread();
     let world = {
         let mut world = World::default();
@@ -281,6 +283,7 @@ fn repl() -> anyhow::Result<()> {
                         execute(
                             &module,
                             &mut interpreter,
+                            &compiler,
                             &thread,
                             Some(&stashed_env),
                             &world,

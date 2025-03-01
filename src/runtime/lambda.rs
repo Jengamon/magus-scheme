@@ -148,6 +148,17 @@ pub trait NativeLambda: std::fmt::Debug + Collectable {
         // used to mark unhandled errors, will set the error (like Raise) unless already set
         Ok(LambdaReturn::Propagate(err))
     }
+
+    /// Create a version of self that will continue where this function
+    /// was called for this lambda (used in continuation impl)
+    ///
+    /// `None` signifies that this lambda has no continuation
+    fn continuation(&self) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        None
+    }
 }
 pub type NativeLambdaPtr<'gc> = Gc<'gc, RefLock<dyn NativeLambda>>;
 pub type LambdaResult<'gc> = Result<LambdaReturn<'gc>, LambdaError>;

@@ -1,4 +1,4 @@
-# Magus - an R5RS-ish impl for Magicflute
+# Magus - an R7RS-ish impl for Magicflute
 
 Build status: [![builds.sr.ht status](https://builds.sr.ht/~jangermad/magus/commits/impl-redo.svg)](https://builds.sr.ht/~jangermad/magus/commits/impl-redo?)
 

@@ -15,7 +15,7 @@ pub mod stdlib;
 pub use anyhow;
 pub use fxhash;
 pub use gc_arena;
-pub use lasso::Rodeo;
+pub use lasso;
 pub use rowan;
 
 pub use general_parser::{CompoundTermKind, TokenKind, gast::*, general_parse};

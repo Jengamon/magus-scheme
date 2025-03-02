@@ -647,7 +647,7 @@ impl<'gc> Thread<'gc> {
                             }
                         }
                         Bytecode::MakePair => {
-                            dbg!(&self.stack);
+                            // dbg!(&self.stack);
                             if self.stack.len() < 2 {
                                 make_error!(SchemeErrorType::NoValue(inst));
                                 continue;
@@ -705,12 +705,21 @@ impl<'gc> Thread<'gc> {
                             match *val.borrow() {
                                 Value::Lambda(l) => {
                                     let pc = *pc;
-                                    let code_len = chunk.code.len();
+                                    let code = std::rc::Rc::clone(&chunk.code);
                                     // advance to next inst *before* pushing lambda
                                     advance_to_next_inst!();
-                                    if let Err(err) =
-                                        self.call_lambda(&ctx, l, args, pc + 1 >= code_len)
-                                    {
+                                    if let Err(err) = self.call_lambda(
+                                        &ctx,
+                                        l,
+                                        args,
+                                        pc + match code[(pc + 1).min(code.len() - 1)] {
+                                            // make sure true branches can also be properly registered as tail calls
+                                            // because a jump unconditionally executes, the actual total movement is
+                                            // jump + 1 plus the + 1 base from this instruction
+                                            Bytecode::Jump { jump } => jump + 2,
+                                            _ => 1,
+                                        } >= code.len(),
+                                    ) {
                                         make_error!(SchemeErrorType::LambdaException(err));
                                         continue;
                                     };
@@ -1010,7 +1019,7 @@ mod tests {
             }
             eprintln!("finished? {}", thread.borrow().is_finished());
             if let Some(Err(err)) = thread.borrow().result() {
-                eprintln!("{}", err.display(&interner));
+                eprintln!("{}", err.display(&interner, []));
             } else {
                 eprintln!(
                     "{:#?}",

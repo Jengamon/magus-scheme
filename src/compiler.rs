@@ -723,8 +723,9 @@ pub enum ImportError {
     InvalidImport,
     #[error("library not found")]
     LibraryNotFound(LibraryName),
-    #[error("invalid name in module")]
-    InvalidModule,
+    // TODO store module name in error
+    #[error("name not found in module: {name}")]
+    NameNotFound { name: Box<str> },
     #[error("failed to define symbol")]
     FailedToDefine(lasso::Spur),
 }
@@ -971,7 +972,7 @@ impl<'gc> Compiler<'gc> {
                                     .borrow_mut(mc)
                                     .define(mc, symbol, val, true).map_err(|_| ImportError::FailedToDefine(symbol))?;
                             } else {
-                                Err(ImportError::InvalidModule)?
+                                Err(ImportError::NameNotFound{ name: Box::from(interner.resolve(&symbol))})?
                             }
                         }
                         Ok(())
@@ -986,8 +987,8 @@ impl<'gc> Compiler<'gc> {
                     };
                     if let Some(modl) = world.library(&library_name) {
                         for symbol in $symbols.iter().copied() {
-                        dbg!(&symbol);
-                            // try  to import as a syntax, then as a value, and fail the module if
+                            // dbg!(&symbol);
+                            // try to import as a syntax, then as a value, and fail the module if
                             // a name doesn't exist
                             if let Some(syntax) = modl.syntax(interner, symbol) {
                                 // Define a macro in scope
@@ -998,7 +999,7 @@ impl<'gc> Compiler<'gc> {
                                     .borrow_mut(mc)
                                     .define(mc, symbol, val, true).map_err(|_| ImportError::FailedToDefine(symbol))?;
                             } else {
-                                Err(ImportError::InvalidModule)?
+                                Err(ImportError::NameNotFound{ name: Box::from(interner.resolve(&symbol))})?
                             }
                         }
                         Ok(())

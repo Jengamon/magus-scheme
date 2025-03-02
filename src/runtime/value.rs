@@ -280,15 +280,17 @@ impl<K: lasso::Resolver> fmt::Display for ConsPrinter<'_, '_, K> {
             return Ok(());
         }
 
-        write!(
-            f,
-            "{}",
-            if matches!(self.cons, ConsInner::Vec(_)) {
-                "#("
-            } else {
-                "("
-            }
-        )?;
+        if self.encountered.borrow().is_empty() {
+            write!(
+                f,
+                "{}",
+                if matches!(self.cons, ConsInner::Vec(_)) {
+                    "#("
+                } else {
+                    "("
+                }
+            )?;
+        }
 
         if self.encountered.borrow().contains(&value) {
             // write as self-recursive list
@@ -303,7 +305,16 @@ impl<K: lasso::Resolver> fmt::Display for ConsPrinter<'_, '_, K> {
             ConsInner::Cons(cons) => {
                 match cons.car.map(|p| *p.borrow()) {
                     Some(Value::Cons(cons)) => {
-                        write!(f, "{cons:?}")?;
+                        write!(
+                            f,
+                            "({})",
+                            ConsPrinter {
+                                cons: ConsInner::Cons(&cons),
+                                resolver: Rc::clone(&self.resolver),
+                                null_ptr: self.null_ptr,
+                                encountered: Rc::clone(&self.encountered)
+                            }
+                        )?;
                     }
                     Some(Value::Vector(vec)) => todo!(),
                     Some(value) => {
@@ -311,11 +322,16 @@ impl<K: lasso::Resolver> fmt::Display for ConsPrinter<'_, '_, K> {
                         // use ResolvedValue
                         write!(
                             f,
-                            "{}",
+                            "{}{}",
                             ResolvedValue {
                                 value,
                                 null_ptr: self.null_ptr,
                                 resolver: Rc::clone(&self.resolver)
+                            },
+                            if cons.cdr != Some(self.null_ptr) {
+                                " "
+                            } else {
+                                ""
                             }
                         )?;
                     }
@@ -323,7 +339,16 @@ impl<K: lasso::Resolver> fmt::Display for ConsPrinter<'_, '_, K> {
                 };
                 match cons.cdr.map(|p| *p.borrow()) {
                     Some(Value::Cons(cons)) => {
-                        write!(f, "{cons:?}")?;
+                        write!(
+                            f,
+                            "{}",
+                            ConsPrinter {
+                                cons: ConsInner::Cons(&cons),
+                                resolver: Rc::clone(&self.resolver),
+                                null_ptr: self.null_ptr,
+                                encountered: Rc::clone(&self.encountered)
+                            }
+                        )?;
                     }
                     Some(Value::Vector(cdr)) => todo!(),
                     Some(value) => {
@@ -331,7 +356,7 @@ impl<K: lasso::Resolver> fmt::Display for ConsPrinter<'_, '_, K> {
                         // use ResolvedValue
                         write!(
                             f,
-                            " . {}",
+                            ". {}",
                             ResolvedValue {
                                 value,
                                 null_ptr: self.null_ptr,
@@ -356,7 +381,11 @@ impl<K: lasso::Resolver> fmt::Display for ConsPrinter<'_, '_, K> {
         }
         // pop encountered and close the list
         self.encountered.borrow_mut().pop();
-        write!(f, ")")
+        if self.encountered.borrow().is_empty() {
+            write!(f, ")")
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -383,7 +412,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
             Value::Inexact(fp) => write!(f, "{fp}"),
             Value::String(s) => write!(f, "\"{}\"", s.borrow().replace('\"', "\\\"")),
             Value::Symbol(sym) if is_valid_scheme_identifier(self.resolver.resolve(&sym.0)) => {
-                write!(f, "'{}", self.resolver.resolve(&sym.0))
+                write!(f, "{}", self.resolver.resolve(&sym.0))
             }
             Value::Symbol(sym) => write!(f, "'|{}|", self.resolver.resolve(&sym.0)),
             Value::Bool(b) => write!(f, "#{}", if b { "t" } else { "f" }),
@@ -448,7 +477,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
             Value::Lambda(lambda) => write!(f, "#<lambda {lambda:p}>"),
             Value::Continuation(cont) => write!(f, "#<continuation {cont}>"),
             Value::Promise(_) => todo!(),
-            Value::Error(e) => write!(f, "{}", e.display(self.resolver.as_ref())),
+            Value::Error(e) => write!(f, "#<error {e:p}>"),
         }
     }
 }

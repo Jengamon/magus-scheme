@@ -4,7 +4,7 @@ use anyhow::Context;
 use clap::Parser;
 use codesnake::{Block, CodeWidth, Label, LineIndex};
 use magus::{
-    bytecode::Bytecode,
+    bytecode::{Bytecode, Constant},
     compiler::{LibraryName, ParseProgram, World},
     environment::StackEnvironment,
     gc_arena::{Gc, RefLock},
@@ -125,6 +125,7 @@ fn compile(source: impl AsRef<str>) -> Result<Module, Vec<GeneralParserError>> {
 
 /// Executes a given module
 fn execute(
+    source: impl AsRef<str>,
     module: &Module,
     interpreter: &mut Interpreter,
     compiler: &CompilerHandle,
@@ -157,27 +158,46 @@ fn execute(
                     unreachable!()
                 };
                 // TODO Make an actual debugger view?
-                dbg!(&chunk.constants);
+                println!("==CONSTANTS TABLE==");
+                for (idx, constant) in chunk.constants.iter().enumerate() {
+                    println!("{idx}: {constant:?}");
+                }
+                println!("==END CONSTANTS==");
                 // expose what each spur means
                 let mut shown = HashSet::new();
+                println!("==SYMBOLS REFERENCED==");
                 for code in chunk.code.iter() {
                     match code {
                         Bytecode::Reference { symbol } if !shown.contains(symbol) => {
                             shown.insert(*symbol);
-                            println!("{symbol:?} -> `{}`", interner.resolve(symbol));
+                            println!("{} -> `{}`", symbol.into_inner(), interner.resolve(symbol));
                         }
                         Bytecode::Define { symbol } if !shown.contains(symbol) => {
                             shown.insert(*symbol);
-                            println!("{symbol:?} -> `{}`", interner.resolve(symbol));
+                            println!("{} -> `{}`", symbol.into_inner(), interner.resolve(symbol));
                         }
                         Bytecode::SetBang { symbol } if !shown.contains(symbol) => {
                             shown.insert(*symbol);
-                            println!("{symbol:?} -> `{}`", interner.resolve(symbol));
+                            println!("{} -> `{}`", symbol.into_inner(), interner.resolve(symbol));
                         }
                         _ => {}
                     }
                 }
-                dbg!(&chunk.code);
+                for constant in chunk.constants.iter() {
+                    if let Constant::Symbol(symbol) = constant {
+                        if !shown.contains(symbol) {
+                            println!("{} -> `{}`", symbol.into_inner(), interner.resolve(symbol));
+                        }
+                    }
+                }
+                println!("==END SYMBOLS==");
+                // nice mnemonic format??
+                println!("==CHUNK CODE==");
+                for code in chunk.code.iter() {
+                    // Use display
+                    println!("{code}");
+                }
+                println!("==END CHUNK==");
                 let thread = ctx.thread;
                 {
                     let mut thread = thread.borrow_mut(&ctx);
@@ -199,6 +219,7 @@ fn execute(
                     }
                     thread.step(ctx, interner, &NullIncluder, &mut fuel);
                     // dbg!(&thread);
+                    let sources = [(interner.get_or_intern_static("repl.scm"), source.as_ref())];
                     if let Some(res) = thread.result() {
                         match res {
                             Ok(res) => {
@@ -210,7 +231,11 @@ fn execute(
                                 }
                             }
                             Err(e) => {
-                                println!("{}: {}", "THREAD ERROR".red(), e.display(interner,));
+                                println!(
+                                    "{}: {}",
+                                    "THREAD ERROR".red(),
+                                    e.display(interner, sources)
+                                );
                             }
                         }
                     };
@@ -235,7 +260,15 @@ fn execute_file(path: impl AsRef<std::path::Path>) -> anyhow::Result<()> {
             let compiler = interpreter.new_compiler();
             let thread = interpreter.new_empty_thread();
             let world = World::default();
-            execute(&module, &mut interpreter, &compiler, &thread, None, &world);
+            execute(
+                source,
+                &module,
+                &mut interpreter,
+                &compiler,
+                &thread,
+                None,
+                &world,
+            );
         }
         Err(errors) => {
             let idx = LineIndex::new(&source);
@@ -319,6 +352,7 @@ fn repl() -> anyhow::Result<()> {
                         prompt.completed_lines += 1;
 
                         execute(
+                            src,
                             &module,
                             &mut interpreter,
                             &compiler,

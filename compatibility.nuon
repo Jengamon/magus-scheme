@@ -8,8 +8,8 @@
         notes
     ];
     [ "base", "", *, false, "", "" ],
-    [ "base", "", +, false, "", "" ],
-    [ "base", "", -, false, "", "" ],
+    [ "base", "procedure", +, true, "Returns sum of argument (0 if no args)", "" ],
+    [ "base", "procedure", -, true, "(unary) negation (2+ args) subtraction of args from first arf", "" ],
     [ "base", "", "...", false, "", "" ],
     [ "base", "", /, false, "", "" ],
     [ "base", "", <, false, "", "" ],

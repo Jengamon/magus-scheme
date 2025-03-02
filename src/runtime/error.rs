@@ -92,10 +92,12 @@ impl<'gc> SchemeError<'gc> {
     pub fn display<'s, R: lasso::Resolver>(
         &'s self,
         resolver: &'s R,
+        sources: impl IntoIterator<Item = (lasso::Spur, &'s str)>,
     ) -> DisplaySchemeError<'s, 'gc, R> {
         DisplaySchemeError {
             resolver,
             error: self,
+            sources: sources.into_iter().collect(),
         }
     }
 }
@@ -112,6 +114,7 @@ impl fmt::Debug for SchemeError<'_> {
 pub struct DisplaySchemeError<'s, 'gc, R: lasso::Resolver> {
     resolver: &'s R,
     error: &'s SchemeError<'gc>,
+    sources: fxhash::FxHashMap<lasso::Spur, &'s str>,
 }
 
 impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
@@ -125,7 +128,7 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
 
         // write the backtrace
         write!(f, "\n\nBacktrace:")?;
-        for frame in self.error.backtrace.iter().rev() {
+        for frame in self.error.backtrace.iter() {
             let file_name = |source_id: Option<lasso::Spur>| {
                 if let Some(sid) = source_id {
                     self.resolver.try_resolve(&sid).unwrap_or("<unnamed>")
@@ -135,19 +138,22 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
             };
 
             let source = |source_id: Option<lasso::Spur>| {
-                source_id.and_then(|sid| self.resolver.try_resolve(&sid))
+                source_id.and_then(|sid| self.sources.get(&sid).copied())
             };
             if let Some(range) = frame.range {
                 write!(
                     f,
-                    "\n - {:?} {}: {}",
+                    "\n - {:?} {} {}{}",
                     range,
                     file_name(frame.source_filename),
                     match frame.execution {
                         Execution::Bytecode { chunk, pc, .. } =>
                             format!("<<code {chunk:p}@({pc})>>"),
                         Execution::Native { native, .. } => format!("<<native {native:p}>>"),
-                    }
+                    },
+                    (source)(frame.source_filename)
+                        .map(|s| format!(": {}", &s[range.0..range.1]))
+                        .unwrap_or(String::new()),
                 )?;
             } else {
                 write!(

@@ -1,5 +1,6 @@
 //! Execution model for Scheme code
 
+use core::fmt;
 use std::{rc::Rc, sync::Arc};
 
 use fxhash::FxHashMap;
@@ -127,6 +128,35 @@ impl Bytecode {
             Self::Duplicate => 1,
             // Self::Pop => 1,
             // Self::Return => 4,
+        }
+    }
+}
+
+// Nice (?) mnemonic display for bytecode
+impl fmt::Display for Bytecode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Bytecode::PushNull => write!(f, "NULL"),
+            Bytecode::PushVoid => write!(f, "VOID"),
+            Bytecode::PushConst { index } => write!(f, "CNST {index}"),
+            Bytecode::PushBool { bool } => {
+                write!(f, "BOOL {}", if *bool { "#t" } else { "#f" })
+            }
+            Bytecode::PushLambda { index } => write!(f, "LMBD {index}"),
+            Bytecode::FetchArg { index } => write!(f, "FARG {index}"),
+            Bytecode::FetchRest => write!(f, "REST"),
+            Bytecode::MakePair => write!(f, "PAIR"),
+            Bytecode::MakeVector { length } => write!(f, "VECT {length}"),
+            Bytecode::Reference { symbol } => write!(f, "REFR {}", symbol.into_inner()),
+            Bytecode::Call { args } => write!(f, "CALL {args}"),
+            Bytecode::Unpack { amount } => write!(f, "UNPK {amount}"),
+            Bytecode::MakeHole { id } => write!(f, "HOLE {id}"),
+            Bytecode::FillHole { id } => write!(f, "FILL {id}"),
+            Bytecode::Define { symbol } => write!(f, "DEFN {}", symbol.into_inner()),
+            Bytecode::SetBang { symbol } => write!(f, "SET! {}", symbol.into_inner()),
+            Bytecode::If { jump } => write!(f, "JMIF {jump}"),
+            Bytecode::Jump { jump } => write!(f, "JUMP {jump}"),
+            Bytecode::Duplicate => write!(f, "DUPL"),
         }
     }
 }

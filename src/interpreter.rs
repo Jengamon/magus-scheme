@@ -6,7 +6,7 @@ use gc_arena::{Collect, Gc, Mutation, RefLock, Rootable};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
 
 use crate::{
-    bytecode, compiler,
+    bytecode, compiler, handler_type,
     value::{ConsCell, Value, ValuePtr},
 };
 
@@ -51,16 +51,6 @@ unsafe impl<'gc> Collect<'gc> for Stash<'gc> {
         trace_slotmap!(compilers);
         trace_slotmap!(values);
     }
-}
-
-macro_rules! handler_type {
-    ($v:vis $hn:ident => $k:ty) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-        $v struct $hn {
-            _knob: Arc<()>,
-            key: $k,
-        }
-    };
 }
 
 handler_type!(pub ThreadHandle => ThreadKey);

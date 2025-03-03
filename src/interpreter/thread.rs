@@ -3,6 +3,7 @@ use gc_arena::{Collect, Gc, Mutation, RefLock};
 use crate::{
     Fuel, Value,
     bytecode::{Bytecode, ChunkPtr, SourceData},
+    compiler::World,
     environment::{StackEnvironment, StackEnvironmentPtr},
     runtime::{
         convert::IntoValue,
@@ -96,8 +97,9 @@ pub struct ThreadFrame<'gc> {
     args: Box<[ValuePtr<'gc>]>,
     exception: Option<SchemeErrorPtr<'gc>>,
     env: StackEnvironmentPtr<'gc>,
-    // used for multiple returns!
     bottom: usize,
+    // TODO add a "promise slot" that when a frame is exiting, will fill the promise with the value it is
+    // exiting the frame with.
 }
 
 impl ThreadFrame<'_> {
@@ -194,6 +196,7 @@ pub struct Thread<'gc> {
     holes: fxhash::FxHashMap<usize, ValuePtr<'gc>>,
 }
 
+// Public-facing API
 impl<'gc> Thread<'gc> {
     pub fn new(mc: &Mutation<'gc>, chunk: ChunkPtr<'gc>) -> Self {
         Self {
@@ -220,7 +223,7 @@ impl<'gc> Thread<'gc> {
     /// Creates a frame of evaluation for the given lambda
     pub fn call(
         &mut self,
-        mc: &Mutation<'gc>,
+        ctx: &Context<'gc>,
         lambda: Lambda<'gc>,
         error_handler: Option<Lambda<'gc>>,
         args: &[ValuePtr<'gc>],
@@ -229,7 +232,7 @@ impl<'gc> Thread<'gc> {
         for arg in args {
             self.stack.push(*arg);
         }
-        self.call_lambda(mc, lambda, args.len(), false)?;
+        self.call_lambda(ctx, lambda, args.len(), false)?;
         // Install error handler (if any)
         self.frames.last_mut().unwrap().handler = error_handler;
         Ok(())
@@ -351,7 +354,10 @@ impl<'gc> Thread<'gc> {
     pub fn exception(&self) -> Option<SchemeErrorPtr<'gc>> {
         self.error
     }
+}
 
+// Private internals
+impl<'gc> Thread<'gc> {
     /// Handles things that happen at the end of a frame, as well as returning it's value
     /// and adjusting the execution stack.
     ///
@@ -418,7 +424,7 @@ impl<'gc> Thread<'gc> {
     /// Sets up the call to a lambda
     fn call_lambda(
         &mut self,
-        mc: &Mutation<'gc>,
+        ctx: &Context<'gc>,
         lambda: Lambda<'gc>,
         args: usize,
         is_tail: bool,
@@ -444,12 +450,14 @@ impl<'gc> Thread<'gc> {
             args: Box::from(args.as_slice()),
             exception: None,
             env: Gc::new(
-                mc,
-                RefLock::new(StackEnvironment::new(mc, Self::current_env(&self.frames))),
+                &ctx,
+                RefLock::new(StackEnvironment::new(&ctx, Self::current_env(&self.frames))),
             ),
         };
 
         if is_tail {
+            // Exiting the current frame
+            self.handle_frame_end(ctx);
             if let Some(frame) = self.frames.last_mut() {
                 *frame = new_frame;
                 return Ok(());
@@ -497,6 +505,8 @@ impl<'gc> Thread<'gc> {
         &mut self,
         ctx: Context<'gc>,
         interner: &mut lasso::Rodeo,
+        // Used for (scheme eval) and its compilation process
+        world: &World,
         includer: &dyn Includer,
         fuel: &mut Fuel,
     ) {
@@ -817,6 +827,7 @@ impl<'gc> Thread<'gc> {
                     let lctx = NativeLambdaContext {
                         self_ptr: native,
                         ctx,
+                        world,
                         stack: &self.stack[frame.bottom..],
                         interner,
                         includer,
@@ -935,6 +946,7 @@ mod tests {
     use crate::{
         Fuel,
         bytecode::{self, Bytecode::*, Constant},
+        compiler::World,
         environment::Environment,
         interpreter::{Context, Includer, NullIncluder},
         runtime::convert::IntoValue,
@@ -943,14 +955,19 @@ mod tests {
     use super::Thread;
 
     #[fixture]
+    fn empty_world() -> World {
+        World::default()
+    }
+
+    #[fixture]
     fn null_includer() -> impl Includer {
         NullIncluder
     }
 
     #[rstest]
-    fn thread_definition(null_includer: impl Includer) {
+    fn thread_definition(empty_world: World, null_includer: impl Includer) {
         // No world is needed anymore if the compiler is unused
-        // let world = &empty_world;
+        let world = &empty_world;
         let includer = &null_includer;
 
         let mut interner = lasso::Rodeo::new();
@@ -990,6 +1007,7 @@ mod tests {
                 ],
                 [Constant::Number(3)],
                 [],
+                [],
                 import_env,
                 Default::default(),
             );
@@ -1011,7 +1029,7 @@ mod tests {
             while !thread.borrow().is_finished() && run_cost < 1000 {
                 thread
                     .borrow_mut(&ctx)
-                    .step(ctx, &mut interner, includer, &mut fuel);
+                    .step(ctx, &mut interner, world, includer, &mut fuel);
                 run_cost += INITIAL_FUEL - fuel.remaining();
                 dbg!(run_cost);
                 fuel.refill(1000, INITIAL_FUEL);

@@ -152,6 +152,14 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
                         Execution::Native { native, .. } => format!("<<native {native:p}>>"),
                     },
                     (source)(frame.source_filename)
+                        .and_then(|s| {
+                            if !((0..s.len()).contains(&range.0) && (0..s.len()).contains(&range.1))
+                            {
+                                None
+                            } else {
+                                Some(s)
+                            }
+                        })
                         .map(|s| format!(": {}", &s[range.0..range.1]))
                         .unwrap_or(String::new()),
                 )?;

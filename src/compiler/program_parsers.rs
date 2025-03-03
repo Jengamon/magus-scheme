@@ -61,7 +61,7 @@ pub enum GAstProgramError {
     NumberError(#[from] std::num::TryFromIntError),
     #[error("out of range")]
     OutOfRange(rowan::TextRange),
-    #[error("number is not an exact real integer, or inexact real number")]
+    #[error("number is not supported")]
     UnsupportedNumber(rowan::TextRange),
     #[error("not parsable")]
     Unparseable(rowan::TextRange),
@@ -205,6 +205,30 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
                                 Program::new(ProgramData::Integer(i), source_data!(self, number)),
                             )
                         }));
+                    }
+                    Some(SchemeNumber::Exact(ExactReal::Inf { is_neg })) => {
+                        // infinities are always inexact
+                        self.ptr = Some(Ok(Gc::new(
+                            self.mc,
+                            Program::new(
+                                ProgramData::Inexact(if is_neg {
+                                    f64::NEG_INFINITY
+                                } else {
+                                    f64::INFINITY
+                                }),
+                                source_data!(self, number),
+                            ),
+                        )));
+                    }
+                    Some(SchemeNumber::Exact(ExactReal::Nan { is_neg: _ })) => {
+                        // negativity of nan is ignored, as it is not meaningful
+                        self.ptr = Some(Ok(Gc::new(
+                            self.mc,
+                            Program::new(
+                                ProgramData::Inexact(f64::NAN),
+                                source_data!(self, number),
+                            ),
+                        )));
                     }
                     Some(SchemeNumber::ExactComplex {
                         real: ExactReal::Integer { value, is_neg },

@@ -40,13 +40,27 @@ pub enum Bytecode {
     /// Push a void value to the stack
     PushVoid,
     /// Push to stack a constant value at a given index of the constant table
-    PushConst { index: usize },
+    PushConst {
+        index: usize,
+    },
     /// Push a boolean value to stack
-    PushBool { bool: bool },
+    PushBool {
+        bool: bool,
+    },
     /// Push a compiled lambda to the stack
-    PushLambda { index: usize },
+    PushLambda {
+        index: usize,
+    },
+    // TODO Push a compiled promise to the stack
+    // A promise is just a blob of bytecode, with a runtime object that can record
+    // what value the blob resulted in
+    PushPromise {
+        index: usize,
+    },
     /// Fetch args from the current scope
-    FetchArg { index: usize },
+    FetchArg {
+        index: usize,
+    },
     /// Fetch the rest arg from the current scope
     FetchRest,
     /// Pop the top 2 arguments from the stack and make a cons cell out of them
@@ -54,25 +68,37 @@ pub enum Bytecode {
     MakePair,
     /// Make a vector (popping from stack), using the amount specified as the number of
     /// items
-    MakeVector { length: usize },
+    MakeVector {
+        length: usize,
+    },
     /// Look up the symbol in the stack environment, and push the result to
     /// stack (if not found or not a symbol, errors)
-    Reference { symbol: lasso::Spur },
+    Reference {
+        symbol: lasso::Spur,
+    },
     /// Pop the top value (must be a callable)
     /// Call the given lambda, making it a tail call if possible (there are
     /// no more instructions in the current context to execute)
-    Call { args: usize },
+    Call {
+        args: usize,
+    },
     /// Multiple returns are turned into a "values" object, which represent multiple items that were returned by a
     /// procedure. To work with the items individually, they must be unpacked (and we reuse arity
     /// to represent how many values were expected to be unpacked onto the stack, so we can revert and error
     /// if an unexpected amount occurs)
-    Unpack { amount: Arity },
+    Unpack {
+        amount: Arity,
+    },
 
     // Holes are the way to make self-referential datatypes
     /// Creates a hole for self-reference
-    MakeHole { id: usize },
+    MakeHole {
+        id: usize,
+    },
     /// Pop the top of the stack as the value of a hole, and clear the hole.
-    FillHole { id: usize },
+    FillHole {
+        id: usize,
+    },
 
     // NOTE These are the "definitive forms" that are
     // theoretically all that's needed to implement the
@@ -81,19 +107,30 @@ pub enum Bytecode {
     // b/c `lambda`, is more "make a compiled lambda, add it to the chunk,
     // the used the `PushLambda` instructions to push it to stack.")
     /// Pop the value on the stack, and define a given symbol using that value.
-    Define { symbol: lasso::Spur },
+    Define {
+        symbol: lasso::Spur,
+    },
     /// Pop the value on the stack and set! a given symbol using that value
     /// (error if the symbol is not already defined in the environment)
-    SetBang { symbol: lasso::Spur },
+    SetBang {
+        symbol: lasso::Spur,
+    },
     /// Branching instruction
     ///
     /// Jump forward by a certain number of instructions if the value popped from the top of the stack is false (any other
     /// value is considered true)
-    If { jump: usize },
+    If {
+        jump: usize,
+    },
     /// Jump forward a certain number of instructions
     ///
     /// Used for `if` on the true branch
-    Jump { jump: usize },
+    Jump {
+        jump: usize,
+    },
+    /// Force the top of the stack if it is a promise.
+    /// Otherwise, does nothing.
+    Force,
 
     /// Duplicate the reference to the value at the top of the stack
     Duplicate,
@@ -112,6 +149,7 @@ impl Bytecode {
             Self::PushConst { .. } => 1,
             Self::PushBool { .. } => 1,
             Self::PushLambda { .. } => 1,
+            Self::PushPromise { .. } => 1,
             Self::FetchArg { .. } => 1,
             Self::FetchRest { .. } => 1,
             Self::MakePair => 1,
@@ -121,6 +159,7 @@ impl Bytecode {
             Self::Reference { .. } => 1,
             Self::Unpack { .. } => 1,
             Self::Call { .. } => 4,
+            Self::Force => 4,
             Self::Define { .. } => 2,
             Self::SetBang { .. } => 2,
             Self::If { .. } => 2,
@@ -143,6 +182,7 @@ impl fmt::Display for Bytecode {
                 write!(f, "BOOL {}", if *bool { "#t" } else { "#f" })
             }
             Bytecode::PushLambda { index } => write!(f, "LMBD {index}"),
+            Bytecode::PushPromise { index } => write!(f, "PROM {index}"),
             Bytecode::FetchArg { index } => write!(f, "FARG {index}"),
             Bytecode::FetchRest => write!(f, "REST"),
             Bytecode::MakePair => write!(f, "PAIR"),
@@ -156,6 +196,7 @@ impl fmt::Display for Bytecode {
             Bytecode::SetBang { symbol } => write!(f, "SET! {}", symbol.into_inner()),
             Bytecode::If { jump } => write!(f, "JMIF {jump}"),
             Bytecode::Jump { jump } => write!(f, "JUMP {jump}"),
+            Bytecode::Force => write!(f, "FORS"),
             Bytecode::Duplicate => write!(f, "DUPL"),
         }
     }
@@ -204,6 +245,9 @@ pub struct Chunk<'gc> {
     pub constants: Rc<[Constant]>,
     /// lambdas this chunk defines
     pub lambdas: Rc<[CompiledLambdaPtr<'gc>]>,
+    /// promises this chunk defines
+    #[collect(require_static)]
+    pub promises: Rc<[Box<[Bytecode]>]>,
     /// environment this chunk references
     // We only need 1 because of the fact that a Scheme program is all the imports *then*
     // commands and definitions
@@ -222,6 +266,7 @@ impl<'gc> Chunk<'gc> {
         code: impl IntoIterator<Item = Bytecode>,
         constants: impl IntoIterator<Item = Constant>,
         lambdas: impl IntoIterator<Item = CompiledLambdaPtr<'gc>>,
+        promises: impl IntoIterator<Item = Box<[Bytecode]>>,
         import_stack_env: StackEnvironmentPtr<'gc>,
         labels: FxHashMap<usize, SourceData>,
     ) -> ChunkPtr<'gc> {
@@ -229,6 +274,7 @@ impl<'gc> Chunk<'gc> {
             code: code.into_iter().collect(),
             constants: constants.into_iter().collect(),
             lambdas: lambdas.into_iter().collect(),
+            promises: promises.into_iter().collect(),
             import_env: import_stack_env,
             labels: Rc::new(labels),
         };

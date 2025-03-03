@@ -26,3 +26,14 @@ pub use runtime::{
     fuel::Fuel,
     value::{self, Value, ValuePtr, ValueType},
 };
+
+macro_rules! handler_type {
+    ($v:vis $hn:ident => $k:ty) => {
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        $v struct $hn {
+            _knob: Arc<()>,
+            key: $k,
+        }
+    };
+}
+pub(crate) use handler_type;

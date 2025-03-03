@@ -3,7 +3,6 @@
 use std::{collections::HashSet, sync::Arc};
 
 use gc_arena::{Gc, RefLock, unsize};
-use procedures::{Add, Subtract};
 
 use crate::{
     bytecode::{Bytecode, Chunk},
@@ -14,7 +13,9 @@ use crate::{
 
 pub use conditionals::If;
 pub use define::{Define, SetBang};
-pub use procedures::CallCc;
+pub use procedures::{
+    Add, Ascending, CallCc, Descending, Equal, MonotonicAscending, MonotonicDescending, Subtract,
+};
 pub use quote::Quote;
 
 mod conditionals;
@@ -74,6 +75,7 @@ impl Syntax for Lambda {
                 code,
                 ctx.constants(),
                 ctx.lambdas(),
+                ctx.promises(),
                 import_env,
                 labels,
             ))
@@ -109,6 +111,11 @@ impl Module for Base {
             "if",
             "+",
             "-",
+            "=",
+            "<",
+            ">",
+            "<=",
+            ">=",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -135,6 +142,11 @@ impl Module for Base {
             "call-with-current-continuation" | "call/cc" => lambda!(CallCc),
             "+" => lambda!(Add),
             "-" => lambda!(Subtract),
+            "=" => lambda!(Equal),
+            "<" => lambda!(MonotonicAscending),
+            "<=" => lambda!(Ascending),
+            ">" => lambda!(MonotonicDescending),
+            ">=" => lambda!(Descending),
             _ => None,
         }
     }

@@ -234,6 +234,7 @@ pub struct SyntaxContext<'a, 'gc> {
     pub world: &'a World,
     constants: &'a mut Vec<Constant>,
     lambdas: &'a mut Vec<CompiledLambdaPtr<'gc>>,
+    promises: &'a mut Vec<Box<[Bytecode]>>,
 }
 
 impl<'gc> SyntaxContext<'_, 'gc> {
@@ -263,6 +264,10 @@ impl<'gc> SyntaxContext<'_, 'gc> {
 
     pub fn lambdas(&self) -> impl IntoIterator<Item = CompiledLambdaPtr<'gc>> {
         self.lambdas.clone()
+    }
+
+    pub fn promises(&self) -> impl IntoIterator<Item = Box<[Bytecode]>> {
+        self.promises.clone()
     }
 }
 
@@ -823,12 +828,14 @@ impl<'gc> Compiler<'gc> {
         // compile code loop
         let mut constants = Vec::new();
         let mut lambdas = Vec::new();
+        let mut promises = Vec::new();
         let mut context = SyntaxContext {
             mc,
             interner,
             world,
             constants: &mut constants,
             lambdas: &mut lambdas,
+            promises: &mut promises,
         };
         let mut code = vec![];
         let mut labels = FxHashMap::default();
@@ -847,6 +854,7 @@ impl<'gc> Compiler<'gc> {
             code,
             constants,
             lambdas,
+            promises,
             self.default_environment_ptr(),
             labels,
         ))
@@ -1049,7 +1057,7 @@ impl<'gc> Compiler<'gc> {
         worlds: (&mut LocalWorld<'gc>, &World),
         interner: &mut lasso::Rodeo,
         includer: &impl Includer,
-        is_native: bool,
+        from_code: bool,
         library_decls: impl IntoIterator<Item = LibraryDeclaration<'gc>>,
     ) -> Result<(), DefineLibraryError> {
         // The '() module is private from Scheme code
@@ -1059,7 +1067,7 @@ impl<'gc> Compiler<'gc> {
 
         // We reserve all modules name with the first component 'scheme, 'srfi, and 'magus
         let reserved_starts = ["scheme", "srfi", "magus"].map(|s| interner.get_or_intern_static(s));
-        if !is_native
+        if from_code
             && matches!(name.0[0], LibraryNameItem::Identifier(ref id) if reserved_starts.contains(id))
         {
             return Err(DefineLibraryError::ReservedName(name.clone()));

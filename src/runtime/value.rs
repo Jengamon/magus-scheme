@@ -34,6 +34,7 @@ pub enum ValueType {
     Char,
     Vector,
     Bytevector,
+    Record,
     InputPort,
     OutputPort,
     Cons,
@@ -59,6 +60,12 @@ pub enum Value<'gc> {
     Undefined,
     // the return value of set! and definitions (define, define-record-type, define-syntax)
     Void,
+    // TODO Expand supported numbers, so that Number becomes a big num,
+    // and add support for exact rationals and complex numbers
+    // (and polar numbers once support lands in the lexer)
+    // From R7RS report around 1.3.3, that implementation restrictions are discouraged.
+    // We want to support w/e madness a programmer dreams of in the language, but the external program can feel free
+    // to convert the given data into the format they need for their usage.
     Number(i64),
     Inexact(f64),
     // Strings must be easily accessed/edited, so prefer to store a "String"
@@ -70,6 +77,7 @@ pub enum Value<'gc> {
     Char(char),
     Vector(Vector<'gc>),
     Bytevector(Bytevector<'gc>),
+    Record(()),
     // Strings might not need to be in the GC, so
     // onlu allow interned strings for now
     // GcString(GcString<'gc>),
@@ -93,7 +101,8 @@ pub enum Value<'gc> {
     // where the execution result is memoized (so that multiple calls to "force" it will
     // always result in the same value, which is calculated in the environment where it was forced
     // for the first time)
-    // Basically should be just a chunk without the import_env
+    // So this a blob of bytecode that is to be evaluated in a surrounding chunk's environment,
+    // (just a blob and a memoize slot)
     Promise(()),
     // A Scheme-side error
     Error(SchemeErrorPtr<'gc>),
@@ -117,6 +126,7 @@ impl PartialEq for Value<'_> {
                 matches!(other, Value::Vector(Vector { vec: ovp }) if Gc::ptr_eq(*vp, *ovp))
             }
             Value::Bytevector(_) => todo!(),
+            Value::Record(_) => todo!(),
             Value::InputPort(_) => todo!(),
             Value::OutputPort(_) => todo!(),
             Value::Cons(ConsCell {
@@ -173,6 +183,7 @@ impl<'gc> Value<'gc> {
             Value::Char(_) => ValueType::Char,
             Value::Vector(_) => ValueType::Vector,
             Value::Bytevector(_) => ValueType::Bytevector,
+            Value::Record(_) => ValueType::Record,
             Value::InputPort(_) => ValueType::InputPort,
             Value::OutputPort(_) => ValueType::OutputPort,
             Value::Cons(_) => ValueType::Cons,
@@ -409,6 +420,9 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
             Value::Undefined => write!(f, "#<undef>"),
             Value::Void => write!(f, "#<void>"),
             Value::Number(n) => write!(f, "{n}"),
+            Value::Inexact(fp) if fp.is_infinite() && fp.is_sign_negative() => write!(f, "-inf.0"),
+            Value::Inexact(fp) if fp.is_infinite() => write!(f, "+inf.0"),
+            Value::Inexact(fp) if fp.is_nan() => write!(f, "+nan.0"),
             Value::Inexact(fp) => write!(f, "{fp}"),
             Value::String(s) => write!(f, "\"{}\"", s.borrow().replace('\"', "\\\"")),
             Value::Symbol(sym) if is_valid_scheme_identifier(self.resolver.resolve(&sym.0)) => {
@@ -453,6 +467,8 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
                 write!(f, ")")?;
                 Ok(())
             }
+            // Handle with cons printer (or just display name and member names, so we don't have to!!)
+            Value::Record(_) => todo!(),
             Value::InputPort(_) => todo!(),
             Value::OutputPort(_) => todo!(),
             // TODO this needs special handling, b/c a cons might recurse into itself

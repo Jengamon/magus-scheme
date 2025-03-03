@@ -207,6 +207,10 @@ fn execute(
                     let Some(frame_env) = thread.env() else {
                         unreachable!()
                     };
+                    // FIXME make stashed stack environments b/c Value::Environment
+                    // is changing from a stack environment to a collection of import sets
+                    // to *actually* support (scheme eval) (which is basically set specifications
+                    // of imports, then compiling code in that context, building a chunk)
                     if let Some(hnd) = stashed_env {
                         let Some(Value::Environment(env)) =
                             arena.get_value(hnd).map(|vp| *vp.borrow())
@@ -217,7 +221,7 @@ fn execute(
                         // The shenanigan: id want to keep this private to the magus crate
                         frame_env.borrow_mut(&ctx).reparent(Some(chunk.import_env));
                     }
-                    thread.step(ctx, interner, &NullIncluder, &mut fuel);
+                    thread.step(ctx, interner, world, &NullIncluder, &mut fuel);
                     // dbg!(&thread);
                     let sources = [(interner.get_or_intern_static("repl.scm"), source.as_ref())];
                     if let Some(res) = thread.result() {
@@ -250,16 +254,27 @@ fn execute(
     }
 }
 
+fn repl_stuff() -> (Interpreter, World) {
+    let mut interpreter = Interpreter::default();
+    let mut world = World::default();
+    world
+        .insert(
+            LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme base)),
+            stdlib::base::Base,
+        )
+        .expect("failed to define scheme base module");
+    (interpreter, world)
+}
+
 fn execute_file(path: impl AsRef<std::path::Path>) -> anyhow::Result<()> {
     let path = path.as_ref();
     let source = std::fs::read_to_string(path).context("failed to read input file")?;
 
     match compile(&source) {
         Ok(module) => {
-            let mut interpreter = Interpreter::default();
+            let (mut interpreter, world) = repl_stuff();
             let compiler = interpreter.new_compiler();
             let thread = interpreter.new_empty_thread();
-            let world = World::default();
             execute(
                 source,
                 &module,
@@ -300,19 +315,9 @@ fn repl() -> anyhow::Result<()> {
     let mut prompt = MagusPrompt::default();
 
     // compiler setup
-    let mut interpreter = Interpreter::default();
+    let (mut interpreter, world) = repl_stuff();
     let compiler = interpreter.new_compiler();
     let thread = interpreter.new_empty_thread();
-    let world = {
-        let mut world = World::default();
-        world
-            .insert(
-                LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme base)),
-                stdlib::base::Base,
-            )
-            .expect("failed to define scheme base module");
-        world
-    };
     // import (scheme base)
     interpreter.enter(|mc, arena, interner| {
         let Some(compiler) = arena.compiler_mut(&compiler) else {

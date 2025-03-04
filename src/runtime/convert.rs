@@ -20,7 +20,7 @@ impl<'gc> FromValue<'gc> for i64 {
         Self: Sized,
     {
         match value {
-            Value::Number(n) => Some(n),
+            Value::Number(n) => n.to_integer_rounded(),
             _ => None,
         }
     }
@@ -74,10 +74,13 @@ macro_rules! impl_into_value {
         }
     };
 
-    (number infallible $tp:ty) => {
+    (number $tp:ty) => {
         impl<'gc> IntoValue<'gc> for $tp {
-            fn into_value(self, _mc: &Mutation<'gc>) -> Value<'gc> {
-                Value::Number(self as i64)
+            fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {
+                Value::Number(Gc::new(
+                    mc,
+                    $crate::value::Number::from_integer(self).unwrap(),
+                ))
             }
         }
     };
@@ -92,14 +95,14 @@ impl<'gc, T: UserType + 'static> IntoValue<'gc> for T {
         Value::UserStruct(UserStruct::new_static(mc, self))
     }
 }
-impl_into_value!(number infallible u8);
-impl_into_value!(number infallible u16);
-impl_into_value!(number infallible u32);
-impl_into_value!(number infallible i8);
-impl_into_value!(number infallible i16);
-impl_into_value!(number infallible i32);
-impl_into_value!(number infallible isize);
-impl_into_value!(simple i64 => Number);
+impl_into_value!(number u8);
+impl_into_value!(number u16);
+impl_into_value!(number u32);
+impl_into_value!(number i8);
+impl_into_value!(number i16);
+impl_into_value!(number i32);
+impl_into_value!(number isize);
+impl_into_value!(number i64);
 impl_into_value!(simple f64 => Inexact);
 impl_into_value!(simple bool => Bool);
 impl_into_value!(simple char => Char);

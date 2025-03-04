@@ -31,6 +31,7 @@ gc-arena = { git = "https://github.com/kyren/gc-arena", rev = "d18259e33bd360beb
 icu_casemap = "1.5.1"
 lasso = { version = "0.7.2" }
 logos = { version = "0.15" }
+num = { version = "0.4.3", features = ["num-bigint"] }
 paste = "1.0.15"
 # petgraph = "0.6.5"
 rowan = "0.16"
@@ -44,3 +45,4 @@ datatest-stable = "0.3.2"
 datatest_parse = { path = "datatest_parse" }
 divan = "0.1.17"
 rstest = "0.24.0"
+similar = "2.7.0"

@@ -2,6 +2,9 @@ alias compat := compatibility-report
 repl *FLAGS:
     cargo run -p magus-repl -- {{FLAGS}}
 
+repl-release *FLAGS:
+    cargo run -p magus-repl --release -- {{FLAGS}}
+
 clear-locale-data:
     rm -rf locale_data
 

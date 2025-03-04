@@ -25,6 +25,7 @@ Chunk {
                     ),
                 ],
                 lambdas: [],
+                promises: [],
                 import_env: RefLock(
                     Environment {
                         parent: Some(
@@ -101,6 +102,7 @@ Chunk {
                                 ),
                             ],
                             lambdas: [],
+                            promises: [],
                             import_env: RefLock(
                                 Environment {
                                     parent: Some(
@@ -150,6 +152,7 @@ Chunk {
                         },
                     },
                 ],
+                promises: [],
                 import_env: RefLock(
                     Environment {
                         parent: Some(
@@ -226,6 +229,7 @@ Chunk {
                                 ),
                             ],
                             lambdas: [],
+                            promises: [],
                             import_env: RefLock(
                                 Environment {
                                     parent: Some(
@@ -302,6 +306,7 @@ Chunk {
                                             ),
                                         ],
                                         lambdas: [],
+                                        promises: [],
                                         import_env: RefLock(
                                             Environment {
                                                 parent: Some(
@@ -351,6 +356,7 @@ Chunk {
                                     },
                                 },
                             ],
+                            promises: [],
                             import_env: RefLock(
                                 Environment {
                                     parent: Some(
@@ -400,6 +406,7 @@ Chunk {
                         },
                     },
                 ],
+                promises: [],
                 import_env: RefLock(
                     Environment {
                         parent: Some(
@@ -471,6 +478,7 @@ Chunk {
             },
         },
     ],
+    promises: [],
     import_env: RefLock(
         Environment {
             parent: None,

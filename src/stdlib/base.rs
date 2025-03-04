@@ -83,7 +83,7 @@ impl Syntax for Lambda {
         // TODO Optmization opportunity: if the source code for a lambda is the same, we
         // don't actually have to recompile the instructions, we would just be in a
         // different import env (and have change labels to match our labels)
-        dbg!((arg_list, &chunk));
+        // dbg!((arg_list, &chunk));
         let index = ctx.add_lambda(Gc::new(
             ctx,
             lambda::CompiledLambda::new(lambda::Arity::AtLeast(0), chunk?),

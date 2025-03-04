@@ -230,9 +230,30 @@ impl Interpreter {
                 arena.stash.values.remove(key);
                 arena.value_knobs.remove(key);
             }
-        })
+        });
+
+        // Run the GC (if the debt is > 1000 bytes)
+        // TODO Provide a way to configure this?
+        if self.arena.metrics().allocation_debt() > 1_000.0 {
+            self.arena.collect_debt();
+        }
     }
 
+    // Force GC collection
+    pub fn force_collect(&mut self) {
+        self.arena.finish_cycle();
+    }
+
+    // GC observability, so you can terminate a program if it's lost in the sauce
+    pub fn metrics(&self) -> &gc_arena::metrics::Metrics {
+        self.arena.metrics()
+    }
+
+    pub fn collection_phase(&self) -> gc_arena::arena::CollectionPhase {
+        self.arena.collection_phase()
+    }
+
+    // Symbols, and immutable strings tend to be stored here
     pub fn interner(&self) -> &lasso::Rodeo {
         &self.interner
     }

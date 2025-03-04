@@ -18,6 +18,10 @@ use super::{
     userstruct::UserStruct,
 };
 
+mod number;
+
+pub use number::{ComplexNumber, ComplexNumberPtr, Number, NumberPtr};
+
 pub type ValuePtr<'gc> = Gc<'gc, RefLock<Value<'gc>>>;
 
 #[derive(Collect, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -66,7 +70,8 @@ pub enum Value<'gc> {
     // From R7RS report around 1.3.3, that implementation restrictions are discouraged.
     // We want to support w/e madness a programmer dreams of in the language, but the external program can feel free
     // to convert the given data into the format they need for their usage.
-    Number(i64),
+    Number(NumberPtr<'gc>),
+    // TODO Add ComplexNumber and ComplexInexact
     Inexact(f64),
     // Strings must be easily accessed/edited, so prefer to store a "String"
     // over slices or intered strings

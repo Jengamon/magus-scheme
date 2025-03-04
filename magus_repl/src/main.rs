@@ -343,6 +343,31 @@ fn repl() -> anyhow::Result<()> {
 
     loop {
         match readline.read_line(&prompt) {
+            Ok(Signal::Success(cmd))
+                if [".gc", ".env", ".collect"].contains(&cmd.to_lowercase().as_str()) =>
+            {
+                match cmd.to_lowercase().as_str() {
+                    ".env" => {
+                        eprintln!("TO BE WRITTEN")
+                    }
+                    ".gc" => {
+                        let metrics = interpreter.metrics();
+                        println!(
+                            "### GC metrics ###\n\nPhase: {:?}\nTotal GC allocations: {} bytes (unfreed ptrs: {})\nAllocation debt: {}",
+                            interpreter.collection_phase(),
+                            metrics.total_gc_allocation(),
+                            metrics.total_gc_count(),
+                            metrics.allocation_debt(),
+                        )
+                    }
+                    ".collect" => {
+                        interpreter.force_collect();
+                    }
+                    _ => {
+                        unreachable!("Unsupported command")
+                    }
+                }
+            }
             Ok(Signal::Success(input)) => {
                 if input.is_empty() {
                     continue;

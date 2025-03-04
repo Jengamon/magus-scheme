@@ -6,6 +6,7 @@ use magus::{
     lexer::Token,
     library_name, stdlib,
 };
+use similar::{ChangeTag, TextDiff};
 
 #[derive(thiserror::Error, Debug)]
 #[error("error(s) occured in general parse datatest at {0}")]
@@ -73,9 +74,17 @@ fn compile_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()
                 error_text = None;
                 // Compile the source to run the test
                 if !debug_output.is_empty() && debug_output.trim() != chunk_debug.trim() {
-                    return Err(anyhow::anyhow!(
-                        "expected chunk:\n{debug_output}\n\ncompilation result:\n{chunk_debug}"
-                    ));
+                    let diff = TextDiff::from_lines(&debug_output, &chunk_debug);
+                    let mut output = String::new();
+                    for change in diff.iter_all_changes() {
+                        let sign = match change.tag() {
+                            ChangeTag::Delete => "-",
+                            ChangeTag::Insert => "+",
+                            ChangeTag::Equal => " ",
+                        };
+                        output += &format!("{}{}", sign, change);
+                    }
+                    return Err(anyhow::anyhow!(output));
                 } else if !err_output.trim().is_empty() {
                     return Err(anyhow::anyhow!(
                         "expected an error, but compilation succeeded\n\n{}",
@@ -87,9 +96,18 @@ fn compile_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()
                 chunk_text = None;
                 error_text = Some(e.to_string());
                 if !err_output.is_empty() && err_output.trim() != e.to_string().trim() {
-                    return Err(anyhow::anyhow!(
-                        "expected error:\n{err_output}\n\ncompilation result:\n{e}"
-                    ));
+                    let e = e.to_string();
+                    let diff = TextDiff::from_lines(&err_output, &e);
+                    let mut output = String::new();
+                    for change in diff.iter_all_changes() {
+                        let sign = match change.tag() {
+                            ChangeTag::Delete => "-",
+                            ChangeTag::Insert => "+",
+                            ChangeTag::Equal => " ",
+                        };
+                        output += &format!("{}{}", sign, change);
+                    }
+                    return Err(anyhow::anyhow!(output));
                 } else if !debug_output.trim().is_empty() {
                     return Err(anyhow::anyhow!(
                         "expected a chunk, but compilation failed:\n\n{}",

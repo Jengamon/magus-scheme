@@ -62,6 +62,7 @@ mod comparison {
     use crate::{
         Value, ValuePtr,
         runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        value::{Number, NumberPtr},
     };
 
     // From R7RS Report:
@@ -71,7 +72,8 @@ mod comparison {
     // These predicates are required to be transitive.
 
     // Helper datatypes and functions
-    type Num = Either<i64, f64>;
+    // TODO Go from Number to ComplexNumber eventually
+    type Num<'gc> = Either<NumberPtr<'gc>, f64>;
     fn convert(p: ValuePtr<'_>) -> Result<Num, anyhow::Error> {
         Ok(match *p.borrow() {
             Value::Number(i) => Either::Left(i),
@@ -81,7 +83,7 @@ mod comparison {
     }
 
     // If `None`, one of the numbers is a NaN
-    fn compare(lhs: &Num, rhs: &Num) -> Option<std::cmp::Ordering> {
+    fn compare<'gc>(lhs: &Num<'gc>, rhs: &Num<'gc>) -> Option<std::cmp::Ordering> {
         lhs.partial_cmp(rhs)
     }
 
@@ -170,9 +172,10 @@ mod math {
     use crate::{
         Value,
         runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        value::Number,
     };
     use either::Either;
-    use gc_arena::Collect;
+    use gc_arena::{Collect, Gc};
 
     #[derive(Debug, Collect)]
     #[collect(require_static)]
@@ -188,19 +191,16 @@ mod math {
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
-            let mut result = Either::Left(0i64);
+            let mut result = Either::Left(Number::ZERO);
             for arg in args {
                 result = if let Value::Number(n) = *arg.borrow() {
                     match result {
-                        Either::Left(l) => l
-                            .checked_add(n)
-                            .map(Either::Left)
-                            .ok_or(anyhow::anyhow!("integer overflow"))?,
-                        Either::Right(f) => Either::Right(f + n as f64),
+                        Either::Left(l) => Either::Left(&l + &*n),
+                        Either::Right(f) => Either::Right(f + n.to_inexact()),
                     }
                 } else if let Value::Inexact(f) = *arg.borrow() {
                     match result {
-                        Either::Left(l) => Either::Right(l as f64 + f),
+                        Either::Left(l) => Either::Right(l.to_inexact() + f),
                         Either::Right(l) => Either::Right(l + f),
                     }
                 } else {
@@ -209,7 +209,7 @@ mod math {
             }
             Ok(LambdaReturn::Return(vec![
                 match result {
-                    Either::Left(num) => Value::Number(num),
+                    Either::Left(num) => Value::Number(Gc::new(&ctx, num)),
                     Either::Right(flt) => Value::Inexact(flt),
                 }
                 .into_ptr(&ctx),
@@ -233,7 +233,7 @@ mod math {
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
             if args.len() == 1 {
                 let value = match *args[0].borrow() {
-                    Value::Number(num) => Value::Number(-num),
+                    Value::Number(num) => Value::Number(Gc::new(&ctx, -&*num)),
                     Value::Inexact(flt) => Value::Inexact(-flt),
                     _ => Err(anyhow::anyhow!(
                         "cannot negate something that is not a number"
@@ -243,7 +243,7 @@ mod math {
             }
 
             let mut result = match *args[0].borrow() {
-                Value::Number(num) => Either::Left(num),
+                Value::Number(num) => Either::Left((*num).clone()),
                 Value::Inexact(flt) => Either::Right(flt),
                 _ => Err(anyhow::anyhow!(
                     "cannot subtract something that is not a number"
@@ -253,15 +253,12 @@ mod math {
             for arg in args.iter().skip(1) {
                 result = if let Value::Number(n) = *arg.borrow() {
                     match result {
-                        Either::Left(l) => l
-                            .checked_sub(n)
-                            .map(Either::Left)
-                            .ok_or(anyhow::anyhow!("integer overflow"))?,
-                        Either::Right(f) => Either::Right(f - n as f64),
+                        Either::Left(l) => Either::Left(&l - &*n),
+                        Either::Right(f) => Either::Right(f - n.to_inexact()),
                     }
                 } else if let Value::Inexact(f) = *arg.borrow() {
                     match result {
-                        Either::Left(l) => Either::Right(l as f64 - f),
+                        Either::Left(l) => Either::Right(l.to_inexact() - f),
                         Either::Right(l) => Either::Right(l - f),
                     }
                 } else {
@@ -273,7 +270,7 @@ mod math {
 
             Ok(LambdaReturn::Return(vec![
                 match result {
-                    Either::Left(num) => Value::Number(num),
+                    Either::Left(num) => Value::Number(Gc::new(&ctx, num)),
                     Either::Right(flt) => Value::Inexact(flt),
                 }
                 .into_ptr(&ctx),

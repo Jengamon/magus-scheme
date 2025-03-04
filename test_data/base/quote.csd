@@ -19,6 +19,7 @@ Chunk {
         ),
     ],
     lambdas: [],
+    promises: [],
     import_env: RefLock(
         Environment {
             parent: None,

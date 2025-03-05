@@ -2,7 +2,8 @@
 pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, MonotonicDescending};
 pub use control::CallCc;
 pub use list::{Car, Cdr};
-pub use math::{Add, Subtract};
+pub use math::{Add, Mul, Subtract};
+pub use predicates::{IsNull, IsPair};
 
 mod control {
     use crate::{
@@ -109,7 +110,7 @@ mod comparison {
                     let mut is_valid = match compare(&args_converted[0], &args_converted[1]) {
                         Some(ord) => ($cmp)(ord),
                         None => {
-                            return Ok(LambdaReturn::Return(vec![ctx.ctx.false_value]));
+                            return Ok(LambdaReturn::Return(vec![ctx.thread_ctx.false_value]));
                         }
                     };
 
@@ -118,12 +119,12 @@ mod comparison {
                         is_valid &= match compare(&last_elem, &rhs) {
                             Some(ord) => ($cmp)(ord),
                             None => {
-                                return Ok(LambdaReturn::Return(vec![ctx.ctx.false_value]));
+                                return Ok(LambdaReturn::Return(vec![ctx.thread_ctx.false_value]));
                             }
                         };
                         // We can shortcut and return here b/c we know that once we are false we are *always* false
                         if !is_valid {
-                            return Ok(LambdaReturn::Return(vec![ctx.ctx.false_value]));
+                            return Ok(LambdaReturn::Return(vec![ctx.thread_ctx.false_value]));
                         }
                         last_elem = rhs;
                     }
@@ -278,6 +279,48 @@ mod math {
             ]))
         }
     }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Mul;
+
+    impl NativeLambda for Mul {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(0)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let mut result = Either::Left(Number::one());
+            for arg in args {
+                result = if let Value::Number(n) = *arg.borrow() {
+                    match result {
+                        Either::Left(l) => Either::Left(&l * &*n),
+                        Either::Right(f) => Either::Right(f * n.to_inexact()),
+                    }
+                } else if let Value::Inexact(f) = *arg.borrow() {
+                    match result {
+                        Either::Left(l) => Either::Right(l.to_inexact() * f),
+                        Either::Right(l) => Either::Right(l * f),
+                    }
+                } else {
+                    Err(anyhow::anyhow!(
+                        "cannot multiply something that is not a number"
+                    ))?
+                };
+            }
+            Ok(LambdaReturn::Return(vec![
+                match result {
+                    Either::Left(num) => Value::Number(num.into_ptr(&ctx)),
+                    Either::Right(flt) => Value::Inexact(flt),
+                }
+                .into_ptr(&ctx),
+            ]))
+        }
+    }
 }
 
 mod list {
@@ -301,7 +344,7 @@ mod list {
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> LambdaResult<'gc> {
-            if args[0] == ctx.ctx.null_value {
+            if args[0] == ctx.thread_ctx.null_value {
                 return Err(anyhow::anyhow!("cons only operates on a pair"))?;
             }
 
@@ -310,7 +353,7 @@ mod list {
             };
 
             Ok(LambdaReturn::Return(vec![
-                c.car.unwrap_or(ctx.ctx.null_value),
+                c.car.unwrap_or(ctx.thread_ctx.null_value),
             ]))
         }
     }
@@ -328,7 +371,7 @@ mod list {
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> LambdaResult<'gc> {
-            if args[0] == ctx.ctx.null_value {
+            if args[0] == ctx.thread_ctx.null_value {
                 return Err(anyhow::anyhow!("cons only operates on a pair"))?;
             }
 
@@ -337,8 +380,66 @@ mod list {
             };
 
             Ok(LambdaReturn::Return(vec![
-                c.cdr.unwrap_or(ctx.ctx.null_value),
+                c.cdr.unwrap_or(ctx.thread_ctx.null_value),
             ]))
+        }
+    }
+}
+
+mod predicates {
+    //! Scheme typechecking stuff
+    use gc_arena::{Collect, Gc};
+
+    use crate::{
+        Value,
+        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+    };
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IsPair;
+
+    impl NativeLambda for IsPair {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let val = match *args[0].borrow() {
+                Value::Cons(_) if Gc::ptr_eq(args[0], ctx.thread_ctx.null_value) => false,
+                Value::Cons(_) => true,
+                _ => false,
+            };
+
+            Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IsNull;
+
+    impl NativeLambda for IsNull {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            // TODO Do we allow the degenerate case of a cons cell with (None None)?
+            // It does mean that we can just do a pointer comparison...
+            //
+            // I think no, for the stdlib, the only pair considered to be null is the thread null value
+            let val = matches!(*args[0].borrow(), Value::Cons(_) if Gc::ptr_eq(args[0], ctx.thread_ctx.null_value));
+
+            Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
         }
     }
 }

@@ -836,7 +836,7 @@ impl<'gc> Thread<'gc> {
                     let args = frame.args.as_ref();
                     let lctx = NativeLambdaContext {
                         self_ptr: native,
-                        ctx,
+                        thread_ctx: ctx,
                         world,
                         stack: &self.stack[frame.bottom..],
                         interner,
@@ -848,9 +848,9 @@ impl<'gc> Thread<'gc> {
                     };
                     let res = if let Some(err) = self.error {
                         // Let native code interfere with errors
-                        native.borrow_mut(lctx.ctx.mc).error(lctx, args, err)
+                        native.borrow_mut(lctx.thread_ctx.mc).error(lctx, args, err)
                     } else {
-                        native.borrow_mut(lctx.ctx.mc).run(lctx, args)
+                        native.borrow_mut(lctx.thread_ctx.mc).run(lctx, args)
                     };
                     // rebind frame to be mutable
                     let Some(frame) = self.frames.last_mut() else {

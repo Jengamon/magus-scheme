@@ -105,6 +105,10 @@ impl Number {
         }
     }
 
+    pub fn one() -> Number {
+        Number::Integer(BigInt::new(Sign::Plus, vec![1]))
+    }
+
     // helper to convert down to Integer variant if Rational is over 1
     fn simplify(r: BigRational) -> Number {
         static ONE: LazyLock<BigInt> = LazyLock::new(|| BigInt::new(Sign::Plus, vec![1]));
@@ -274,6 +278,45 @@ impl std::ops::Sub<&Number> for f64 {
     type Output = f64;
     fn sub(self, rhs: &Number) -> Self::Output {
         self - rhs.to_inexact()
+    }
+}
+// TODO Make these op implementations a macro
+impl std::ops::Mul<f64> for Number {
+    type Output = f64;
+    fn mul(self, rhs: f64) -> Self::Output {
+        self.to_inexact() * rhs
+    }
+}
+impl std::ops::Mul<Number> for f64 {
+    type Output = f64;
+    fn mul(self, rhs: Number) -> Self::Output {
+        self * rhs.to_inexact()
+    }
+}
+impl std::ops::Mul for &Number {
+    type Output = Number;
+    fn mul(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Number::Integer(i), Number::Integer(i2)) => Number::Integer(i * i2),
+            (Number::Rational(r), Number::Integer(i))
+            | (Number::Integer(i), Number::Rational(r)) => {
+                // mulition is reflexive, so we can do
+                Number::simplify(r * BigRational::from_integer(i.clone()))
+            }
+            (Number::Rational(r), Number::Rational(r2)) => Number::simplify(r * r2),
+        }
+    }
+}
+impl std::ops::Mul<f64> for &Number {
+    type Output = f64;
+    fn mul(self, rhs: f64) -> Self::Output {
+        self.to_inexact() * rhs
+    }
+}
+impl std::ops::Mul<&Number> for f64 {
+    type Output = f64;
+    fn mul(self, rhs: &Number) -> Self::Output {
+        self * rhs.to_inexact()
     }
 }
 

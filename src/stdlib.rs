@@ -1,6 +1,9 @@
 use gc_arena::Collect;
 
-use crate::compiler::ProgramPtr;
+use crate::{
+    compiler::{ProgramData, ProgramPtr},
+    runtime::lambda::Arity,
+};
 
 pub mod base;
 pub mod srfi;
@@ -18,11 +21,74 @@ enum Formals {
     },
 }
 
+impl Formals {
+    // Arity calcuation (when used for `lambda`)
+    pub fn arity(&self) -> Arity {
+        match self {
+            Self::Empty => Arity::Exact(0),
+            Self::Single(_) => Arity::AtLeast(0),
+            Self::List(l) => Arity::Exact(l.len()),
+            Self::Dotted { pre_dot, .. } => Arity::AtLeast(pre_dot.len()),
+        }
+    }
+
+    pub fn non_rest_params(&self) -> impl IntoIterator<Item = lasso::Spur> {
+        match self {
+            Self::Empty | Self::Single(_) => vec![],
+            Self::List(l) => l.to_vec(),
+            Self::Dotted { pre_dot, .. } => pre_dot.to_vec(),
+        }
+    }
+
+    pub fn rest_param(&self) -> Option<lasso::Spur> {
+        match self {
+            Self::Single(s) => Some(*s),
+            Self::Dotted { dot, .. } => Some(*dot),
+            _ => None,
+        }
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
-enum FormalsError {}
+#[error("not a formals list")]
+struct NotFormals;
 
 impl Formals {
-    pub fn convert(ptr: ProgramPtr<'_>, interner: &mut lasso::Rodeo) -> Result<Self, FormalsError> {
-        todo!()
+    pub fn convert(ptr: ProgramPtr<'_>, interner: &mut lasso::Rodeo) -> Result<Self, NotFormals> {
+        match &ptr.data {
+            ProgramData::EmptyList => Ok(Self::Empty),
+            ProgramData::Symbol(s) => Ok(Self::Single(*s)),
+            ProgramData::List { head, body } => {
+                // convert head to a symbol, and list away!
+                let mut list = vec![head.into_symbol(interner).ok_or(NotFormals)?];
+                for p in body {
+                    match &p.data {
+                        ProgramData::Symbol(s) => {
+                            list.push(*s);
+                        }
+                        _ => return Err(NotFormals),
+                    }
+                }
+                Ok(Self::List(list.into()))
+            }
+            ProgramData::DottedList { pre_dot, dot } => {
+                let pre_dot = pre_dot
+                    .iter()
+                    .map(|p| match &p.data {
+                        ProgramData::Symbol(s) => Ok(*s),
+                        _ => Err(NotFormals),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let dot = match &dot.data {
+                    ProgramData::Symbol(s) => Ok(*s),
+                    _ => Err(NotFormals),
+                }?;
+                Ok(Self::Dotted {
+                    pre_dot: pre_dot.into(),
+                    dot,
+                })
+            }
+            _ => Err(NotFormals),
+        }
     }
 }

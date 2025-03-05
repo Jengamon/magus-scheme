@@ -1,7 +1,7 @@
 use core::fmt;
 use std::sync::LazyLock;
 
-use gc_arena::{Collect, Gc};
+use gc_arena::{Collect, Gc, Mutation};
 use num::bigint::Sign;
 use num::{BigInt, BigRational, Complex, Integer, ToPrimitive};
 
@@ -43,6 +43,10 @@ pub enum Number {
 // want, but remain copy)
 impl Number {
     pub const ZERO: Number = Number::Integer(BigInt::ZERO);
+
+    pub fn into_ptr<'gc>(self, mc: &Mutation<'gc>) -> NumberPtr<'gc> {
+        Gc::new(mc, self)
+    }
 
     pub fn from_integer(i: impl ToPrimitive + Integer) -> Option<Self> {
         Some(Number::Integer(Self::i64_to_bigint(i.to_i64()?)))

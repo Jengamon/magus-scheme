@@ -1,0 +1,6 @@
+---
+---
+(import (only (scheme base) define lambda car))
+(define head (lambda in (car in)))
+; this shouldn't cause a panic (as it did)
+(head)

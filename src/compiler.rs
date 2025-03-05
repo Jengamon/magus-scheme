@@ -324,6 +324,19 @@ pub trait Syntax: std::fmt::Debug {
         import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
     ) -> anyhow::Result<SyntaxReturn<'gc>>;
+
+    /// Registers this syntax item as a definition
+    fn is_definition(&self) -> bool {
+        false
+    }
+
+    /// Registers this syntax item as a container
+    ///
+    /// Affects how definitions are registered. A container syntax is considered a
+    /// definition if all of it's components are definitions (or containers of only definitions)
+    fn is_container(&self) -> bool {
+        false
+    }
 }
 // TODO we are very stringent, and might relax this in the future...
 pub type ArcSyntax = Arc<dyn Syntax + Sync + Send + 'static>;
@@ -1090,23 +1103,25 @@ impl<'gc> Compiler<'gc> {
     }
 
     /// Checks if an expression is considered a definition by Scheme
-    pub fn is_definition(interner: &mut lasso::Rodeo, program: ProgramPtr<'gc>) -> bool {
-        let define_head_symbols: [_; 4] = [
-            "define",
-            "define-syntax",
-            "define-values",
-            "define-record-type",
-        ]
-        .map(|s| interner.get_or_intern_static(s));
-        let begin = interner.get_or_intern_static("begin");
+    pub fn is_definition(&self, interner: &mut lasso::Rodeo, program: ProgramPtr<'gc>) -> bool {
+        let definition_symbols = self
+            .syntax_items
+            .iter()
+            .filter_map(|(k, syn)| syn.is_definition().then_some(*k))
+            .collect::<fxhash::FxHashSet<_>>();
+        let container_symbols = self
+            .syntax_items
+            .iter()
+            .filter_map(|(k, syn)| syn.is_container().then_some(*k))
+            .collect::<fxhash::FxHashSet<_>>();
 
         match &program.data {
             ProgramData::List { head, body } => {
                 matches!(head, ListHead::Program(p) if match p.data {
-                    ProgramData::Symbol(s) if define_head_symbols.contains(&s) => true,
+                    ProgramData::Symbol(s) if definition_symbols.contains(&s) => true,
                     ProgramData::Symbol(s)
-                        if s == begin
-                            && body.iter().all(|bp| Self::is_definition(interner, *bp)) =>
+                        if container_symbols.contains(&s)
+                            && body.iter().all(|bp| self.is_definition(interner, *bp)) =>
                     {
                         true
                     }

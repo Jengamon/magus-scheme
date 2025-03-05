@@ -12,7 +12,7 @@ Chunk {
     ],
     lambdas: [
         CompiledLambda {
-            arity: AtLeast(
+            arity: Exact(
                 0,
             ),
             chunk: Chunk {
@@ -75,8 +75,8 @@ Chunk {
             },
         },
         CompiledLambda {
-            arity: AtLeast(
-                0,
+            arity: Exact(
+                1,
             ),
             chunk: Chunk {
                 constants: [
@@ -89,7 +89,7 @@ Chunk {
                 ],
                 lambdas: [
                     CompiledLambda {
-                        arity: AtLeast(
+                        arity: Exact(
                             0,
                         ),
                         chunk: Chunk {
@@ -177,6 +177,12 @@ Chunk {
                     },
                 ),
                 code: [
+                    FetchArg {
+                        index: 0,
+                    },
+                    Define {
+                        symbol: Spur(9),
+                    },
                     Reference {
                         symbol: Spur(9),
                     },
@@ -191,7 +197,7 @@ Chunk {
                     },
                 ],
                 labels: {
-                    0: SourceData {
+                    2: SourceData {
                         source_id: Spur(3),
                         range: (
                             69,
@@ -202,8 +208,8 @@ Chunk {
             },
         },
         CompiledLambda {
-            arity: AtLeast(
-                0,
+            arity: Exact(
+                3,
             ),
             chunk: Chunk {
                 constants: [
@@ -216,7 +222,7 @@ Chunk {
                 ],
                 lambdas: [
                     CompiledLambda {
-                        arity: AtLeast(
+                        arity: Exact(
                             0,
                         ),
                         chunk: Chunk {
@@ -279,8 +285,8 @@ Chunk {
                         },
                     },
                     CompiledLambda {
-                        arity: AtLeast(
-                            0,
+                        arity: Exact(
+                            1,
                         ),
                         chunk: Chunk {
                             constants: [
@@ -293,7 +299,7 @@ Chunk {
                             ],
                             lambdas: [
                                 CompiledLambda {
-                                    arity: AtLeast(
+                                    arity: Exact(
                                         0,
                                     ),
                                     chunk: Chunk {
@@ -381,6 +387,12 @@ Chunk {
                                 },
                             ),
                             code: [
+                                FetchArg {
+                                    index: 0,
+                                },
+                                Define {
+                                    symbol: Spur(9),
+                                },
                                 Reference {
                                     symbol: Spur(9),
                                 },
@@ -395,7 +407,7 @@ Chunk {
                                 },
                             ],
                             labels: {
-                                0: SourceData {
+                                2: SourceData {
                                     source_id: Spur(3),
                                     range: (
                                         69,
@@ -431,6 +443,24 @@ Chunk {
                     },
                 ),
                 code: [
+                    FetchArg {
+                        index: 0,
+                    },
+                    Define {
+                        symbol: Spur(9),
+                    },
+                    FetchArg {
+                        index: 1,
+                    },
+                    Define {
+                        symbol: Spur(10),
+                    },
+                    FetchArg {
+                        index: 2,
+                    },
+                    Define {
+                        symbol: Spur(11),
+                    },
                     Reference {
                         symbol: Spur(13),
                     },
@@ -460,14 +490,14 @@ Chunk {
                     },
                 ],
                 labels: {
-                    0: SourceData {
+                    6: SourceData {
                         source_id: Spur(3),
                         range: (
                             157,
                             177,
                         ),
                     },
-                    8: SourceData {
+                    14: SourceData {
                         source_id: Spur(3),
                         range: (
                             178,

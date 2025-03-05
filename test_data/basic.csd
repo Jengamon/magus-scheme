@@ -11,7 +11,7 @@ Chunk {
     ],
     lambdas: [
         CompiledLambda {
-            arity: AtLeast(
+            arity: Exact(
                 0,
             ),
             chunk: Chunk {

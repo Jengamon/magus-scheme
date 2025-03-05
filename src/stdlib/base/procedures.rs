@@ -1,6 +1,7 @@
 // TODO Split, if this file gets too large, into separate files
 pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, MonotonicDescending};
 pub use control::CallCc;
+pub use list::{Car, Cdr};
 pub use math::{Add, Subtract};
 
 mod control {
@@ -62,7 +63,7 @@ mod comparison {
     use crate::{
         Value, ValuePtr,
         runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
-        value::{Number, NumberPtr},
+        value::NumberPtr,
     };
 
     // From R7RS Report:
@@ -209,7 +210,7 @@ mod math {
             }
             Ok(LambdaReturn::Return(vec![
                 match result {
-                    Either::Left(num) => Value::Number(Gc::new(&ctx, num)),
+                    Either::Left(num) => Value::Number(num.into_ptr(&ctx)),
                     Either::Right(flt) => Value::Inexact(flt),
                 }
                 .into_ptr(&ctx),
@@ -270,10 +271,73 @@ mod math {
 
             Ok(LambdaReturn::Return(vec![
                 match result {
-                    Either::Left(num) => Value::Number(Gc::new(&ctx, num)),
+                    Either::Left(num) => Value::Number(num.into_ptr(&ctx)),
                     Either::Right(flt) => Value::Inexact(flt),
                 }
                 .into_ptr(&ctx),
+            ]))
+        }
+    }
+}
+
+mod list {
+    use gc_arena::Collect;
+
+    use crate::{
+        Value, ValuePtr,
+        runtime::lambda::{Arity, LambdaResult, LambdaReturn, NativeLambda, NativeLambdaContext},
+    };
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Car;
+    impl NativeLambda for Car {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[ValuePtr<'gc>],
+        ) -> LambdaResult<'gc> {
+            if args[0] == ctx.ctx.null_value {
+                return Err(anyhow::anyhow!("cons only operates on a pair"))?;
+            }
+
+            let Value::Cons(c) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!("cons only operates on a pair"))?;
+            };
+
+            Ok(LambdaReturn::Return(vec![
+                c.car.unwrap_or(ctx.ctx.null_value),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Cdr;
+    impl NativeLambda for Cdr {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[ValuePtr<'gc>],
+        ) -> LambdaResult<'gc> {
+            if args[0] == ctx.ctx.null_value {
+                return Err(anyhow::anyhow!("cons only operates on a pair"))?;
+            }
+
+            let Value::Cons(c) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!("cons only operates on a pair"))?;
+            };
+
+            Ok(LambdaReturn::Return(vec![
+                c.cdr.unwrap_or(ctx.ctx.null_value),
             ]))
         }
     }

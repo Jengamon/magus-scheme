@@ -362,7 +362,11 @@ impl<'gc> Thread<'gc> {
     /// and adjusting the execution stack.
     ///
     /// This should be the last thing done on a step before looping back to fuelcheck.
-    fn handle_frame_end(&mut self, ctx: &Context<'gc>) {
+    ///
+    /// `should_pop` can be set to false in the case of tail calls
+    // TODO Add an Option return value to indicate the frame that should be clobbered by tail calls (
+    // once dynamic_wind handlers enter the fray)
+    fn handle_frame_end(&mut self, ctx: &Context<'gc>, should_pop: bool) {
         let Some(frame) = self.frames.last_mut() else {
             unreachable!("[ICE] no frame present");
         };
@@ -395,7 +399,10 @@ impl<'gc> Thread<'gc> {
         // Native lambdas support this logic natively (if their Return vec len == 1, that value is unwrapped,
         // if 0, return Void, otherwise returns Values)
         let ret_val = self.stack.pop();
-        self.stack.drain(bottom..);
+        // drain any extra value on stack
+        if self.stack.len() >= bottom {
+            self.stack.drain(bottom..);
+        }
         if let Some(ret) = ret_val {
             self.stack.push(ret);
         } else {
@@ -403,7 +410,9 @@ impl<'gc> Thread<'gc> {
         }
         // FIXME Remember to do the same for native lambdas (so do it as a function)
         // TODO If dynamic-wind is present. call the after
-        self.frames.pop();
+        if should_pop {
+            self.frames.pop();
+        }
     }
 
     fn make_backtrace(frames: &[ThreadFrame<'gc>]) -> Vec<StackFrame<'gc>> {
@@ -450,14 +459,14 @@ impl<'gc> Thread<'gc> {
             args: Box::from(args.as_slice()),
             exception: None,
             env: Gc::new(
-                &ctx,
-                RefLock::new(StackEnvironment::new(&ctx, Self::current_env(&self.frames))),
+                ctx,
+                RefLock::new(StackEnvironment::new(ctx, Self::current_env(&self.frames))),
             ),
         };
 
         if is_tail {
             // Exiting the current frame
-            self.handle_frame_end(ctx);
+            self.handle_frame_end(ctx, false);
             if let Some(frame) = self.frames.last_mut() {
                 *frame = new_frame;
                 return Ok(());
@@ -563,7 +572,7 @@ impl<'gc> Thread<'gc> {
                 Execution::Bytecode { chunk, pc, arity } => {
                     // If framepointer is oob, then that means execution of this frame is finished
                     if chunk.code.len() <= *pc {
-                        self.handle_frame_end(&ctx);
+                        self.handle_frame_end(&ctx, true);
                         continue;
                     }
                     macro_rules! advance_to_next_inst {
@@ -580,6 +589,7 @@ impl<'gc> Thread<'gc> {
                     }
                     // The core of execution
                     let inst = chunk.code[*pc];
+                    // eprintln!("EXEC >> {inst:?}");
                     fuel.consume(inst.cost());
                     match inst {
                         Bytecode::PushNull => {
@@ -722,11 +732,11 @@ impl<'gc> Thread<'gc> {
                                         &ctx,
                                         l,
                                         args,
-                                        pc + match code[(pc + 1).min(code.len() - 1)] {
+                                        pc + match code[pc] {
                                             // make sure true branches can also be properly registered as tail calls
                                             // because a jump unconditionally executes, the actual total movement is
                                             // jump + 1 plus the + 1 base from this instruction
-                                            Bytecode::Jump { jump } => jump + 2,
+                                            Bytecode::Jump { jump } => jump + 1,
                                             _ => 1,
                                         } >= code.len(),
                                     ) {
@@ -857,7 +867,7 @@ impl<'gc> Thread<'gc> {
                                 self.stack
                                     .push(Value::Values(Gc::new(&ctx, vals)).into_ptr(&ctx));
                             }
-                            self.handle_frame_end(&ctx);
+                            self.handle_frame_end(&ctx, true);
                         }
                         Ok(LambdaReturn::Continue { cont, args }) => todo!(),
                         Ok(LambdaReturn::Raise {
@@ -877,13 +887,13 @@ impl<'gc> Thread<'gc> {
                                         .resolve_into(interner.clone(), ctx.null_value)
                                 ));
                             }
-                            self.handle_frame_end(&ctx);
+                            self.handle_frame_end(&ctx, true);
                         }
                         Ok(LambdaReturn::Propagate(err)) => {
                             // TODO Check if same error
                             // If not, store the current error in the new error irritants
                             self.error = Some(err);
-                            self.handle_frame_end(&ctx);
+                            self.handle_frame_end(&ctx, true);
                         }
                         Ok(LambdaReturn::Call {
                             lambda,
@@ -912,7 +922,7 @@ impl<'gc> Thread<'gc> {
                             };
                             // Set dynamic wind
                             self.frames.last_mut().unwrap().dynamic_wind = dynamic_wind;
-                            self.handle_frame_end(&ctx);
+                            self.handle_frame_end(&ctx, true);
                         }
                         Ok(LambdaReturn::SetExceptionHandler(handler)) => {
                             frame.handler = Some(handler);
@@ -929,7 +939,7 @@ impl<'gc> Thread<'gc> {
                                     make_error!(SchemeErrorType::Rust(std::rc::Rc::new(e)));
                                 }
                             }
-                            self.handle_frame_end(&ctx);
+                            self.handle_frame_end(&ctx, true);
                         }
                     }
                 }

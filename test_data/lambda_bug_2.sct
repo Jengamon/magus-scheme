@@ -1,0 +1,8 @@
+---
+---
+(import (only (scheme base) define lambda car cdr))
+(define head (lambda in (car in)))
+(define tail (lambda in (cdr in)))
+; the result of this should be "3", not "(5)" as it was
+; accidentally clobbering the frame below
+(head 3 (tail 4 5))

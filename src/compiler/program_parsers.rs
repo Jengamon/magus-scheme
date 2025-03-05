@@ -324,7 +324,70 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
                 let import = self.interner.get_or_intern_static("import");
                 let define_library = self.interner.get_or_intern_static("define-library");
                 let mut datum = list.datum();
-                if !list.has_dot() {
+                if let Some(dot) = list.dot() {
+                    // The list has a dot, so interpret as a dotted list
+                    // we *don't* have to handle the head separately
+                    if !list.is_valid() {
+                        // cuz GAst can handle syntactically invalid programs listwise
+                        // make sure the list is actually valid (which means we can assume that after a dot, only 1 datum exists)
+                        self.ptr = Some(Err(GAstProgramError::Unparseable(
+                            list.syntax().text_range(),
+                        )));
+                        return;
+                    }
+
+                    let dot_range = dot.text_range();
+
+                    let mut dot_encountered = false;
+                    let mut pre_dot = vec![];
+                    let mut post_dot = None;
+                    loop {
+                        let Some(data) = datum.next() else {
+                            if dot_encountered {
+                                break;
+                            } else {
+                                self.ptr = Some(Err(GAstProgramError::Unparseable(
+                                    list.syntax().text_range(),
+                                )));
+                                return;
+                            }
+                        };
+
+                        dot_encountered |= data.syntax().text_range().start() > dot_range.start();
+
+                        self.visit_datum(&data);
+                        match self.ptr.take() {
+                            Some(Ok(p)) => {
+                                if dot_encountered {
+                                    if post_dot.is_some() {
+                                        unreachable!("is_valid should check for this");
+                                    }
+
+                                    post_dot = Some(p);
+                                } else {
+                                    pre_dot.push(p);
+                                }
+                            }
+                            None | Some(Err(_)) => {
+                                self.ptr = Some(Err(GAstProgramError::Unparseable(
+                                    list.syntax().text_range(),
+                                )));
+                                return;
+                            }
+                        }
+                    }
+
+                    self.ptr = Some(Ok(Gc::new(
+                        self.mc,
+                        Program {
+                            data: ProgramData::DottedList {
+                                pre_dot,
+                                dot: post_dot.unwrap(),
+                            },
+                            source: source_data!(self, list),
+                        },
+                    )));
+                } else {
                     let Some(head) = datum.next() else {
                         self.ptr = Some(Ok(Gc::new(
                             self.mc,
@@ -380,18 +443,6 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
                             self.ptr = Some(Err(e));
                         }
                     }
-                } else {
-                    // The list has a dot, so interpret as a dotted list
-                    // we *don't* have to handle the head separately
-                    if !list.is_valid() {
-                        // cuz GAst can handle syntactically invalid programs listwise
-                        // make sure the list is actually valid (which means we can assume that after a dot, only 1 datum exists)
-                        self.ptr = Some(Err(GAstProgramError::Unparseable(
-                            list.syntax().text_range(),
-                        )));
-                        return;
-                    }
-                    todo!()
                 }
             }
         }

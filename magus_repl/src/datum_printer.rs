@@ -175,13 +175,18 @@ impl<'a, 'f> DatumPrintImpl<'a, 'f> {
         self.align += alignment;
         let use_newlines = newline_operand1 && list.datum().count() > 10;
         self.visit_datum(&operator);
-        for operand in list.datum().skip(1) {
+        let list_len = list.datum().count();
+        for (idx, operand) in list.datum().skip(1).enumerate() {
             let preserve_newline = Self::preceded_by_newline(operand.syntax());
             if use_newlines || preserve_newline {
                 self.write_new_line()
             } else {
                 write!(self.fmt, " ")
             }?;
+            // + 2 to factor in the skipping of the first element
+            if list.dot().is_some_and(|_| idx + 2 == list_len) {
+                write!(self.fmt, ". ")?;
+            }
             self.visit_datum(&operand);
         }
         if use_newlines {

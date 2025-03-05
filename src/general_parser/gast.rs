@@ -617,28 +617,29 @@ datum_as_type!(token as_bool for Boolean from BOOLEAN);
 pub struct List(MagusSyntaxNode);
 impl List {
     /// Get the head element
+    #[inline]
     pub fn head(&self) -> Option<Datum> {
         self.datum().next()
     }
 
     /// Get the tail elements
+    #[inline]
     pub fn tail(&self) -> impl Iterator<Item = Datum> + '_ {
         self.datum().skip(1)
     }
 
-    /// Looks for a dot token within (without checking for valid structure)
-    pub fn has_dot(&self) -> bool {
-        self.0
-            .children_with_tokens()
-            .any(|elem| matches!(elem, MagusSyntaxElement::Token(tok) if tok.kind() == DOT))
+    /// Gets the dot token (if any)
+    #[inline]
+    pub fn dot(&self) -> Option<MagusSyntaxToken> {
+        self.0.children_with_tokens().find_map(|elem| match elem {
+            MagusSyntaxElement::Token(tok) if tok.kind() == DOT => Some(tok),
+            _ => None,
+        })
     }
 
     /// Checks if a list is syntactically valid.
     pub fn is_valid(&self) -> bool {
-        let dot_token = self.0.children_with_tokens().find_map(|elem| match elem {
-            MagusSyntaxElement::Token(tok) if tok.kind() == DOT => Some(tok),
-            _ => None,
-        });
+        let dot_token = self.dot();
 
         match dot_token {
             Some(tok) => {

@@ -123,7 +123,7 @@ impl PartialEq for Value<'_> {
             Value::Void => matches!(other, Value::Void),
             Value::Number(n) => matches!(other, Value::Number(on) if on == n),
             Value::Inexact(i) => matches!(other, Value::Inexact(oi) if oi == i),
-            Value::String(s) => matches!(other, Value::String(os) if os == s),
+            Value::String(s) => matches!(other, Value::String(os) if Gc::ptr_eq(*s, *os)),
             Value::Symbol(sym) => matches!(other, Value::Symbol(osym) if osym == sym),
             Value::Bool(b) => matches!(other, Value::Bool(ob) if ob == b),
             Value::Char(c) => matches!(other, Value::Char(oc) if oc == c),
@@ -152,6 +152,8 @@ impl PartialEq for Value<'_> {
             }) => {
                 matches!(other, Value::Cons(ConsCell { car: Some(ocar), cdr: None}) if Gc::ptr_eq(*car, *ocar) )
             }
+            // *technically* is wrong, but as long as there is no way to manufacture ConsCell w/ (None None),
+            // this is essentially correct
             Value::Cons(ConsCell {
                 car: None,
                 cdr: None,

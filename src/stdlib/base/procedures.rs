@@ -1,10 +1,68 @@
 // TODO Split, if this file gets too large, into separate files
 pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, MonotonicDescending};
 pub use control::CallCc;
+pub use equality::{IsEq, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
 pub use math::{Add, Mul, Subtract};
 pub use predicates::{IsNull, IsPair};
 
+mod equality {
+    //! defines eq? and eqv?
+    use gc_arena::{Collect, Gc};
+
+    use crate::{
+        Value,
+        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+    };
+
+    #[derive(Collect, Debug)]
+    #[collect(require_static)]
+    pub struct IsEq;
+
+    impl NativeLambda for IsEq {
+        fn arity(&self) -> Arity {
+            Arity::Exact(2)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            Ok(LambdaReturn::Return(vec![
+                Value::Bool(match *args[0].borrow() {
+                    // we have to override pointer equality for booleans and symbols
+                    Value::Bool(b) => matches!(*args[1].borrow(), Value::Bool(ob) if b == ob),
+                    Value::Symbol(sym) => {
+                        matches!(*args[1].borrow(), Value::Symbol(osym) if sym == osym)
+                    }
+                    _ => Gc::ptr_eq(args[0], args[1]),
+                })
+                .into_ptr(&ctx),
+            ]))
+        }
+    }
+
+    #[derive(Collect, Debug)]
+    #[collect(require_static)]
+    pub struct IsEqv;
+
+    impl NativeLambda for IsEqv {
+        fn arity(&self) -> Arity {
+            Arity::Exact(2)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            Ok(LambdaReturn::Return(vec![
+                Value::Bool(args[0] == args[1]).into_ptr(&ctx),
+            ]))
+        }
+    }
+}
 mod control {
     use crate::{
         Value,

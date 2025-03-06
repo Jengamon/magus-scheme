@@ -279,6 +279,8 @@ struct ConsPrinter<'a, 'gc, K: lasso::Resolver> {
     encountered: Rc<RefCell<Vec<Value<'gc>>>>,
 }
 
+// TODO Change this to an implementation of Brent's algorithm
+// and DFS (as it currently is)
 impl<K: lasso::Resolver> fmt::Display for ConsPrinter<'_, '_, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // recurse into the value, keeping track of encountered cons cells
@@ -323,12 +325,17 @@ impl<K: lasso::Resolver> fmt::Display for ConsPrinter<'_, '_, K> {
                     Some(Value::Cons(cons)) => {
                         write!(
                             f,
-                            "({})",
+                            "({}){}",
                             ConsPrinter {
                                 cons: ConsInner::Cons(&cons),
                                 resolver: Rc::clone(&self.resolver),
                                 null_ptr: self.null_ptr,
                                 encountered: Rc::clone(&self.encountered)
+                            },
+                            if cons.cdr != Some(self.null_ptr) {
+                                " "
+                            } else {
+                                ""
                             }
                         )?;
                     }

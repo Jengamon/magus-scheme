@@ -360,9 +360,9 @@ pub fn general_parse(source: impl AsRef<str>) -> GAst {
                 unreachable!("should not be produced outside of a nested comment")
             }
             Ok(Token::Syntax(SyntaxToken::IntralineWhitespace)) => {
-                // read in as whitespace, which is only an error for 2 constructs: abbreviations and labeled
-                if in_abbreviation(&checkpoints) || in_labeled(&checkpoints) {
-                    // the two constructs expect the start of a datum
+                // read in as whitespace, which is only an error for labeled
+                if in_labeled(&checkpoints) {
+                    // expect the start of a datum
                     errors.push(GeneralParserError::ExpectedToken {
                         expected: Box::from(DATUM_EXPECTED_TOKENS),
                         found: TokenKind::IntralineWhitespace,

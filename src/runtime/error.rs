@@ -57,6 +57,9 @@ pub enum SchemeErrorType<'gc> {
     /// Attempted to define in a frozen environment
     #[error("cannot define in a frozen environment")]
     FrozenDefine,
+    /// Attempted to define a non-existent name
+    #[error("set! could not find name `{0}` in environment")]
+    NoName(Box<str>),
     /// Lambda exceptions (runtime errors)
     #[error("lambda exception: {0}")]
     LambdaException(

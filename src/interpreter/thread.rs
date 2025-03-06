@@ -815,7 +815,9 @@ impl<'gc> Thread<'gc> {
                                 .rebind(&ctx, symbol, value, interner)
                                 .is_err()
                             {
-                                make_error!(SchemeErrorType::FrozenDefine);
+                                make_error!(SchemeErrorType::NoName(Box::from(
+                                    interner.resolve(&symbol)
+                                )));
                                 continue;
                             }
 

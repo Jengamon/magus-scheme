@@ -2,17 +2,14 @@ use gc_arena::Gc;
 
 use crate::{
     bytecode::Bytecode,
-    compiler::{Compiler, ProgramPtr, Syntax, SyntaxContext, SyntaxReturn},
+    compiler::{Compiler, ProgramData, ProgramPtr, Syntax, SyntaxContext, SyntaxReturn},
     environment::StackEnvironmentPtr,
     runtime::lambda::CompiledLambda,
     stdlib::{Formals, base::lambda_helper},
 };
 
 #[derive(Debug)]
-pub struct Define {
-    /// What symbol is this being defined under?
-    pub(crate) self_sym: lasso::Spur,
-}
+pub struct Define;
 
 impl Syntax for Define {
     fn evaluate<'gc>(
@@ -39,10 +36,9 @@ impl Syntax for Define {
                     ));
                 }
 
-                // Save peeps from themselves (im looking at you, me) and don't
-                // allow overriding 1 symbol (generally the symbol that defines this macro)
-                if name == self.self_sym {
-                    return Err(anyhow::anyhow!("cannot define definition macro"));
+                // Prevent defining macros
+                if compiler.get_macro(name).is_some() {
+                    return Err(anyhow::anyhow!("cannot define macro"));
                 }
 
                 let Some(value) = args.get(1).cloned() else {
@@ -67,10 +63,9 @@ impl Syntax for Define {
                 // rejig the formals
                 let name = *syms.first().unwrap();
 
-                // Save peeps from themselves (im looking at you, me) and don't
-                // allow overriding 1 symbol (generally the symbol that defines this macro)
-                if name == self.self_sym {
-                    return Err(anyhow::anyhow!("cannot define definition macro"));
+                // Prevent defining macros
+                if compiler.get_macro(name).is_some() {
+                    return Err(anyhow::anyhow!("cannot define macro"));
                 }
 
                 let formals = if syms.len() == 1 {
@@ -99,10 +94,9 @@ impl Syntax for Define {
                 // rejig the formals
                 let name = *pre_dot.first().unwrap();
 
-                // Save peeps from themselves (im looking at you, me) and don't
-                // allow overriding 1 symbol (generally the symbol that defines this macro)
-                if name == self.self_sym {
-                    return Err(anyhow::anyhow!("cannot define definition macro"));
+                // Prevent defining macros
+                if compiler.get_macro(name).is_some() {
+                    return Err(anyhow::anyhow!("cannot define macro"));
                 }
 
                 let formals = Formals::Dotted {
@@ -140,10 +134,38 @@ impl Syntax for SetBang {
         &self,
         ctx: &mut SyntaxContext<'_, 'gc>,
         compiler: &mut Compiler<'gc>,
-        import_env: StackEnvironmentPtr<'gc>,
+        _import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
     ) -> anyhow::Result<SyntaxReturn<'gc>> {
-        let _ = (ctx, compiler, import_env, args);
-        todo!()
+        if args.len() != 2 {
+            return Err(anyhow::anyhow!("set! must be given exactly 2 arguments"));
+        }
+
+        let ProgramData::Symbol(name) = args[0].data else {
+            return Err(anyhow::anyhow!(
+                "set! must be given a symbol as its first argument"
+            ));
+        };
+
+        // Make sure peeps are aware they can't set! macros
+        if compiler.get_macro(name).is_some() {
+            return Err(anyhow::anyhow!("cannot set! macro"));
+        }
+
+        let Some(value) = args.get(1).cloned() else {
+            return Err(anyhow::anyhow!("define must be given 2 arguments"));
+        };
+
+        // Inform the compiler that a name is being defined in scope
+        compiler.define_variable(name);
+
+        Ok(SyntaxReturn::Code(
+            compiler
+                .compile_code(ctx, value)?
+                .into_bytecode()
+                .into_iter()
+                .chain([Bytecode::SetBang { symbol: name }, Bytecode::PushVoid])
+                .collect(),
+        ))
     }
 }

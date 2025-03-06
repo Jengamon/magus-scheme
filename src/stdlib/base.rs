@@ -186,7 +186,7 @@ impl Module for Base {
 
     fn syntax(&self, interner: &mut lasso::Rodeo, symbol: lasso::Spur) -> Option<ArcSyntax> {
         match interner.resolve(&symbol) {
-            "define" => Some(Arc::new(Define { self_sym: symbol })),
+            "define" => Some(Arc::new(Define)),
             "lambda" => Some(Arc::new(Lambda)),
             "set!" => Some(Arc::new(SetBang)),
             "if" => Some(Arc::new(If)),

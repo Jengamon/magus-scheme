@@ -452,7 +452,14 @@ impl<'gc> Thread<'gc> {
         };
         let args: Vec<_> = self.stack.drain(self.stack.len() - args..).collect();
         let new_frame = ThreadFrame {
-            bottom: self.stack.len(),
+            // Ignore voids at the top of the stack when determining the bottom of a frame
+            bottom: self.stack.len().saturating_sub(
+                self.stack
+                    .iter()
+                    .rev()
+                    .take_while(|v| matches!(*v.borrow(), Value::Void))
+                    .count(),
+            ),
             execution: Execution::from_lambda(lambda),
             handler: None,
             dynamic_wind: None,

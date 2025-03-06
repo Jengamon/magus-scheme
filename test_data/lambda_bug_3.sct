@@ -1,0 +1,19 @@
+---
+---
+(import (only (scheme base) define if = * -))
+(define (factorial x)
+  (if (= x 0)
+	  1
+	  (* x (factorial (- x 1)))))
+(define (factorial2 x)
+  (define (fact-iter a product)
+	(if (= a 0)
+		product
+		(fact-iter (- a 1) (* product a))))
+  (fact-iter x 1))
+; These both should return numbers that can be compared.
+; The problem was a Void (from the define macro) was getting in the way,
+; so I changed how the stack bottom is determined (it ignores Void) to
+; solve this (maybe?)
+(= (factorial 100) (factorial2 100))
+

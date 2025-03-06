@@ -46,11 +46,23 @@ fn main() -> anyhow::Result<()> {
 struct SchemeValidator;
 impl Validator for SchemeValidator {
     fn validate(&self, line: &str) -> reedline::ValidationResult {
-        // check if parens are balanced
+        // check if parens (and #|) are balanced
         let lparen_count = line.chars().filter(|c| *c == '(').count();
         let rparen_count = line.chars().filter(|c| *c == ')').count();
+        let snc_count = line
+            .chars()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .filter(|c| c[0] == '#' && c[1] == '|')
+            .count();
+        let enc_count = line
+            .chars()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .filter(|c| c[0] == '|' && c[1] == '#')
+            .count();
 
-        if lparen_count != rparen_count || line.ends_with(';') {
+        if lparen_count != rparen_count || line.ends_with(';') || snc_count != enc_count {
             reedline::ValidationResult::Incomplete
         } else {
             reedline::ValidationResult::Complete

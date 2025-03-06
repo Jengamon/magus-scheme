@@ -232,15 +232,32 @@ impl Interpreter {
             }
         });
 
-        // Run the GC (if the debt is > 1000 bytes)
-        // TODO Provide a way to configure this?
-        if self.arena.metrics().allocation_debt() > 1_000.0 {
+        if self.arena.metrics().allocation_debt() > 10_000.0 {
+            // once we have 10 kb allocated, start trying to collect memory
+            // (this is a failsafe)
+            // TODO provide a way to configure this cap
             self.arena.collect_debt();
         }
     }
 
-    // Force GC collection
-    pub fn force_collect(&mut self) {
+    // Expose collection methods
+    pub fn mark_debt(&mut self) {
+        self.arena.mark_debt();
+    }
+
+    pub fn finish_marking(&mut self) {
+        self.arena.finish_marking();
+    }
+
+    pub fn cycle_debt(&mut self) {
+        self.arena.cycle_debt();
+    }
+
+    pub fn collect_debt(&mut self) {
+        self.arena.collect_debt();
+    }
+
+    pub fn finish_cycle(&mut self) {
         self.arena.finish_cycle();
     }
 

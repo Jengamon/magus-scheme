@@ -373,7 +373,7 @@ fn repl() -> anyhow::Result<()> {
                         )
                     }
                     ".collect" => {
-                        interpreter.force_collect();
+                        interpreter.finish_cycle();
                     }
                     _ => {
                         unreachable!("Unsupported command")

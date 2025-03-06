@@ -242,7 +242,7 @@ fn execute(
                                 for v in res {
                                     println!(
                                         "{}",
-                                        v.borrow().resolve_into(interner.clone(), ctx.null_value)
+                                        Value::resolve_into(v, interner.clone(), ctx.null_value)
                                     );
                                 }
                             }

@@ -14,8 +14,8 @@ use crate::{
 pub use conditionals::If;
 pub use define::{Define, SetBang};
 pub use procedures::{
-    Add, Ascending, CallCc, Car, Cdr, Descending, Equal, IsNull, IsPair, MonotonicAscending,
-    MonotonicDescending, Mul, Subtract,
+    Add, Ascending, Caar, Cadr, CallCc, Car, Cdar, Cddr, Cdr, Descending, Equal, IsNull, IsPair,
+    MonotonicAscending, MonotonicDescending, Mul, Subtract,
 };
 pub use quote::Quote;
 
@@ -142,6 +142,10 @@ impl Module for Base {
             ">=",
             "car",
             "cdr",
+            "caar",
+            "cadr",
+            "cdar",
+            "cddr",
             "pair?",
             "null?",
         ]
@@ -178,6 +182,10 @@ impl Module for Base {
             ">=" => lambda!(Descending),
             "car" => lambda!(Car),
             "cdr" => lambda!(Cdr),
+            "caar" => lambda!(Caar),
+            "cadr" => lambda!(Cadr),
+            "cdar" => lambda!(Cdar),
+            "cddr" => lambda!(Cddr),
             "pair?" => lambda!(IsPair),
             "null?" => lambda!(IsNull),
             _ => None,

@@ -778,11 +778,10 @@ impl<'gc> Thread<'gc> {
                                 }
                             }
                         }
-                        Bytecode::Unpack { amount } => {
-                            // If arity is Exact(1), we look at the top value, and if it is a Values, we error
-                            // (so make sure we only *create* values if there is *more* that 1 value to treat like this)
-                            // otherwise expect a values object the matches the requested arity, and error if it doesn't
-                            // w/o unpacking values
+                        Bytecode::Splice => {
+                            // Pop the top list (which is the list to splice) and then the bottom list (the list to splice into)
+                            // Find the null at the end of the bottom list...(which has to be a list...) and replace the pointer
+                            // pointing to null with a pointer pointing to the top list, then push the bottom list back to stack
                             todo!()
                         }
                         Bytecode::Define { symbol } => {
@@ -894,16 +893,14 @@ impl<'gc> Thread<'gc> {
                         }) => {
                             if is_continuable {
                                 make_error!(SchemeErrorType::RaiseContinuable(
-                                    error
-                                        .borrow()
-                                        .resolve_into(interner.clone(), ctx.null_value)
+                                    Value::resolve_into(error, interner.clone(), ctx.null_value)
                                 ));
                             } else {
-                                make_error!(SchemeErrorType::Raise(
-                                    error
-                                        .borrow()
-                                        .resolve_into(interner.clone(), ctx.null_value)
-                                ));
+                                make_error!(SchemeErrorType::Raise(Value::resolve_into(
+                                    error,
+                                    interner.clone(),
+                                    ctx.null_value
+                                )));
                             }
                             self.handle_frame_end(&ctx, true);
                         }

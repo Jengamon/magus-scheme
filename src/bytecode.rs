@@ -6,10 +6,7 @@ use std::{rc::Rc, sync::Arc};
 use fxhash::FxHashMap;
 use gc_arena::{Collect, Gc, Mutation};
 
-use crate::{
-    environment::StackEnvironmentPtr,
-    runtime::lambda::{Arity, CompiledLambdaPtr},
-};
+use crate::{environment::StackEnvironmentPtr, runtime::lambda::CompiledLambdaPtr};
 
 /*
 compiled form is at its root primitive forms:
@@ -82,13 +79,9 @@ pub enum Bytecode {
     Call {
         args: usize,
     },
-    /// Multiple returns are turned into a "values" object, which represent multiple items that were returned by a
-    /// procedure. To work with the items individually, they must be unpacked (and we reuse arity
-    /// to represent how many values were expected to be unpacked onto the stack, so we can revert and error
-    /// if an unexpected amount occurs)
-    Unpack {
-        amount: Arity,
-    },
+    /// Splice the list at the top of the stack with the list below it, appending it to the list below, and leaving the
+    /// list below on the stack
+    Splice,
 
     // Holes are the way to make self-referential datatypes
     /// Creates a hole for self-reference
@@ -157,7 +150,7 @@ impl Bytecode {
             Self::FillHole { .. } => 1,
             Self::MakeVector { .. } => 1,
             Self::Reference { .. } => 1,
-            Self::Unpack { .. } => 1,
+            Self::Splice => 1,
             Self::Call { .. } => 4,
             Self::Force => 4,
             Self::Define { .. } => 2,
@@ -189,7 +182,7 @@ impl fmt::Display for Bytecode {
             Bytecode::MakeVector { length } => write!(f, "VECT {length}"),
             Bytecode::Reference { symbol } => write!(f, "REFR {}", symbol.into_inner()),
             Bytecode::Call { args } => write!(f, "CALL {args}"),
-            Bytecode::Unpack { amount } => write!(f, "UNPK {amount}"),
+            Bytecode::Splice => write!(f, "SPLI"),
             Bytecode::MakeHole { id } => write!(f, "HOLE {id}"),
             Bytecode::FillHole { id } => write!(f, "FILL {id}"),
             Bytecode::Define { symbol } => write!(f, "DEFN {}", symbol.into_inner()),

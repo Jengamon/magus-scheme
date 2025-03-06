@@ -1,7 +1,7 @@
 // TODO Split, if this file gets too large, into separate files
 pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, MonotonicDescending};
 pub use control::CallCc;
-pub use list::{Car, Cdr};
+pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
 pub use math::{Add, Mul, Subtract};
 pub use predicates::{IsNull, IsPair};
 
@@ -345,15 +345,139 @@ mod list {
             args: &[ValuePtr<'gc>],
         ) -> LambdaResult<'gc> {
             if args[0] == ctx.thread_ctx.null_value {
-                return Err(anyhow::anyhow!("cons only operates on a pair"))?;
+                return Err(anyhow::anyhow!("car only operates on a pair"))?;
             }
 
             let Value::Cons(c) = *args[0].borrow() else {
-                return Err(anyhow::anyhow!("cons only operates on a pair"))?;
+                return Err(anyhow::anyhow!("car only operates on a pair"))?;
             };
 
             Ok(LambdaReturn::Return(vec![
                 c.car.unwrap_or(ctx.thread_ctx.null_value),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Caar;
+    impl NativeLambda for Caar {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[ValuePtr<'gc>],
+        ) -> LambdaResult<'gc> {
+            if args[0] == ctx.thread_ctx.null_value {
+                return Err(anyhow::anyhow!("caar only operates on a pair"))?;
+            }
+
+            let Value::Cons(c) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!("caar only operates on a pair"))?;
+            };
+
+            let Some(Value::Cons(c)) = c.car.map(|p| *p.borrow()) else {
+                return Err(anyhow::anyhow!("caar only operates on a pair"))?;
+            };
+
+            Ok(LambdaReturn::Return(vec![
+                c.car.unwrap_or(ctx.thread_ctx.null_value),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Cadr;
+    impl NativeLambda for Cadr {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[ValuePtr<'gc>],
+        ) -> LambdaResult<'gc> {
+            if args[0] == ctx.thread_ctx.null_value {
+                return Err(anyhow::anyhow!("cadr only operates on a pair"))?;
+            }
+
+            let Value::Cons(c) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!("cadr only operates on a pair"))?;
+            };
+
+            let Some(Value::Cons(c)) = c.cdr.map(|p| *p.borrow()) else {
+                return Err(anyhow::anyhow!("cadr only operates on a pair"))?;
+            };
+
+            Ok(LambdaReturn::Return(vec![
+                c.car.unwrap_or(ctx.thread_ctx.null_value),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Cdar;
+    impl NativeLambda for Cdar {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[ValuePtr<'gc>],
+        ) -> LambdaResult<'gc> {
+            if args[0] == ctx.thread_ctx.null_value {
+                return Err(anyhow::anyhow!("cdar only operates on a pair"))?;
+            }
+
+            let Value::Cons(c) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!("cdar only operates on a pair"))?;
+            };
+
+            let Some(Value::Cons(c)) = c.car.map(|p| *p.borrow()) else {
+                return Err(anyhow::anyhow!("cdar only operates on a pair"))?;
+            };
+
+            Ok(LambdaReturn::Return(vec![
+                c.cdr.unwrap_or(ctx.thread_ctx.null_value),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Cddr;
+    impl NativeLambda for Cddr {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[ValuePtr<'gc>],
+        ) -> LambdaResult<'gc> {
+            if args[0] == ctx.thread_ctx.null_value {
+                return Err(anyhow::anyhow!("cddr only operates on a pair"))?;
+            }
+
+            let Value::Cons(c) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!("cddr only operates on a pair"))?;
+            };
+
+            let Some(Value::Cons(c)) = c.cdr.map(|p| *p.borrow()) else {
+                return Err(anyhow::anyhow!("cddr only operates on a pair"))?;
+            };
+
+            Ok(LambdaReturn::Return(vec![
+                c.cdr.unwrap_or(ctx.thread_ctx.null_value),
             ]))
         }
     }
@@ -372,11 +496,11 @@ mod list {
             args: &[ValuePtr<'gc>],
         ) -> LambdaResult<'gc> {
             if args[0] == ctx.thread_ctx.null_value {
-                return Err(anyhow::anyhow!("cons only operates on a pair"))?;
+                return Err(anyhow::anyhow!("cdr only operates on a pair"))?;
             }
 
             let Value::Cons(c) = *args[0].borrow() else {
-                return Err(anyhow::anyhow!("cons only operates on a pair"))?;
+                return Err(anyhow::anyhow!("cdr only operates on a pair"))?;
             };
 
             Ok(LambdaReturn::Return(vec![

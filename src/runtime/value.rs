@@ -1,8 +1,8 @@
 //! Representation of Scheme values
 
 use core::fmt;
+use std::rc::Rc;
 use std::string::String as StdString;
-use std::{cell::RefCell, rc::Rc};
 
 use gc_arena::{Collect, Gc, Mutation, RefLock};
 use lasso::IntoResolver;
@@ -206,20 +206,21 @@ impl<'gc> Value<'gc> {
     }
 
     pub fn resolve_into<K: lasso::Resolver>(
-        self,
+        value_ptr: ValuePtr<'gc>,
         resolver: impl IntoResolver<Resolver = K> + 'static,
         null_ptr: ValuePtr<'gc>,
     ) -> ResolvedValue<'gc, K> {
-        self.resolve(Rc::new(resolver.into_resolver()), null_ptr)
+        Self::resolve(value_ptr, Rc::new(resolver.into_resolver()), null_ptr)
     }
 
     pub fn resolve<K: lasso::Resolver>(
-        self,
+        value_ptr: ValuePtr<'gc>,
         resolver: Rc<K>,
         null_ptr: ValuePtr<'gc>,
     ) -> ResolvedValue<'gc, K> {
         ResolvedValue {
-            value: self,
+            value: *value_ptr.borrow(),
+            value_ptr,
             null_ptr,
             resolver,
         }
@@ -240,175 +241,25 @@ impl<'gc> Value<'gc> {
     }
 }
 
-#[derive(Collect)]
-#[collect(no_drop)]
-pub struct ResolvedValue<'gc, R: lasso::Resolver> {
-    value: Value<'gc>,
-    null_ptr: ValuePtr<'gc>,
-    #[collect(require_static)]
-    resolver: Rc<R>,
-}
-
-impl<R: lasso::Resolver> Clone for ResolvedValue<'_, R> {
-    fn clone(&self) -> Self {
-        Self {
-            value: self.value,
-            null_ptr: self.null_ptr,
-            resolver: self.resolver.clone(),
-        }
-    }
-}
-
-impl<K: lasso::Resolver> fmt::Debug for ResolvedValue<'_, K> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ResolvedValue")
-            .field("value", &self.value)
-            .finish_non_exhaustive()
-    }
-}
-
 enum ConsInner<'a, 'gc> {
     Cons(&'a ConsCell<'gc>),
     Vec(&'a Vector<'gc>),
 }
 // Handles printing possibly self-referential structures
-struct ConsPrinter<'a, 'gc, K: lasso::Resolver> {
+struct CircularPrinter<'a, 'gc, K: lasso::Resolver> {
     cons: ConsInner<'a, 'gc>,
+    self_ptr: ValuePtr<'gc>,
     resolver: Rc<K>,
     null_ptr: ValuePtr<'gc>,
-    encountered: Rc<RefCell<Vec<Value<'gc>>>>,
 }
 
 // TODO Change this to an implementation of Brent's algorithm
 // and DFS (as it currently is)
-impl<K: lasso::Resolver> fmt::Display for ConsPrinter<'_, '_, K> {
+impl<K: lasso::Resolver> fmt::Display for CircularPrinter<'_, '_, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // recurse into the value, keeping track of encountered cons cells
         // so that we don't recurse into them
-        let value = match self.cons {
-            ConsInner::Cons(cons) => Value::Cons(*cons),
-            ConsInner::Vec(vec) => Value::Vector(*vec),
-        };
-
-        if *self.null_ptr.borrow() == value {
-            if self.encountered.borrow().is_empty() {
-                // we are starting at the null cons, so close it out
-                write!(f, "()")?;
-            }
-            return Ok(());
-        }
-
-        if self.encountered.borrow().is_empty() {
-            write!(
-                f,
-                "{}",
-                if matches!(self.cons, ConsInner::Vec(_)) {
-                    "#("
-                } else {
-                    "("
-                }
-            )?;
-        }
-
-        if self.encountered.borrow().contains(&value) {
-            // write as self-recursive list
-            write!(f, "...)")?;
-            return Ok(());
-        }
-
-        // handle car and cdr, adding a dot if cdr is *not* a cons cell
-        self.encountered.borrow_mut().push(value);
-        // we handle both
-        match self.cons {
-            ConsInner::Cons(cons) => {
-                match cons.car.map(|p| *p.borrow()) {
-                    Some(Value::Cons(cons)) => {
-                        write!(
-                            f,
-                            "({}){}",
-                            ConsPrinter {
-                                cons: ConsInner::Cons(&cons),
-                                resolver: Rc::clone(&self.resolver),
-                                null_ptr: self.null_ptr,
-                                encountered: Rc::clone(&self.encountered)
-                            },
-                            if cons.cdr != Some(self.null_ptr) {
-                                " "
-                            } else {
-                                ""
-                            }
-                        )?;
-                    }
-                    Some(Value::Vector(vec)) => todo!(),
-                    Some(value) => {
-                        // this value is *definitely* not self-referential, so it's ok to
-                        // use ResolvedValue
-                        write!(
-                            f,
-                            "{}{}",
-                            ResolvedValue {
-                                value,
-                                null_ptr: self.null_ptr,
-                                resolver: Rc::clone(&self.resolver)
-                            },
-                            if cons.cdr != Some(self.null_ptr) {
-                                " "
-                            } else {
-                                ""
-                            }
-                        )?;
-                    }
-                    None => {}
-                };
-                match cons.cdr.map(|p| *p.borrow()) {
-                    Some(Value::Cons(cons)) => {
-                        write!(
-                            f,
-                            "{}",
-                            ConsPrinter {
-                                cons: ConsInner::Cons(&cons),
-                                resolver: Rc::clone(&self.resolver),
-                                null_ptr: self.null_ptr,
-                                encountered: Rc::clone(&self.encountered)
-                            }
-                        )?;
-                    }
-                    Some(Value::Vector(cdr)) => todo!(),
-                    Some(value) => {
-                        // this value is *definitely* not self-referential, so it's ok to
-                        // use ResolvedValue
-                        write!(
-                            f,
-                            ". {}",
-                            ResolvedValue {
-                                value,
-                                null_ptr: self.null_ptr,
-                                resolver: Rc::clone(&self.resolver)
-                            }
-                        )?;
-                    }
-                    None => {}
-                };
-            }
-            ConsInner::Vec(vec) => {
-                for vptr in vec.vec.borrow().iter() {
-                    match *vptr.borrow() {
-                        Value::Cons(cdr) => todo!(),
-                        Value::Vector(cdr) => todo!(),
-                        value => {
-                            todo!()
-                        }
-                    }
-                }
-            }
-        }
-        // pop encountered and close the list
-        self.encountered.borrow_mut().pop();
-        if self.encountered.borrow().is_empty() {
-            write!(f, ")")
-        } else {
-            Ok(())
-        }
+        todo!()
     }
 }
 
@@ -421,6 +272,35 @@ fn is_valid_scheme_identifier(s: &str) -> bool {
 
     // TODO add refinements, as we are currently too permissive atm
     true
+}
+
+#[derive(Collect)]
+#[collect(no_drop)]
+pub struct ResolvedValue<'gc, R: lasso::Resolver> {
+    value: Value<'gc>,
+    value_ptr: ValuePtr<'gc>,
+    null_ptr: ValuePtr<'gc>,
+    #[collect(require_static)]
+    resolver: Rc<R>,
+}
+
+impl<R: lasso::Resolver> Clone for ResolvedValue<'_, R> {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value,
+            value_ptr: self.value_ptr,
+            null_ptr: self.null_ptr,
+            resolver: self.resolver.clone(),
+        }
+    }
+}
+
+impl<K: lasso::Resolver> fmt::Debug for ResolvedValue<'_, K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedValue")
+            .field("value", &self.value)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
@@ -438,35 +318,26 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
             Value::Inexact(fp) => write!(f, "{fp}"),
             Value::String(s) => write!(f, "\"{}\"", s.borrow().replace('\"', "\\\"")),
             Value::Symbol(sym) if is_valid_scheme_identifier(self.resolver.resolve(&sym.0)) => {
-                write!(f, "{}", self.resolver.resolve(&sym.0))
+                write!(f, "'{}", self.resolver.resolve(&sym.0))
             }
             Value::Symbol(sym) => write!(f, "'|{}|", self.resolver.resolve(&sym.0)),
             Value::Bool(b) => write!(f, "#{}", if b { "t" } else { "f" }),
             Value::Char(c) => write!(f, "#\\{c}"),
-            Value::Vector(ref vec) => {
-                // write!(f, "#(")?;
-                // for (idx, elem) in vec.vec.borrow().iter().copied().enumerate() {
-                //     if idx != 0 {
-                //         write!(f, " ")?;
-                //     }
-                //     write!(
-                //         f,
-                //         "{}",
-                //         elem.borrow().resolve(self.resolver.clone(), self.null_ptr)
-                //     )?;
-                // }
-                // write!(f, ")")?;
-                // Ok(())
+            Value::Vector(ref vec) if vec.is_circular(self.value_ptr) => {
                 write!(
                     f,
                     "{}",
-                    ConsPrinter {
+                    CircularPrinter {
                         cons: ConsInner::Vec(vec),
+                        self_ptr: self.value_ptr,
                         resolver: self.resolver.clone(),
                         null_ptr: self.null_ptr,
-                        encountered: Rc::new(RefCell::new(Vec::new())),
                     }
                 )
+            }
+            Value::Vector(ref vec) => {
+                // just dfs the structure, we know it isn't circular
+                todo!()
             }
             Value::Bytevector(bv) => {
                 write!(f, "#u8(")?;
@@ -484,17 +355,70 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
             Value::InputPort(_) => todo!(),
             Value::OutputPort(_) => todo!(),
             // TODO this needs special handling, b/c a cons might recurse into itself
-            Value::Cons(ref cons) => {
+            Value::Cons(ref cons) if cons.is_circular(self.value_ptr) => {
                 write!(
                     f,
                     "{}",
-                    ConsPrinter {
+                    CircularPrinter {
                         cons: ConsInner::Cons(cons),
+                        self_ptr: self.value_ptr,
                         resolver: self.resolver.clone(),
                         null_ptr: self.null_ptr,
-                        encountered: Rc::new(RefCell::new(Vec::new())),
                     }
                 )
+            }
+            Value::Cons(ref cons) => {
+                // we know we aren't cyclical at *all*, so just dfs
+                write!(f, "(")?;
+                let mut cons = *cons;
+                loop {
+                    let car = cons.car;
+                    let cdr = cons.cdr;
+                    if let Some(car) = car {
+                        if !Gc::ptr_eq(car, self.null_ptr) {
+                            write!(
+                                f,
+                                "{}",
+                                ResolvedValue {
+                                    value: *car.borrow(),
+                                    value_ptr: car,
+                                    null_ptr: self.null_ptr,
+                                    resolver: Rc::clone(&self.resolver)
+                                }
+                            )?;
+                        } else {
+                            write!(f, "'()")?;
+                        }
+                    } else {
+                        write!(f, "'()")?;
+                    }
+                    if !cdr.is_none_or(|cdr| Gc::ptr_eq(cdr, self.null_ptr)) {
+                        write!(f, " ")?;
+                        let Some(cdr) = cdr else {
+                            unreachable!();
+                        };
+
+                        if let Value::Cons(c) = *cdr.borrow() {
+                            cons = c;
+                        } else {
+                            write!(
+                                f,
+                                ". {}",
+                                ResolvedValue {
+                                    value: *cdr.borrow(),
+                                    value_ptr: cdr,
+                                    null_ptr: self.null_ptr,
+                                    resolver: Rc::clone(&self.resolver),
+                                }
+                            )?;
+                        }
+                    } else {
+                        write!(f, ")")?;
+                        break;
+                    }
+                }
+
+                Ok(())
             }
             Value::Environment(_) => todo!(),
             Value::UserStruct(user) => {
@@ -540,6 +464,38 @@ impl<'gc> From<Gc<'gc, RefLock<Vec<u8>>>> for Bytevector<'gc> {
 #[collect(no_drop)]
 pub struct Vector<'gc> {
     pub vec: Gc<'gc, RefLock<Vec<ValuePtr<'gc>>>>,
+}
+
+impl<'gc> Vector<'gc> {
+    fn is_circular_impl(&self, self_ptr: ValuePtr<'gc>, stack: &mut Vec<ValuePtr<'gc>>) -> bool {
+        stack.push(self_ptr);
+        for val in self.vec.borrow().iter().copied() {
+            match *val.borrow() {
+                Value::Cons(cell) => {
+                    if cell.is_circular_impl(val, stack) {
+                        return true;
+                    }
+                }
+                Value::Vector(vec) => {
+                    if vec.is_circular_impl(val, stack) {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert!(Gc::ptr_eq(stack.pop().unwrap(), self_ptr));
+        false
+    }
+
+    /// Returns if a vector is circular (self-referential)
+    ///
+    /// # Parameters
+    /// - `self_ptr`: [`ValuePtr`] pointing to this [`ConsCell`]
+    pub fn is_circular(&self, self_ptr: ValuePtr<'gc>) -> bool {
+        let mut stack = vec![];
+        self.is_circular_impl(self_ptr, &mut stack)
+    }
 }
 
 // FIXME make this a struct of usize (stack index) and a ThreadPtr (a "brand")
@@ -593,17 +549,33 @@ impl<'gc> ConsCell<'gc> {
     fn is_circular_impl(&self, self_ptr: ValuePtr<'gc>, stack: &mut Vec<ValuePtr<'gc>>) -> bool {
         stack.push(self_ptr);
         if let Some(val) = self.car {
-            if let Value::Cons(cell) = *val.borrow() {
-                if cell.is_circular_impl(val, stack) {
-                    return true;
+            match *val.borrow() {
+                Value::Cons(cell) => {
+                    if cell.is_circular_impl(val, stack) {
+                        return true;
+                    }
                 }
+                Value::Vector(vec) => {
+                    if vec.is_circular_impl(val, stack) {
+                        return true;
+                    }
+                }
+                _ => {}
             }
         }
         if let Some(val) = self.cdr {
-            if let Value::Cons(cell) = *val.borrow() {
-                if cell.is_circular_impl(val, stack) {
-                    return true;
+            match *val.borrow() {
+                Value::Cons(cell) => {
+                    if cell.is_circular_impl(val, stack) {
+                        return true;
+                    }
                 }
+                Value::Vector(vec) => {
+                    if vec.is_circular_impl(val, stack) {
+                        return true;
+                    }
+                }
+                _ => {}
             }
         }
         assert!(Gc::ptr_eq(stack.pop().unwrap(), self_ptr));

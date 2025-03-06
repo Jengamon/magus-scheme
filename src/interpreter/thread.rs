@@ -435,7 +435,7 @@ impl<'gc> Thread<'gc> {
         &mut self,
         ctx: &Context<'gc>,
         lambda: Lambda<'gc>,
-        args: usize,
+        mut args: usize,
         is_tail: bool,
     ) -> Result<(), LambdaException> {
         // TODO First argument is lowest on the stack
@@ -448,7 +448,16 @@ impl<'gc> Thread<'gc> {
             });
         }
         if self.stack.len() < args {
-            todo!("not enough args")
+            // If this is triggered, we should check if the actual number of items on the stack still
+            // satisfy the arity. If so, we patch it in as args, if not, we error with an arity mismatch
+            if lambda.arity().is_satisfied(self.stack.len()) {
+                args = self.stack.len();
+            } else {
+                return Err(LambdaException::MismatchedArity {
+                    expected: lambda.arity(),
+                    got: self.stack.len(),
+                });
+            }
         };
         let args: Vec<_> = self.stack.drain(self.stack.len() - args..).collect();
         let new_frame = ThreadFrame {

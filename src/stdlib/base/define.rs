@@ -66,6 +66,13 @@ impl Syntax for Define {
 
                 // rejig the formals
                 let name = *syms.first().unwrap();
+
+                // Save peeps from themselves (im looking at you, me) and don't
+                // allow overriding 1 symbol (generally the symbol that defines this macro)
+                if name == self.self_sym {
+                    return Err(anyhow::anyhow!("cannot define definition macro"));
+                }
+
                 let formals = if syms.len() == 1 {
                     Formals::Empty
                 } else {
@@ -91,6 +98,13 @@ impl Syntax for Define {
 
                 // rejig the formals
                 let name = *pre_dot.first().unwrap();
+
+                // Save peeps from themselves (im looking at you, me) and don't
+                // allow overriding 1 symbol (generally the symbol that defines this macro)
+                if name == self.self_sym {
+                    return Err(anyhow::anyhow!("cannot define definition macro"));
+                }
+
                 let formals = Formals::Dotted {
                     pre_dot: Box::from(&pre_dot[1..]),
                     dot,

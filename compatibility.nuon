@@ -9,7 +9,7 @@
     ];
     [ "base", "procedure", *, true, "Returns product of arguments (1 if no args)", "" ],
     [ "base", "procedure", +, true, "Returns sum of arguments (0 if no args)", "" ],
-    [ "base", "procedure", -, true, "(unary) negation (2+ args) subtraction of args from first arf", "" ],
+    [ "base", "procedure", -, true, "negation or subtraction of args from first argument", "" ],
     [ "base", "", "...", false, "", "" ],
     [ "base", "", /, false, "", "" ],
     [ "base", "procedure", <, true, "`true` if arguments are monotonically increasing", "" ],
@@ -67,7 +67,7 @@
     [ "base", "", current-error-port, false, "", "" ],
     [ "base", "", current-input-port, false, "", "" ],
     [ "base", "", current-output-port, false, "", "" ],
-    [ "base", "", define, partial, "", "only supports (define <name> <val>) form" ],
+    [ "base", "", define, true, "defines a variable in the current environment", "" ],
     [ "base", "", define-record-type, false, "", "" ],
     [ "base", "", define-syntax, false, "", "" ],
     [ "base", "", define-values, false, "", "" ],

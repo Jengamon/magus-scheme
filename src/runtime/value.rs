@@ -405,7 +405,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
                         } else {
                             write!(
                                 f,
-                                ". {}",
+                                ". {})",
                                 ResolvedValue {
                                     value: *cdr.borrow(),
                                     value_ptr: cdr,
@@ -413,6 +413,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
                                     resolver: Rc::clone(&self.resolver),
                                 }
                             )?;
+                            break;
                         }
                     } else {
                         write!(f, ")")?;

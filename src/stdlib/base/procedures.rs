@@ -5,6 +5,7 @@ pub use equality::{IsEq, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
 pub use math::{Add, Mul, Subtract};
 pub use predicates::{IsNull, IsPair};
+pub use structure::{Cons, Values};
 
 mod equality {
     //! defines eq? and eqv?
@@ -622,6 +623,63 @@ mod predicates {
             let val = matches!(*args[0].borrow(), Value::Cons(_) if Gc::ptr_eq(args[0], ctx.thread_ctx.null_value));
 
             Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+        }
+    }
+}
+
+mod structure {
+    use gc_arena::{Collect, Gc};
+
+    use crate::{
+        Value,
+        runtime::lambda::{Arity, LambdaReturn, NativeLambda},
+    };
+
+    // Stuff like cons and values
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Values;
+
+    impl NativeLambda for Values {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: crate::runtime::lambda::NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<crate::runtime::lambda::LambdaReturn<'gc>, crate::runtime::lambda::LambdaError>
+        {
+            Ok(LambdaReturn::Return(vec![
+                Value::Values(Gc::new(&ctx, args.to_vec())).into_ptr(&ctx),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Cons;
+
+    impl NativeLambda for Cons {
+        fn arity(&self) -> crate::runtime::lambda::Arity {
+            Arity::Exact(2)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: crate::runtime::lambda::NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<crate::runtime::lambda::LambdaReturn<'gc>, crate::runtime::lambda::LambdaError>
+        {
+            Ok(crate::runtime::lambda::LambdaReturn::Return(vec![
+                Value::Cons(crate::value::ConsCell {
+                    car: Some(args[0]),
+                    cdr: Some(args[1]),
+                })
+                .into_ptr(&ctx),
+            ]))
         }
     }
 }

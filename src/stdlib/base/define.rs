@@ -121,7 +121,7 @@ impl Syntax for Define {
         }
     }
 
-    fn is_definition(&self) -> bool {
+    fn is_definition(&self, _ptr: ProgramPtr<'_>) -> bool {
         true
     }
 }

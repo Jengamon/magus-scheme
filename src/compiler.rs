@@ -326,7 +326,7 @@ pub trait Syntax: std::fmt::Debug {
     ) -> anyhow::Result<SyntaxReturn<'gc>>;
 
     /// Registers this syntax item as a definition
-    fn is_definition(&self) -> bool {
+    fn is_definition<'gc>(&self, _ptr: ProgramPtr<'gc>) -> bool {
         false
     }
 
@@ -334,7 +334,7 @@ pub trait Syntax: std::fmt::Debug {
     ///
     /// Affects how definitions are registered. A container syntax is considered a
     /// definition if all of it's components are definitions (or containers of only definitions)
-    fn is_container(&self) -> bool {
+    fn is_container<'gc>(&self, _ptr: ProgramPtr<'gc>) -> bool {
         false
     }
 }
@@ -1107,12 +1107,12 @@ impl<'gc> Compiler<'gc> {
         let definition_symbols = self
             .syntax_items
             .iter()
-            .filter_map(|(k, syn)| syn.is_definition().then_some(*k))
+            .filter_map(|(k, syn)| syn.is_definition(program).then_some(*k))
             .collect::<fxhash::FxHashSet<_>>();
         let container_symbols = self
             .syntax_items
             .iter()
-            .filter_map(|(k, syn)| syn.is_container().then_some(*k))
+            .filter_map(|(k, syn)| syn.is_container(program).then_some(*k))
             .collect::<fxhash::FxHashSet<_>>();
 
         match &program.data {

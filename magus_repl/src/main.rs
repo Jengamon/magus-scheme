@@ -325,6 +325,7 @@ fn repl() -> anyhow::Result<()> {
         ))
         .with_validator(Box::new(SchemeValidator));
     let mut prompt = MagusPrompt::default();
+    println!("Type `.q` or `.quit` to exit. Type `.help` for more commands.");
 
     // compiler setup
     let (mut interpreter, world) = repl_stuff();
@@ -353,12 +354,25 @@ fn repl() -> anyhow::Result<()> {
         )
     });
 
+    const HELP_STRING: &str = "### HELP ###
+.q, .quit - quit repl
+.gc - check GC stats
+.env - (todo) check current root environment
+.collect - force GC collection";
+
+    let mut double_ctrl_c = false;
     loop {
         match readline.read_line(&prompt) {
             Ok(Signal::Success(cmd))
-                if [".gc", ".env", ".collect"].contains(&cmd.to_lowercase().as_str()) =>
+                if [".gc", ".env", ".collect", ".quit", ".q", ".help"]
+                    .contains(&cmd.to_lowercase().as_str()) =>
             {
+                double_ctrl_c = false;
                 match cmd.to_lowercase().as_str() {
+                    ".help" => {
+                        println!("{}", HELP_STRING)
+                    }
+                    ".quit" | ".q" => break,
                     ".env" => {
                         eprintln!("TO BE WRITTEN")
                     }
@@ -381,6 +395,7 @@ fn repl() -> anyhow::Result<()> {
                 }
             }
             Ok(Signal::Success(input)) => {
+                double_ctrl_c = false;
                 if input.is_empty() {
                     continue;
                 }
@@ -423,7 +438,17 @@ fn repl() -> anyhow::Result<()> {
                     }
                 }
             }
-            Ok(Signal::CtrlC) | Ok(Signal::CtrlD) => break,
+            // 2 Ctrl-Cs in a row will *also* close the program
+            Ok(Signal::CtrlC) if double_ctrl_c => {
+                break;
+            }
+            // Ctrl-C only kills the current buffer
+            // TODO Make this also interrupt the currently running thread
+            Ok(Signal::CtrlC) => {
+                double_ctrl_c = true;
+                continue;
+            }
+            Ok(Signal::CtrlD) => break,
             Err(e) => {
                 panic!("{e}");
             }

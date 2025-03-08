@@ -418,12 +418,17 @@ impl<'gc> Thread<'gc> {
     fn make_backtrace(frames: &[ThreadFrame<'gc>]) -> Vec<StackFrame<'gc>> {
         frames
             .iter()
+            .enumerate()
             .rev()
-            .map(|f| {
-                let sd = f.execution.source_data();
+            .map(|(i, f)| {
+                // get the source data of the *parent* frame, which is what called this frame
+                let psd = i
+                    .checked_sub(1)
+                    .and_then(|idx| frames.get(idx))
+                    .and_then(|pf| pf.execution.source_data());
                 StackFrame {
-                    source_filename: sd.map(|sd| sd.source_id),
-                    range: sd.map(|sd| sd.range),
+                    source_filename: psd.map(|psd| psd.source_id),
+                    range: psd.map(|psd| psd.range),
                     execution: f.execution,
                 }
             })

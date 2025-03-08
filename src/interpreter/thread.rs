@@ -86,7 +86,7 @@ pub enum ExecutionKind {
     Native,
 }
 
-#[derive(Debug, Collect, Clone)]
+#[derive(Collect, Clone)]
 #[collect(no_drop)]
 pub struct ThreadFrame<'gc> {
     execution: Execution<'gc>,
@@ -133,6 +133,17 @@ impl PartialEq for ThreadFrame<'_> {
     }
 }
 impl Eq for ThreadFrame<'_> {}
+
+impl std::fmt::Debug for ThreadFrame<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ThreadFrame")
+            .field("args", &self.args)
+            .field("exception", &self.exception)
+            .field("bottom", &self.bottom)
+            .field("execution", &self.kind())
+            .finish_non_exhaustive()
+    }
+}
 
 #[derive(Debug, thiserror::Error, Clone)]
 pub enum LambdaException {
@@ -510,10 +521,28 @@ impl<'gc> Thread<'gc> {
             self.frames[..self.frames.len() - 1].to_vec()
         };
         // Adjust the last to actually be the continuation (if bytecode frame)
-        if let Some(Execution::Bytecode { pc, .. }) =
+        if let Some(Execution::Bytecode { pc, chunk, .. }) =
             frames_copy.last_mut().map(|f| &mut f.execution)
         {
-            *pc += 1;
+            // handle Jumps
+            match chunk.code.get(*pc) {
+                Some(code) => match code {
+                    Bytecode::If { .. } => {
+                        // don't move the pc, as the If instruction will handle it
+                    }
+                    Bytecode::Jump { jump } => {
+                        // jump forward (as this is unconditional)
+                        *pc += jump + 1;
+                    }
+                    _ => {
+                        // all other instructions move linearly
+                        *pc += 1;
+                    }
+                },
+                None => {
+                    // no instruction here, don't move pc, as the frame will be popped once handled
+                }
+            }
         };
 
         Continuation::new(frames_copy)
@@ -541,7 +570,7 @@ impl<'gc> Thread<'gc> {
             // We just dump execution
             self.frames.clear();
         } else {
-            todo!("continuation handling")
+            todo!("continuation handling {c:?}")
         }
     }
 

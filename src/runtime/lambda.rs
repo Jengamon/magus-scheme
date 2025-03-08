@@ -15,7 +15,7 @@ use crate::{
     },
 };
 
-use super::{error::SchemeErrorPtr, value::Continuation};
+use super::{error::SchemeErrorPtr, value::ContinuationPtr};
 
 /// Possible errors
 #[derive(thiserror::Error, Debug)]
@@ -40,7 +40,7 @@ pub enum LambdaReturn<'gc> {
     ///
     /// `[call-end]`
     Continue {
-        cont: Continuation<'gc>,
+        cont: ContinuationPtr<'gc>,
         args: Vec<ValuePtr<'gc>>,
     },
     /// Raise the given value as an error

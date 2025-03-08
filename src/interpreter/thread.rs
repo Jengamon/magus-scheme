@@ -13,7 +13,7 @@ use crate::{
             NativeLambdaPtr,
         },
     },
-    value::{ConsCell, Continuation, ValuePtr},
+    value::{ConsCell, Continuation, ContinuationPtr, ValuePtr},
 };
 
 use super::{Context, Includer};
@@ -519,6 +519,32 @@ impl<'gc> Thread<'gc> {
         Continuation::new(frames_copy)
     }
 
+    fn handle_continuation(&mut self, mc: &Mutation<'gc>, c: ContinuationPtr<'gc>, args: usize) {
+        // TODO Make sure to add before and after calls on *top* of the native call for all
+        // frames that are left
+        // with all befores below all afters , e.g.:
+        // if two dynamic-wind lambdas are to be exited [n f1 ... f2]
+        // then the frame stack should look like
+        // [n after(f2) after(f1) before(f1) before(f2)]
+        // (which is reversed call order, because stack)
+        // n can be a native frame or nothing (null continuation means "go to first native call below this")
+
+        // TODO handle dynamic-wind and non-empty continuations
+        // Don't advance the frame b/c it will be wiped by the continuation
+        if c.frames.is_empty() {
+            // wrap the last args values as a values object
+            let values = self
+                .stack
+                .drain(self.stack.len() - args.min(self.stack.len())..);
+            let values = Value::Values(Gc::new(mc, Vec::from_iter(values))).into_ptr(mc);
+            self.stack.push(values);
+            // We just dump execution
+            self.frames.clear();
+        } else {
+            todo!("continuation handling")
+        }
+    }
+
     fn error_handler(&self) -> Option<Lambda<'gc>> {
         self.frames.iter().rev().find_map(|f| f.handler)
     }
@@ -766,31 +792,7 @@ impl<'gc> Thread<'gc> {
                                     };
                                 }
                                 Value::Continuation(c) => {
-                                    // TODO Make sure to add before and after calls on *top* of the native call for all
-                                    // frames that are left
-                                    // with all befores below all afters , e.g.:
-                                    // if two dynamic-wind lambdas are to be exited [n f1 ... f2]
-                                    // then the frame stack should look like
-                                    // [n after(f2) after(f1) before(f1) before(f2)]
-                                    // (which is reversed call order, because stack)
-                                    // n can be a native frame or nothing (null continuation means "go to first native call below this")
-
-                                    // TODO handle dynamic-wind and non-empty continuations
-                                    // Don't advance the frame b/c it will be wiped by the continuation
-                                    if c.frames.is_empty() {
-                                        // wrap the last args values as a values object
-                                        let values = self
-                                            .stack
-                                            .drain(self.stack.len() - args.min(self.stack.len())..);
-                                        let values =
-                                            Value::Values(Gc::new(&ctx, Vec::from_iter(values)))
-                                                .into_ptr(&ctx);
-                                        self.stack.push(values);
-                                        // We just dump execution
-                                        self.frames.clear();
-                                    } else {
-                                        todo!("continuation handling")
-                                    }
+                                    self.handle_continuation(&ctx, c, args);
                                 }
                                 _ => {
                                     make_error!(SchemeErrorType::NonCallable);
@@ -905,7 +907,11 @@ impl<'gc> Thread<'gc> {
                             }
                             self.handle_frame_end(&ctx, true);
                         }
-                        Ok(LambdaReturn::Continue { cont, args }) => todo!(),
+                        Ok(LambdaReturn::Continue { cont, args }) => {
+                            let args_len = args.len();
+                            self.stack.extend(args);
+                            self.handle_continuation(&ctx, cont, args_len);
+                        }
                         Ok(LambdaReturn::Raise {
                             error,
                             is_continuable,

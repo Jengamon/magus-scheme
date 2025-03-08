@@ -21,7 +21,7 @@
     [ "base", "", abs, false, "", "" ],
     [ "base", "", and, false, "", "" ],
     [ "base", "", append, false, "", "" ],
-    [ "base", "", apply, false, "", "" ],
+    [ "base", "procedure", apply, true, "call a procedure with given args (and rest arg)", "" ],
     [ "base", "", assoc, false, "", "" ],
     [ "base", "", assq, false, "", "" ],
     [ "base", "", assv, false, "", "" ],

@@ -594,41 +594,37 @@ impl<'gc> ConsCell<'gc> {
         self.is_circular_impl(self_ptr, &mut stack)
     }
 
-    fn is_param_list_impl(&self, self_ptr: ValuePtr<'gc>, stack: &mut Vec<ValuePtr<'gc>>) -> bool {
-        stack.push(self_ptr);
-        if let Some(val) = self.car {
-            match *val.borrow() {
-                Value::Cons(cell) => {
-                    if !cell.is_param_list_impl(val, stack) {
-                        return false;
-                    }
-                }
-                Value::Symbol(_) => {}
-                _ => return false,
-            }
-        }
+    fn is_list_impl(
+        &self,
+        self_ptr: ValuePtr<'gc>,
+        null_ptr: ValuePtr<'gc>,
+        stack: &mut Vec<ValuePtr<'gc>>,
+    ) -> bool {
         if let Some(val) = self.cdr {
             match *val.borrow() {
-                Value::Cons(cell) => {
-                    if !cell.is_param_list_impl(val, stack) {
-                        return false;
+                Value::Cons(_) if Gc::ptr_eq(val, null_ptr) => return true,
+                // only non-self recursive values are considered lists (for now)
+                // (and probably ever)
+                Value::Cons(cell) if stack.iter().all(|ptr| !Gc::ptr_eq(*ptr, self_ptr)) => {
+                    stack.push(self_ptr);
+                    if cell.is_list_impl(val, null_ptr, stack) {
+                        return true;
                     }
+                    assert!(Gc::ptr_eq(stack.pop().unwrap(), self_ptr));
                 }
-                Value::Symbol(_) => {}
                 _ => return false,
             }
         }
-        assert!(Gc::ptr_eq(stack.pop().unwrap(), self_ptr));
         true
     }
 
-    /// Returns if a cons cell is a valid param list
+    /// Returns if a cons cell is a valid list
     ///
     /// # Parameters
     /// - `self_ptr`: [`ValuePtr`] pointing to this [`ConsCell`]
-    pub fn is_param_list(&self, self_ptr: ValuePtr<'gc>) -> bool {
+    pub fn is_list(&self, self_ptr: ValuePtr<'gc>, null_ptr: ValuePtr<'gc>) -> bool {
         let mut stack = vec![];
-        self.is_param_list_impl(self_ptr, &mut stack)
+        self.is_list_impl(self_ptr, null_ptr, &mut stack)
     }
 
     pub fn from_iter<

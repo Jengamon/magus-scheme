@@ -1,6 +1,6 @@
 // TODO Split, if this file gets too large, into separate files
 pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, MonotonicDescending};
-pub use control::CallCc;
+pub use control::{Apply, CallCc};
 pub use equality::{IsEq, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
 pub use math::{Add, Mul, Subtract};
@@ -64,6 +64,7 @@ mod equality {
         }
     }
 }
+
 mod control {
     use crate::{
         Value,
@@ -72,6 +73,7 @@ mod control {
             lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
         },
     };
+    use either::Either;
     use gc_arena::{Collect, Gc};
 
     #[derive(Collect, Debug)]
@@ -111,6 +113,92 @@ mod control {
                 lambda,
                 args: vec![Gc::new(&ctx, cont).into_value(&ctx).into_ptr(&ctx)],
                 dynamic_wind: None,
+            })
+        }
+    }
+
+    #[derive(Collect, Debug)]
+    #[collect(require_static)]
+    pub struct Apply;
+
+    impl NativeLambda for Apply {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let call = match *args[0].borrow() {
+                Value::Lambda(l) => Either::Left(l),
+                Value::Continuation(c) => Either::Right(c),
+                _ => Err(anyhow::anyhow!(
+                    "apply must be given a callable as the first argument"
+                ))?,
+            };
+
+            // The last argument is a list that we have to unwrap
+            let args_append = match args.last().map(|a| (a, *a.borrow())) {
+                // the proc was the only argument
+                Some((_, Value::Lambda(_))) => {
+                    vec![]
+                }
+                Some((sptr, Value::Cons(cons)))
+                    if cons.is_list(*sptr, ctx.thread_ctx.null_value) =>
+                {
+                    // we unwrap the cons (since it is non-cyclical)
+                    let mut args = vec![];
+                    let mut current = cons;
+
+                    loop {
+                        // push car, and set cons to tail *or* break on non-list cdr
+                        // break on null cdr
+                        args.push(current.car.unwrap_or(ctx.thread_ctx.null_value));
+                        match current.cdr.map(|v| *v.borrow()) {
+                            Some(Value::Cons(_))
+                                if Gc::ptr_eq(current.cdr.unwrap(), ctx.thread_ctx.null_value) =>
+                            {
+                                break;
+                            }
+                            Some(Value::Cons(c)) => {
+                                current = c;
+                            }
+                            Some(_) => {
+                                unreachable!("must be a valid list")
+                            }
+                            None => {
+                                // None is null_value lite
+                                break;
+                            }
+                        }
+                    }
+
+                    args
+                }
+                // Non-list cons and other values are just treated as the last argument
+                Some((ptr, _)) => {
+                    vec![*ptr]
+                }
+                None => unreachable!("arity of 1"),
+            };
+            let args_len = args.len() - 1;
+
+            let args = args
+                .iter()
+                .skip(1)
+                .take(args_len.saturating_sub(1))
+                .copied()
+                .chain(args_append)
+                .collect();
+            Ok(match call {
+                Either::Left(lambda) => LambdaReturn::TailCall {
+                    lambda,
+                    args,
+                    dynamic_wind: None,
+                },
+                Either::Right(cont) => LambdaReturn::Continue { cont, args },
             })
         }
     }

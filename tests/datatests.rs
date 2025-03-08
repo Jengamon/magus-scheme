@@ -1,8 +1,9 @@
 use datatest_stable::Utf8Path;
 use magus::{
+    Fuel, Value,
     compiler::{Compiler, LibraryName, ParseProgram, World},
     general_parser::general_parse,
-    interpreter::NullIncluder,
+    interpreter::{Interpreter, NullIncluder},
     lexer::Token,
     library_name, stdlib,
 };
@@ -24,8 +25,132 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
         );
         Err(DatatestError(Box::from(path)))?
     };
-    println!("{data}\n\n{data:#?}");
-    Ok(())
+
+    let mut interp = Interpreter::default();
+    let mut test_world = World::default();
+    test_world.insert(
+        LibraryName::from_iter(library_name!(interp.interner_mut() => scheme base)),
+        stdlib::base::Base,
+    )?;
+    let includer = NullIncluder;
+    let comp = interp.new_compiler();
+    let file_name = format!("{path}.scm");
+    let chunk = interp.compiler_context::<anyhow::Error>(&comp, |mc, comp, interner| {
+        let programs = (file_name.as_str(), data.source()).parse_program(mc, interner, false)?;
+        Ok(comp.compile(mc, interner, &test_world, &includer, programs)?)
+    })?;
+    let mut fuel = Fuel::with(1_000_000);
+    let thread = interp.new_thread(&chunk);
+    // Run thread until out-of-fuel or finished
+    let mut is_finished = false;
+    while fuel.remaining() > 0 && !is_finished {
+        interp.run(&thread, |ctx, _arena, interner| {
+            if ctx.thread.borrow().is_finished() {
+                is_finished = true;
+            } else {
+                ctx.thread
+                    .borrow_mut(&ctx)
+                    .step(ctx, interner, &test_world, &includer, &mut fuel);
+            }
+        });
+    }
+
+    if !is_finished {
+        // we didn't finish, so we ran out of fuel
+        println!("test ran out of fuel");
+        Err(DatatestError(Box::from(path)))?
+    }
+
+    let file_name_spur = interp.interner_mut().get_or_intern(file_name);
+    let results = interp.try_run(&thread, |ctx, _arena, interner| {
+        match ctx.thread.borrow().result().expect("finished execution") {
+            Ok(v) => Ok(v
+                .into_iter()
+                .map(|v| Value::resolve_into(v, interner.clone(), ctx.null_value).to_string())
+                .map(|s| Box::from(s.as_str()))
+                .collect::<Vec<_>>()),
+            // Alternate display, which removes pointer data (for UI tests)
+            Err(e) => Err(format!(
+                "{:#}",
+                e.display(interner, [(file_name_spur, data.source())])
+            )
+            .split('\n')
+            .map(Box::from)
+            .collect::<Vec<_>>()),
+        }
+    });
+    let errored = match results.as_ref() {
+        Ok(res) => {
+            if res != &data.processed {
+                let new = res.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
+                let old = data
+                    .processed
+                    .iter()
+                    .map(|s| s.as_ref())
+                    .collect::<Vec<_>>();
+                let diff = TextDiff::from_slices(old.as_slice(), new.as_slice());
+                for change in diff.iter_all_changes() {
+                    let sign = match change.tag() {
+                        ChangeTag::Delete => "-",
+                        ChangeTag::Insert => "+",
+                        ChangeTag::Equal => " ",
+                    };
+                    println!("{}{}", sign, change);
+                }
+                true
+            } else if !data.errors.is_empty() {
+                println!("errors should be empty if successful result");
+                true
+            } else {
+                false
+            }
+        }
+        Err(errs) => {
+            if errs != &data.errors {
+                let new = errs.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
+                let old = data.errors.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
+                let diff = TextDiff::from_slices(old.as_slice(), new.as_slice());
+                for change in diff.iter_all_changes() {
+                    let sign = match change.tag() {
+                        ChangeTag::Delete => "-",
+                        ChangeTag::Insert => "+",
+                        ChangeTag::Equal => " ",
+                    };
+                    println!("{}{}", sign, change);
+                }
+                true
+            } else if !data.processed.is_empty() {
+                println!("values should be empty if error result");
+                true
+            } else {
+                false
+            }
+        }
+    };
+
+    // TODO We finished, so compare results (and if DATATEST_EXPECT, write the results to test file)
+    // from https://matklad.github.io/2021/05/31/how-to-test.html
+    // add an env var that instead of outputting the errors of a test
+    // updates the file a test is at to correspond to the test.
+    if std::env::var("DATATEST_EXPECT").is_ok() {
+        let mut data = data;
+        match results {
+            Ok(res) => {
+                data.errors = vec![];
+                data.processed = res;
+            }
+            Err(e) => {
+                data.processed = vec![];
+                data.errors = e;
+            }
+        }
+        std::fs::write(path, data.to_string())?;
+        Ok(())
+    } else if errored {
+        Err(DatatestError(Box::from(path)))?
+    } else {
+        Ok(())
+    }
 }
 
 /// Tests the compiler
@@ -300,7 +425,6 @@ fn lexer_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()> 
 datatest_stable::harness! {
     {test = general_parser_test, root = "test_data", pattern = r"^.*\.gpd"},
     {test = lexer_test, root = "test_data", pattern = r"^.*\.lxd"},
-    // disable these tests for now, b/c datatest_stable or nextest don't like when there are no tests
     {test = compile_test, root = "test_data", pattern = r"^.*\.csd"},
-    // {test = scheme_test, root = "test_data", pattern = r"^.*\.sct"},
+    {test = scheme_test, root = "test_data", pattern = r"^.*\.sct"},
 }

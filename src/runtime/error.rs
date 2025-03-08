@@ -150,9 +150,22 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
                     range,
                     file_name(frame.source_filename),
                     match frame.execution {
-                        Execution::Bytecode { chunk, pc, .. } =>
-                            format!("<<code {chunk:p}@({pc})>>"),
-                        Execution::Native { native, .. } => format!("<<native {native:p}>>"),
+                        Execution::Bytecode { chunk, pc, .. } => format!(
+                            "<<code{}>>",
+                            if f.alternate() {
+                                String::new()
+                            } else {
+                                format!(" {chunk:p}@({pc})")
+                            }
+                        ),
+                        Execution::Native { native, .. } => format!(
+                            "<<native{}>>",
+                            if f.alternate() {
+                                String::new()
+                            } else {
+                                format!(" {native:p}")
+                            }
+                        ),
                     },
                     (source)(frame.source_filename)
                         .and_then(|s| {
@@ -171,9 +184,22 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
                     f,
                     "\n - <<synthesized>> {}",
                     match frame.execution {
-                        Execution::Bytecode { chunk, pc, .. } =>
-                            format!("<<code {chunk:p}@({pc})>>"),
-                        Execution::Native { native, .. } => format!("<<native {native:p}>>"),
+                        Execution::Bytecode { chunk, pc, .. } => format!(
+                            "<<code{}>>",
+                            if f.alternate() {
+                                String::new()
+                            } else {
+                                format!(" {chunk:p}@({pc})")
+                            }
+                        ),
+                        Execution::Native { native, .. } => format!(
+                            "<<native{}>>",
+                            if f.alternate() {
+                                String::new()
+                            } else {
+                                format!(" {native:p}")
+                            }
+                        ),
                     }
                 )?;
             }

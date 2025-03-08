@@ -1,4 +1,5 @@
 ---
+#t
 ---
 (import (only (scheme base) define if = * -))
 (define (factorial x)

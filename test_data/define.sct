@@ -1,5 +1,8 @@
 ; Interpreter output TODO
 ---
+11
 ; Compiler output TODO
 ---
+(import (only (scheme base) define +))
+(define x 1)
 (define y 3) (+ y x) (define x 4) (+ x #!fold-case Y X)

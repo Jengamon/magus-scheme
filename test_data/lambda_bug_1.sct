@@ -1,3 +1,7 @@
+error: Rust code produced an error: car only operates on a pair
+
+Backtrace:
+ - <<synthesized>> <<native>>
 ---
 ---
 (import (only (scheme base) define lambda car))

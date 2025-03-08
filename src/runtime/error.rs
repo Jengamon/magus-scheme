@@ -143,6 +143,7 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
             let source = |source_id: Option<lasso::Spur>| {
                 source_id.and_then(|sid| self.sources.get(&sid).copied())
             };
+            // TODO Remove pointer data from errors in favor of something not as...exposed
             if let Some(range) = frame.range {
                 write!(
                     f,

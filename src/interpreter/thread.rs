@@ -578,7 +578,11 @@ impl<'gc> Thread<'gc> {
             };
         }
 
+        // When a step is called, we cleat the interrup status of fuel at this point
+        fuel.clear_interrupt();
+
         while fuel.should_continue() {
+            // This is here b/c we could be finished while fuel still remains
             if self.is_finished() {
                 return;
             }
@@ -896,6 +900,12 @@ impl<'gc> Thread<'gc> {
                     };
                     // now interpret the result!
                     match res {
+                        Ok(LambdaReturn::Waiting) => {
+                            // Call interrupt (in case the lambda itself doesn't) so that
+                            // the interpreter loop is disrupted
+                            fuel.interrupt();
+                            continue;
+                        }
                         Ok(LambdaReturn::Return(vals)) => {
                             if vals.len() == 1 {
                                 self.stack.push(vals[0]);

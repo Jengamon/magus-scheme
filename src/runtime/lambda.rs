@@ -32,6 +32,8 @@ pub type DynamicWind<'gc> = Option<(Lambda<'gc>, Lambda<'gc>)>;
 /// If something marked `[call-end]` is returned, the lambda will not be called again.
 #[derive(Debug)]
 pub enum LambdaReturn<'gc> {
+    /// Suspend the lambda, as it is waiting on an external value
+    Waiting,
     /// Return the given values, pushing them to the stack
     ///
     /// `[call-end]`

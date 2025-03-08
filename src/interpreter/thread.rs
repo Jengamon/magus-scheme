@@ -775,8 +775,22 @@ impl<'gc> Thread<'gc> {
                                     // (which is reversed call order, because stack)
                                     // n can be a native frame or nothing (null continuation means "go to first native call below this")
 
-                                    // FIXME Make this a function so native lambdas can do this easily too.
-                                    todo!("continuation handling")
+                                    // TODO handle dynamic-wind and non-empty continuations
+                                    // Don't advance the frame b/c it will be wiped by the continuation
+                                    if c.frames.is_empty() {
+                                        // wrap the last args values as a values object
+                                        let values = self
+                                            .stack
+                                            .drain(self.stack.len() - args.min(self.stack.len())..);
+                                        let values =
+                                            Value::Values(Gc::new(&ctx, Vec::from_iter(values)))
+                                                .into_ptr(&ctx);
+                                        self.stack.push(values);
+                                        // We just dump execution
+                                        self.frames.clear();
+                                    } else {
+                                        todo!("continuation handling")
+                                    }
                                 }
                                 _ => {
                                     make_error!(SchemeErrorType::NonCallable);
@@ -942,7 +956,7 @@ impl<'gc> Thread<'gc> {
                             };
                             // Set dynamic wind
                             self.frames.last_mut().unwrap().dynamic_wind = dynamic_wind;
-                            self.handle_frame_end(&ctx, true);
+                            // self.handle_frame_end(&ctx, true);
                         }
                         Ok(LambdaReturn::SetExceptionHandler(handler)) => {
                             frame.handler = Some(handler);

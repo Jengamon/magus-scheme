@@ -515,7 +515,7 @@ impl<'gc> Vector<'gc> {
 #[derive(Debug, Collect, Clone, PartialEq, Eq)]
 #[collect(no_drop)]
 pub struct Continuation<'gc> {
-    frames: Rc<[ThreadFrame<'gc>]>,
+    pub(crate) frames: Rc<[ThreadFrame<'gc>]>,
 }
 pub type ContinuationPtr<'gc> = Gc<'gc, Continuation<'gc>>;
 

@@ -100,7 +100,7 @@ mod control {
                 .into());
             };
 
-            if ctx.get_arity(self, lambda).is_satisfied(1) {
+            if !ctx.get_arity(self, lambda).is_satisfied(1) {
                 return Err(anyhow::anyhow!(
                     "call-with-current-continuation must be given a 1-arity lambda"
                 )

@@ -514,12 +514,23 @@ impl<'gc> Thread<'gc> {
     ///
     /// # Parameters
     /// - `is_tail`: will exclude the current frame if true.
-    pub fn create_continuation(&self, is_tail: bool) -> Continuation<'gc> {
-        let mut frames_copy = if !is_tail {
-            self.frames.clone()
+    pub fn create_continuation(&self, mc: &Mutation<'gc>, is_tail: bool) -> Continuation<'gc> {
+        let mut frames_copy: Vec<_> = if !is_tail {
+            &self.frames[..]
         } else {
-            self.frames[..self.frames.len() - 1].to_vec()
-        };
+            &self.frames[..self.frames.len() - 1]
+        }
+        .iter()
+        .map(|f| ThreadFrame {
+            execution: match f.execution {
+                Execution::Native { native } => Execution::Native {
+                    native: native.borrow().continuation(mc).unwrap_or(native),
+                },
+                _ => f.execution.clone(),
+            },
+            ..f.clone()
+        })
+        .collect();
         // Adjust the last to actually be the continuation (if bytecode frame)
         if let Some(Execution::Bytecode { pc, chunk, .. }) =
             frames_copy.last_mut().map(|f| &mut f.execution)

@@ -91,7 +91,7 @@ mod control {
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
             // get the continuation of the stack frame right above us
-            let cont = ctx.thread_ref.create_continuation(true);
+            let cont = ctx.thread_ref.create_continuation(&ctx, true);
 
             let arg = args.first();
             let Some(Value::Lambda(lambda)) = arg.map(|p| *p.borrow()) else {

@@ -159,10 +159,8 @@ pub trait NativeLambda: std::fmt::Debug + Collectable {
     ///
     /// `None` signifies that this lambda can simply have its pointer
     /// copied as a continuation (it does not mutate `self`)
-    fn continuation(&self) -> Option<Self>
-    where
-        Self: Sized,
-    {
+    fn continuation<'gc>(&self, mc: &Mutation<'gc>) -> Option<NativeLambdaPtr<'gc>> {
+        let _ = mc;
         None
     }
 }

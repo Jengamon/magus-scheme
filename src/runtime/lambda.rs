@@ -181,6 +181,14 @@ impl<'gc> CompiledLambda<'gc> {
     pub fn new(arity: Arity, chunk: ChunkPtr<'gc>) -> Self {
         Self { arity, chunk }
     }
+
+    pub fn arity(&self) -> Arity {
+        self.arity
+    }
+
+    pub fn chunk(&self) -> ChunkPtr<'gc> {
+        self.chunk
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

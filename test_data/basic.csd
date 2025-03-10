@@ -1,6 +1,7 @@
 
 ---
 Chunk {
+    upvalues: 0,
     constants: [
         Number(
             3,
@@ -15,6 +16,7 @@ Chunk {
                 0,
             ),
             chunk: Chunk {
+                upvalues: 0,
                 constants: [
                     Number(
                         3,

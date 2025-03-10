@@ -1,6 +1,7 @@
 
 ---
 Chunk {
+    upvalues: 0,
     constants: [
         Symbol(
             Spur(8),

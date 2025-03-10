@@ -1,0 +1,7 @@
+---
+7
+---
+; upvalues in upvalues should also work
+(import (only (scheme base) define lambda +))
+(define (a a) (lambda (b) (lambda () (+ a b))))
+(((a 3) 4))

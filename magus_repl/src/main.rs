@@ -203,8 +203,17 @@ fn execute(
                     }
                 }
                 println!("==END SYMBOLS==");
+                println!("==LAMBDAS==");
+                for (idx, l) in chunk.lambdas.iter().enumerate() {
+                    println!("==LAMBDA {idx}==");
+                    for code in l.chunk().code.iter() {
+                        println!("{code}")
+                    }
+                    println!("==END LAMBDA {idx}==");
+                }
+                println!("==END LAMBDAS==");
                 // nice mnemonic format??
-                println!("==CHUNK CODE==");
+                println!("==CHUNK CODE (upvalues: {})==", chunk.upvalues);
                 for code in chunk.code.iter() {
                     // Use display
                     println!("{code}");

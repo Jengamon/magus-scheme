@@ -54,6 +54,14 @@ pub enum Bytecode {
     PushPromise {
         index: usize,
     },
+    /// Sets an upvalue referencing the value at the top of stack (does not pop)
+    SetUpvalue {
+        index: usize,
+    },
+    /// Fetch an upvalue (an argument of a parent scope)
+    FetchUpvalue {
+        index: usize,
+    },
     /// Fetch args from the current scope
     FetchArg {
         index: usize,
@@ -143,6 +151,8 @@ impl Bytecode {
             Self::PushBool { .. } => 1,
             Self::PushLambda { .. } => 1,
             Self::PushPromise { .. } => 1,
+            Self::SetUpvalue { .. } => 1,
+            Self::FetchUpvalue { .. } => 1,
             Self::FetchArg { .. } => 1,
             Self::FetchRest { .. } => 1,
             Self::MakePair => 1,
@@ -176,6 +186,8 @@ impl fmt::Display for Bytecode {
             }
             Bytecode::PushLambda { index } => write!(f, "LMBD {index}"),
             Bytecode::PushPromise { index } => write!(f, "PROM {index}"),
+            Bytecode::SetUpvalue { index } => write!(f, "UPVL {index}"),
+            Bytecode::FetchUpvalue { index } => write!(f, "FUPV {index}"),
             Bytecode::FetchArg { index } => write!(f, "FARG {index}"),
             Bytecode::FetchRest => write!(f, "REST"),
             Bytecode::MakePair => write!(f, "PAIR"),
@@ -233,6 +245,8 @@ impl SourceData {
 // NOTE Chunks are not thread-safe and are immutable, so to make them *really* cheap to clone,
 // we can use Rc
 pub struct Chunk<'gc> {
+    /// number of upvalues this chunk (and subchunks) can use
+    pub upvalues: usize,
     /// symbols this chunk references
     #[collect(require_static)]
     pub constants: Rc<[Constant]>,
@@ -254,12 +268,14 @@ pub struct Chunk<'gc> {
 pub type ChunkPtr<'gc> = Gc<'gc, Chunk<'gc>>;
 
 impl<'gc> Chunk<'gc> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         mc: &Mutation<'gc>,
         code: impl IntoIterator<Item = Bytecode>,
         constants: impl IntoIterator<Item = Constant>,
         lambdas: impl IntoIterator<Item = CompiledLambdaPtr<'gc>>,
         promises: impl IntoIterator<Item = Box<[Bytecode]>>,
+        upvalues: usize,
         import_stack_env: StackEnvironmentPtr<'gc>,
         labels: FxHashMap<usize, SourceData>,
     ) -> ChunkPtr<'gc> {
@@ -268,6 +284,7 @@ impl<'gc> Chunk<'gc> {
             constants: constants.into_iter().collect(),
             lambdas: lambdas.into_iter().collect(),
             promises: promises.into_iter().collect(),
+            upvalues,
             import_env: import_stack_env,
             labels: Rc::new(labels),
         };

@@ -1,5 +1,6 @@
 use core::fmt;
 use std::{
+    cell::RefCell,
     collections::{HashMap, HashSet},
     num::NonZero,
     rc::Rc,
@@ -235,6 +236,7 @@ pub struct SyntaxContext<'a, 'gc> {
     constants: &'a mut Vec<Constant>,
     lambdas: &'a mut Vec<CompiledLambdaPtr<'gc>>,
     promises: &'a mut Vec<Box<[Bytecode]>>,
+    upvalues: &'a mut usize,
 }
 
 impl<'gc> SyntaxContext<'_, 'gc> {
@@ -258,6 +260,14 @@ impl<'gc> SyntaxContext<'_, 'gc> {
         }
     }
 
+    // Internal method to create an upvalue reference
+    fn add_upvalue(&mut self) -> usize {
+        // Upvalues should be comparable to see if they are referencing the same out-of-scope value
+        let idx = *self.upvalues;
+        *self.upvalues += 1;
+        idx
+    }
+
     pub fn constants(&self) -> impl IntoIterator<Item = Constant> {
         self.constants.clone()
     }
@@ -268,6 +278,10 @@ impl<'gc> SyntaxContext<'_, 'gc> {
 
     pub fn promises(&self) -> impl IntoIterator<Item = Box<[Bytecode]>> {
         self.promises.clone()
+    }
+
+    pub fn upvalues(&self) -> usize {
+        *self.upvalues
     }
 }
 
@@ -326,7 +340,7 @@ pub trait Syntax: std::fmt::Debug {
     ) -> anyhow::Result<SyntaxReturn<'gc>>;
 
     /// Registers this syntax item as a definition
-    fn is_definition<'gc>(&self, _ptr: ProgramPtr<'gc>) -> bool {
+    fn is_definition(&self, _ptr: ProgramPtr<'_>) -> bool {
         false
     }
 
@@ -334,7 +348,7 @@ pub trait Syntax: std::fmt::Debug {
     ///
     /// Affects how definitions are registered. A container syntax is considered a
     /// definition if all of it's components are definitions (or containers of only definitions)
-    fn is_container<'gc>(&self, _ptr: ProgramPtr<'gc>) -> bool {
+    fn is_container(&self, _ptr: ProgramPtr<'_>) -> bool {
         false
     }
 }
@@ -467,8 +481,22 @@ type SyntaxDef = HashMap<lasso::Spur, ArcSyntax>;
 type VariableDef = HashSet<lasso::Spur>;
 #[derive(Debug, Clone, Default)]
 pub struct ArgumentScope {
-    args: Box<[lasso::Spur]>,
+    args: Rc<[lasso::Spur]>,
     rest: Option<lasso::Spur>,
+
+    upvalues: Rc<RefCell<fxhash::FxHashMap<Option<usize>, usize>>>,
+}
+
+impl ArgumentScope {
+    // A scope should be able to set an argument as an upvalue which changes the code emitted when it is defined
+    // so that the code emitted when referencing it can also change to enable this
+
+    /// Define an argument as an upvalue
+    /// - `Some(index)`: argument at index
+    /// - `None`: rest argument
+    pub(crate) fn set_upvalue(&mut self, index: Option<usize>, upvalue_index: usize) {
+        self.upvalues.borrow_mut().insert(index, upvalue_index);
+    }
 }
 
 slotmap::new_key_type! {
@@ -517,11 +545,11 @@ pub struct Compiler<'gc> {
     variables_defined: VariableDef,
     // arguments that are in scope
     #[collect(require_static)]
-    argument_scope: ArgumentScope,
+    argument_scopes: Vec<ArgumentScope>,
 
     // checkpoints store macro and variable definitions
     #[collect(require_static)]
-    checkpoints: Vec<(SyntaxDef, VariableDef, ArgumentScope)>,
+    checkpoints: Vec<(SyntaxDef, VariableDef, Vec<ArgumentScope>)>,
     // import environments in-scope
     environments: Vec<StackEnvironmentPtr<'gc>>,
     // which environment to use
@@ -536,8 +564,15 @@ pub struct Checkpoint(usize);
 pub struct EnvironmentSpec(NonZero<usize>);
 #[derive(Debug, Clone, Copy)]
 pub enum Arg {
-    Index(usize),
-    Rest,
+    Index {
+        /// Scope is the 0 inverse-indexed scope (where 0 is current scope, 1 is parent scope, etc)
+        scope: usize,
+        index: usize,
+    },
+    Rest {
+        /// Scope is the 0 inverse-indexed scope (where 0 is current scope, 1 is parent scope, etc)
+        scope: usize,
+    },
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -725,12 +760,13 @@ pub enum LibraryDeclaration<'gc> {
 
 impl<'gc> LibraryDeclaration<'gc> {
     pub fn convert(interner: &mut lasso::Rodeo, ptr: ProgramPtr<'gc>) -> Option<Self> {
-        let import = interner.get_or_intern_static("import");
-        let include_library_definitions =
-            interner.get_or_intern_static("include-library-definitions");
-        let include = interner.get_or_intern_static("include");
-        let include_ci = interner.get_or_intern_static("include-ci");
-        let begin = interner.get_or_intern_static("begin");
+        // let import = interner.get_or_intern_static("import");
+        // let include_library_definitions =
+        //     interner.get_or_intern_static("include-library-definitions");
+        // let include = interner.get_or_intern_static("include");
+        // let include_ci = interner.get_or_intern_static("include-ci");
+        // let begin = interner.get_or_intern_static("begin");
+        let _ = (interner, ptr);
         None
     }
 }
@@ -764,7 +800,7 @@ impl<'gc> Compiler<'gc> {
             local_world: LocalWorld::default(),
             syntax_items: Default::default(),
             variables_defined: Default::default(),
-            argument_scope: Default::default(),
+            argument_scopes: Default::default(),
             checkpoints: Default::default(),
             // The very first environment pointer is always the default environment
             environments: vec![Gc::new(mc, RefLock::new(Environment::new(mc, None)))],
@@ -842,6 +878,7 @@ impl<'gc> Compiler<'gc> {
         let mut constants = Vec::new();
         let mut lambdas = Vec::new();
         let mut promises = Vec::new();
+        let mut upvalues = 0;
         let mut context = SyntaxContext {
             mc,
             interner,
@@ -849,6 +886,7 @@ impl<'gc> Compiler<'gc> {
             constants: &mut constants,
             lambdas: &mut lambdas,
             promises: &mut promises,
+            upvalues: &mut upvalues,
         };
         let mut code = vec![];
         let mut labels = FxHashMap::default();
@@ -868,6 +906,7 @@ impl<'gc> Compiler<'gc> {
             constants,
             lambdas,
             promises,
+            upvalues,
             self.default_environment_ptr(),
             labels,
         ))
@@ -903,9 +942,49 @@ impl<'gc> Compiler<'gc> {
                     index,
                 }])))
             }
-            ProgramData::Symbol(spur) => Ok(SyntaxReturn::Code(Box::from([Bytecode::Reference {
-                symbol: *spur,
-            }]))),
+            ProgramData::Symbol(spur) => {
+                if let Some(arg) = self.is_argument(*spur) {
+                    match arg {
+                        Arg::Index { scope, index } if scope != 0 => {
+                            // Create an upvalue pointing at the requisite scope...
+                            let upvalue_index = ctx.add_upvalue();
+                            // Find the argument scope, and define upvalues
+                            let Some(argument_scope) =
+                                self.argument_scopes.iter_mut().rev().nth(scope)
+                            else {
+                                unreachable!("[ICE] upvalue scope error");
+                            };
+                            argument_scope.set_upvalue(Some(index), upvalue_index);
+
+                            Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
+                                index: upvalue_index,
+                            }])))
+                        }
+                        Arg::Rest { scope } if scope != 0 => {
+                            // Create an upvalue pointing at the requisitve scopes rest param
+                            let upvalue_index = ctx.add_upvalue();
+                            // Find the argument scope, and define upvalues
+                            let Some(argument_scope) =
+                                self.argument_scopes.iter_mut().rev().nth(scope)
+                            else {
+                                unreachable!("[ICE] upvalue scope error");
+                            };
+                            argument_scope.set_upvalue(None, upvalue_index);
+
+                            Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
+                                index: upvalue_index,
+                            }])))
+                        }
+                        _ => Ok(SyntaxReturn::Code(Box::from([Bytecode::Reference {
+                            symbol: *spur,
+                        }]))),
+                    }
+                } else {
+                    Ok(SyntaxReturn::Code(Box::from([Bytecode::Reference {
+                        symbol: *spur,
+                    }])))
+                }
+            }
             ProgramData::Bool(b) => Ok(SyntaxReturn::Code(Box::from([Bytecode::PushBool {
                 bool: *b,
             }]))),
@@ -1103,7 +1182,7 @@ impl<'gc> Compiler<'gc> {
     }
 
     /// Checks if an expression is considered a definition by Scheme
-    pub fn is_definition(&self, interner: &mut lasso::Rodeo, program: ProgramPtr<'gc>) -> bool {
+    pub fn is_definition(&self, program: ProgramPtr<'gc>) -> bool {
         let definition_symbols = self
             .syntax_items
             .iter()
@@ -1121,7 +1200,7 @@ impl<'gc> Compiler<'gc> {
                     ProgramData::Symbol(s) if definition_symbols.contains(&s) => true,
                     ProgramData::Symbol(s)
                         if container_symbols.contains(&s)
-                            && body.iter().all(|bp| self.is_definition(interner, *bp)) =>
+                            && body.iter().all(|bp| self.is_definition(*bp)) =>
                     {
                         true
                     }
@@ -1148,6 +1227,47 @@ impl<'gc> Compiler<'gc> {
         };
         self.environments.push(new_env);
         EnvironmentSpec(nzp)
+    }
+
+    /// Helper function for pushing arguments to certain names (while also handling upvalues)
+    pub fn arguments(&self) -> impl IntoIterator<Item = Bytecode> {
+        if let Some(argument_scope) = self.argument_scopes.last() {
+            argument_scope
+                .args
+                .iter()
+                .copied()
+                .enumerate()
+                .flat_map(|(index, symbol)| {
+                    if let Some(upv) = argument_scope.upvalues.borrow().get(&Some(index)) {
+                        vec![
+                            Bytecode::FetchArg { index },
+                            Bytecode::SetUpvalue { index: *upv },
+                            Bytecode::Define { symbol },
+                        ]
+                    } else {
+                        vec![Bytecode::FetchArg { index }, Bytecode::Define { symbol }]
+                    }
+                })
+                .chain(
+                    argument_scope
+                        .rest
+                        .map(|symbol| {
+                            if let Some(upv) = argument_scope.upvalues.borrow().get(&None) {
+                                vec![
+                                    Bytecode::FetchRest,
+                                    Bytecode::SetUpvalue { index: *upv },
+                                    Bytecode::Define { symbol },
+                                ]
+                            } else {
+                                vec![Bytecode::FetchRest, Bytecode::Define { symbol }]
+                            }
+                        })
+                        .unwrap_or_default(),
+                )
+                .collect::<Vec<_>>()
+        } else {
+            Vec::default()
+        }
     }
 
     /// Helper for a hygenic context
@@ -1200,14 +1320,14 @@ impl<'gc> Compiler<'gc> {
         self.checkpoints.push((
             self.syntax_items.clone(),
             self.variables_defined.clone(),
-            self.argument_scope.clone(),
+            self.argument_scopes.clone(),
         ));
         checkpoint
     }
 
     /// Restore the syntax items, variables, and argument symbols defined at the point the checkpoint was created.
     pub fn restore_checkpoint(&mut self, checkpoint: Checkpoint) {
-        let Some((syntax_items, variables_defined, argument_scope)) =
+        let Some((syntax_items, variables_defined, argument_scopes)) =
             self.checkpoints.get(checkpoint.0)
         else {
             unreachable!()
@@ -1215,21 +1335,32 @@ impl<'gc> Compiler<'gc> {
 
         self.syntax_items = syntax_items.clone();
         self.variables_defined = variables_defined.clone();
-        self.argument_scope = argument_scope.clone();
+        self.argument_scopes = argument_scopes.clone();
     }
 
     pub fn is_argument(&self, symbol: lasso::Spur) -> Option<Arg> {
-        if let Some(rest) = self.argument_scope.rest {
-            if symbol == rest {
-                return Some(Arg::Rest);
-            }
+        if let Some(scope) =
+            self.argument_scopes
+                .iter()
+                .rev()
+                .enumerate()
+                .find_map(|(idx, args)| {
+                    matches!(args.rest, Some(rest) if symbol == rest).then_some(idx)
+                })
+        {
+            return Some(Arg::Rest { scope });
         }
 
-        self.argument_scope
-            .args
+        self.argument_scopes
             .iter()
-            .position(|s| *s == symbol)
-            .map(Arg::Index)
+            .rev()
+            .enumerate()
+            .find_map(|(scope, args)| {
+                args.args
+                    .iter()
+                    .position(|s| *s == symbol)
+                    .map(|index| Arg::Index { scope, index })
+            })
     }
 
     // if this fails, the variable is either undefined by the script,
@@ -1238,8 +1369,10 @@ impl<'gc> Compiler<'gc> {
     // since the environment is not determined until the script is run
     pub fn get_macro(&self, symbol: lasso::Spur) -> Option<ArcSyntax> {
         if self.variables_defined.contains(&symbol)
-            || self.argument_scope.args.contains(&symbol)
-            || (self.argument_scope.rest.is_some_and(|r| r == symbol))
+            || self
+                .argument_scopes
+                .iter()
+                .any(|args| args.args.contains(&symbol) || args.rest.is_some_and(|r| r == symbol))
         {
             return None;
         }
@@ -1249,15 +1382,16 @@ impl<'gc> Compiler<'gc> {
 
     pub fn define_macro(&mut self, symbol: lasso::Spur, syntax: ArcSyntax) {
         self.variables_defined.remove(&symbol);
-        self.argument_scope.args = self
-            .argument_scope
-            .args
-            .iter()
-            .copied()
-            .filter(|s| *s != symbol)
-            .collect();
-        if self.argument_scope.rest.is_some_and(|r| r == symbol) {
-            self.argument_scope.rest.take();
+        for arg_scope in self.argument_scopes.iter_mut() {
+            arg_scope.args = arg_scope
+                .args
+                .iter()
+                .copied()
+                .filter(|s| *s != symbol)
+                .collect();
+            if arg_scope.rest.is_some_and(|r| r == symbol) {
+                arg_scope.rest.take();
+            }
         }
         self.syntax_items.insert(symbol, syntax);
     }
@@ -1266,12 +1400,16 @@ impl<'gc> Compiler<'gc> {
         self.variables_defined.insert(symbol);
     }
 
-    pub fn define_arg_symbols(
+    pub fn define_arguments(
         &mut self,
         args: impl IntoIterator<Item = lasso::Spur>,
         rest: Option<lasso::Spur>,
     ) {
-        self.argument_scope.args = args.into_iter().collect();
-        self.argument_scope.rest = rest;
+        // Create and push a new argument scope
+        self.argument_scopes.push(ArgumentScope {
+            args: args.into_iter().collect(),
+            rest,
+            upvalues: Rc::new(RefCell::new(fxhash::FxHashMap::default())),
+        });
     }
 }

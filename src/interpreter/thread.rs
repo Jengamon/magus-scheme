@@ -100,6 +100,8 @@ pub struct ThreadFrame<'gc> {
     bottom: usize,
     // TODO add a "promise slot" that when a frame is exiting, will fill the promise with the value it is
     // exiting the frame with.
+    // Upvalues are stored per-frame, but are duplicated across frames (which is why the GcReflock pattern)
+    upvalues: Gc<'gc, RefLock<Vec<ValuePtr<'gc>>>>,
 }
 
 impl ThreadFrame<'_> {
@@ -130,6 +132,7 @@ impl PartialEq for ThreadFrame<'_> {
                 || self.exception.is_none() && other.exception.is_none())
             && Gc::ptr_eq(self.env, other.env)
             && self.bottom == other.bottom
+            && Gc::ptr_eq(self.upvalues, other.upvalues)
     }
 }
 impl Eq for ThreadFrame<'_> {}
@@ -226,6 +229,7 @@ impl<'gc> Thread<'gc> {
                 dynamic_wind: None,
                 exception: None,
                 bottom: 0,
+                upvalues: Gc::new(mc, RefLock::new(Vec::with_capacity(chunk.upvalues))),
             }],
             ..Default::default()
         }
@@ -270,6 +274,8 @@ impl<'gc> Thread<'gc> {
                 // Adjust the frame's parent to point to *this* chunk's import env
                 last.env.borrow_mut(mc).reparent(Some(chunk.import_env));
                 last.execution = execution;
+                // Create an independant upvalues array
+                last.upvalues = Gc::new(mc, RefLock::new(Vec::with_capacity(chunk.upvalues)));
                 return;
             }
         }
@@ -285,6 +291,8 @@ impl<'gc> Thread<'gc> {
             dynamic_wind: None,
             exception: None,
             bottom: self.stack.len(),
+            // Create an independant upvalues array
+            upvalues: Gc::new(mc, RefLock::new(Vec::with_capacity(chunk.upvalues))),
         });
     }
 
@@ -494,6 +502,16 @@ impl<'gc> Thread<'gc> {
                 ctx,
                 RefLock::new(StackEnvironment::new(ctx, Self::current_env(&self.frames))),
             ),
+            // Copy parent frame upvalues (if available)
+            upvalues: self.frames.last().map(|f| f.upvalues).unwrap_or_else(|| {
+                Gc::new(
+                    ctx,
+                    RefLock::new(Vec::with_capacity(match lambda {
+                        Lambda::Compiled(c) => c.chunk.upvalues,
+                        _ => 0,
+                    })),
+                )
+            }),
         };
 
         if is_tail {
@@ -526,7 +544,7 @@ impl<'gc> Thread<'gc> {
                 Execution::Native { native } => Execution::Native {
                     native: native.borrow().continuation(mc).unwrap_or(native),
                 },
-                _ => f.execution.clone(),
+                _ => f.execution,
             },
             ..f.clone()
         })
@@ -734,6 +752,34 @@ impl<'gc> Thread<'gc> {
                                 advance_to_next_inst!();
                             } else {
                                 make_error!(SchemeErrorType::InvalidRest);
+                            }
+                        }
+                        Bytecode::SetUpvalue { index } => {
+                            let upvalues_len = frame.upvalues.borrow().len();
+                            if upvalues_len <= index {
+                                // Fill upvalues with undefineds
+                                frame.upvalues.borrow_mut(&ctx).extend(std::iter::repeat_n(
+                                    Gc::new(&ctx, RefLock::new(Value::Undefined)),
+                                    index - upvalues_len + 1,
+                                ));
+                            }
+                            let Some(val) = self.stack.last().copied() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+                            frame.upvalues.borrow_mut(&ctx)[index] = val;
+                            advance_to_next_inst!();
+                        }
+                        Bytecode::FetchUpvalue { index } => {
+                            if let Some(val) = frame.upvalues.borrow().get(index) {
+                                if !matches!(*val.borrow(), Value::Undefined) {
+                                    self.stack.push(*val);
+                                    advance_to_next_inst!();
+                                } else {
+                                    todo!("TODO upvalue misreference miscompilation");
+                                }
+                            } else {
+                                todo!("TODO Handle if upvalue misreferenced miscompilation")
                             }
                         }
                         Bytecode::Reference { symbol } => {
@@ -1108,6 +1154,7 @@ mod tests {
                 [Constant::Number(3)],
                 [],
                 [],
+                0,
                 import_env,
                 Default::default(),
             );

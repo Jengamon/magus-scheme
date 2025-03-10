@@ -2,6 +2,7 @@
 ---
 ; all the arities are wrong currently
 Chunk {
+    upvalues: 0,
     constants: [
         Number(
             3,
@@ -16,6 +17,7 @@ Chunk {
                 0,
             ),
             chunk: Chunk {
+                upvalues: 0,
                 constants: [
                     Number(
                         3,
@@ -79,6 +81,7 @@ Chunk {
                 1,
             ),
             chunk: Chunk {
+                upvalues: 0,
                 constants: [
                     Number(
                         3,
@@ -93,6 +96,7 @@ Chunk {
                             0,
                         ),
                         chunk: Chunk {
+                            upvalues: 0,
                             constants: [
                                 Number(
                                     3,
@@ -212,6 +216,7 @@ Chunk {
                 1,
             ),
             chunk: Chunk {
+                upvalues: 0,
                 constants: [
                     Number(
                         3,
@@ -226,6 +231,7 @@ Chunk {
                             0,
                         ),
                         chunk: Chunk {
+                            upvalues: 0,
                             constants: [
                                 Number(
                                     3,
@@ -289,6 +295,7 @@ Chunk {
                             1,
                         ),
                         chunk: Chunk {
+                            upvalues: 0,
                             constants: [
                                 Number(
                                     3,
@@ -303,6 +310,7 @@ Chunk {
                                         0,
                                     ),
                                     chunk: Chunk {
+                                        upvalues: 0,
                                         constants: [
                                             Number(
                                                 3,
@@ -491,6 +499,7 @@ Chunk {
                 3,
             ),
             chunk: Chunk {
+                upvalues: 0,
                 constants: [
                     Number(
                         3,
@@ -505,6 +514,7 @@ Chunk {
                             0,
                         ),
                         chunk: Chunk {
+                            upvalues: 0,
                             constants: [
                                 Number(
                                     3,
@@ -568,6 +578,7 @@ Chunk {
                             1,
                         ),
                         chunk: Chunk {
+                            upvalues: 0,
                             constants: [
                                 Number(
                                     3,
@@ -582,6 +593,7 @@ Chunk {
                                         0,
                                     ),
                                     chunk: Chunk {
+                                        upvalues: 0,
                                         constants: [
                                             Number(
                                                 3,
@@ -701,6 +713,7 @@ Chunk {
                             1,
                         ),
                         chunk: Chunk {
+                            upvalues: 0,
                             constants: [
                                 Number(
                                     3,
@@ -715,6 +728,7 @@ Chunk {
                                         0,
                                     ),
                                     chunk: Chunk {
+                                        upvalues: 0,
                                         constants: [
                                             Number(
                                                 3,
@@ -778,6 +792,7 @@ Chunk {
                                         1,
                                     ),
                                     chunk: Chunk {
+                                        upvalues: 0,
                                         constants: [
                                             Number(
                                                 3,
@@ -792,6 +807,7 @@ Chunk {
                                                     0,
                                                 ),
                                                 chunk: Chunk {
+                                                    upvalues: 0,
                                                     constants: [
                                                         Number(
                                                             3,

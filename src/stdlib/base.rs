@@ -36,29 +36,24 @@ fn lambda_helper<'gc>(
 ) -> anyhow::Result<ChunkPtr<'gc>> {
     compiler.hygenic(ctx, import_env, |ctx, compiler, import_env| {
         // build a chunk
-        let mut code = vec![];
 
-        for (index, symbol) in formals.non_rest_params().into_iter().enumerate() {
-            code.extend([Bytecode::FetchArg { index }, Bytecode::Define { symbol }])
-        }
-        if let Some(symbol) = formals.rest_param() {
-            code.extend([Bytecode::FetchRest, Bytecode::Define { symbol }])
-        }
+        compiler.define_arguments(formals.non_rest_params(), formals.rest_param());
 
         let mut labels = fxhash::FxHashMap::default();
         let mut definitions_allowed = true;
+        let mut program_code = Vec::new();
         for program in body {
-            if !compiler.is_definition(ctx.interner, program) && definitions_allowed {
+            if !compiler.is_definition(program) && definitions_allowed {
                 definitions_allowed = false;
-            } else if compiler.is_definition(ctx.interner, program) && !definitions_allowed {
+            } else if compiler.is_definition(program) && !definitions_allowed {
                 return Err(anyhow::anyhow!(
                     "lambda body requires all definitions before all expressions"
                 ));
             }
             if let Some(source) = program.source {
-                labels.insert(code.len(), source);
+                labels.insert(program_code.len(), source);
             }
-            code.extend(compiler.compile_code(ctx, program)?.into_bytecode());
+            program_code.extend(compiler.compile_code(ctx, program)?.into_bytecode());
         }
 
         if definitions_allowed {
@@ -67,12 +62,23 @@ fn lambda_helper<'gc>(
             ));
         }
 
+        // join argument defs, then program code (done here, so that upvalues are known)
+        let arguments = compiler.arguments().into_iter().collect::<Vec<_>>();
+        // adjust code labels for arguments code
+        for k in labels.keys().copied().collect::<Vec<_>>() {
+            let v = labels.remove(&k).expect("[ICE] mislabeled data");
+            labels.insert(k + arguments.len(), v);
+        }
+        // get the code all nice and joind together
+        let code: Vec<_> = arguments.into_iter().chain(program_code).collect();
+
         Ok(Chunk::new(
             ctx,
             code,
             ctx.constants(),
             ctx.lambdas(),
             ctx.promises(),
+            ctx.upvalues(),
             import_env,
             labels,
         ))

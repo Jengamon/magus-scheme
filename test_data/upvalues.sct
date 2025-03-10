@@ -1,0 +1,7 @@
+---
+3
+---
+(import (only (scheme base) define lambda))
+; we need upvalues b/c of code like this
+(define (thunk a) (lambda () a))
+((thunk 3))

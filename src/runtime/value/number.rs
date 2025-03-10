@@ -59,7 +59,7 @@ impl Number {
     fn i64_to_bigint(i: i64) -> BigInt {
         match i {
             0 => BigInt::ZERO,
-            i if i.is_negative() => BigInt::from_bytes_be(Sign::Minus, &i.to_be_bytes()),
+            i if i.is_negative() => BigInt::from_bytes_be(Sign::Minus, &i.abs().to_be_bytes()),
             i => BigInt::from_bytes_be(Sign::Plus, &i.to_be_bytes()),
         }
     }

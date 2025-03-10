@@ -1,0 +1,7 @@
+---
+#t
+---
+(import (only (scheme base) = + define))
+; Negative numbers should work properly
+(define (game a b c) (= (+ a b c) 0))
+(game 1 2 -3)

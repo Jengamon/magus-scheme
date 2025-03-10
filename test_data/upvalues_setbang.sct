@@ -1,0 +1,7 @@
+---
+9
+---
+; set! should work even if the name is an upvalue
+(import (only (scheme base) define lambda set! +))
+(define (h a) (lambda () (define x a) (set! a 4) (+ x a a)))
+((h 1))

@@ -27,7 +27,7 @@ mod procedures;
 mod quote;
 
 // helper function for compiling a lambda
-fn lambda_helper<'gc>(
+pub fn lambda_helper<'gc>(
     compiler: &mut Compiler<'gc>,
     ctx: &mut SyntaxContext<'_, 'gc>,
     import_env: StackEnvironmentPtr<'gc>,

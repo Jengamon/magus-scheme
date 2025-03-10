@@ -261,7 +261,7 @@ impl<'gc> SyntaxContext<'_, 'gc> {
     }
 
     // Internal method to create an upvalue reference
-    fn add_upvalue(&mut self) -> usize {
+    pub(crate) fn add_upvalue(&mut self) -> usize {
         // Upvalues should be comparable to see if they are referencing the same out-of-scope value
         let idx = *self.upvalues;
         *self.upvalues += 1;
@@ -487,6 +487,10 @@ pub struct ArgumentScope {
     upvalues: Rc<RefCell<fxhash::FxHashMap<Option<usize>, usize>>>,
 }
 
+#[derive(thiserror::Error, Debug)]
+#[error("name not defined in scope")]
+pub struct Undefined;
+
 impl ArgumentScope {
     // A scope should be able to set an argument as an upvalue which changes the code emitted when it is defined
     // so that the code emitted when referencing it can also change to enable this
@@ -496,6 +500,17 @@ impl ArgumentScope {
     /// - `None`: rest argument
     pub(crate) fn set_upvalue(&mut self, index: Option<usize>, upvalue_index: usize) {
         self.upvalues.borrow_mut().insert(index, upvalue_index);
+    }
+
+    /// Get the upvalue index of an argument if available
+    pub fn is_upvalue(&self, symbol: lasso::Spur) -> Result<Option<usize>, Undefined> {
+        if self.rest.is_some_and(|r| r == symbol) {
+            Ok(self.upvalues.borrow().get(&None).copied())
+        } else if let Some(pos) = self.args.iter().position(|s| s == &symbol) {
+            Ok(self.upvalues.borrow().get(&Some(pos)).copied())
+        } else {
+            Err(Undefined)
+        }
     }
 }
 
@@ -946,30 +961,42 @@ impl<'gc> Compiler<'gc> {
                 if let Some(arg) = self.is_argument(*spur) {
                     match arg {
                         Arg::Index { scope, index } if scope != 0 => {
-                            // Create an upvalue pointing at the requisite scope...
-                            let upvalue_index = ctx.add_upvalue();
                             // Find the argument scope, and define upvalues
                             let Some(argument_scope) =
                                 self.argument_scopes.iter_mut().rev().nth(scope)
                             else {
                                 unreachable!("[ICE] upvalue scope error");
                             };
-                            argument_scope.set_upvalue(Some(index), upvalue_index);
+                            let upvalue_index =
+                                if let Ok(Some(upv)) = argument_scope.is_upvalue(*spur) {
+                                    upv
+                                } else {
+                                    // Create an upvalue pointing at the requisite scope...
+                                    let upvalue_index = ctx.add_upvalue();
+                                    argument_scope.set_upvalue(Some(index), upvalue_index);
+                                    upvalue_index
+                                };
 
                             Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
                                 index: upvalue_index,
                             }])))
                         }
                         Arg::Rest { scope } if scope != 0 => {
-                            // Create an upvalue pointing at the requisitve scopes rest param
-                            let upvalue_index = ctx.add_upvalue();
                             // Find the argument scope, and define upvalues
                             let Some(argument_scope) =
                                 self.argument_scopes.iter_mut().rev().nth(scope)
                             else {
                                 unreachable!("[ICE] upvalue scope error");
                             };
-                            argument_scope.set_upvalue(None, upvalue_index);
+                            let upvalue_index =
+                                if let Ok(Some(upv)) = argument_scope.is_upvalue(*spur) {
+                                    upv
+                                } else {
+                                    // Create an upvalue pointing at the requisite scope...
+                                    let upvalue_index = ctx.add_upvalue();
+                                    argument_scope.set_upvalue(None, upvalue_index);
+                                    upvalue_index
+                                };
 
                             Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
                                 index: upvalue_index,
@@ -1411,5 +1438,15 @@ impl<'gc> Compiler<'gc> {
             rest,
             upvalues: Rc::new(RefCell::new(fxhash::FxHashMap::default())),
         });
+    }
+
+    /// Get the [`ArgumentScope`] of a given scope where 0 is local, 1 is parent, etc..
+    pub fn argument_scope(&self, scope: usize) -> Option<&ArgumentScope> {
+        self.argument_scopes.iter().rev().nth(scope)
+    }
+
+    /// Get the [`ArgumentScope`] of a given scope where 0 is local, 1 is parent, etc..
+    pub fn argument_scope_mut(&mut self, scope: usize) -> Option<&mut ArgumentScope> {
+        self.argument_scopes.iter_mut().rev().nth(scope)
     }
 }

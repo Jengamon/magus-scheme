@@ -11,7 +11,7 @@ pub mod srfi;
 /// Data struct for formals
 #[derive(Debug, Collect)]
 #[collect(require_static)]
-enum Formals {
+pub enum Formals {
     Empty,
     Single(lasso::Spur),
     List(Box<[lasso::Spur]>),
@@ -51,7 +51,7 @@ impl Formals {
 
 #[derive(thiserror::Error, Debug)]
 #[error("not a formals list")]
-struct NotFormals;
+pub struct NotFormals;
 
 impl Formals {
     pub fn convert(ptr: ProgramPtr<'_>, interner: &mut lasso::Rodeo) -> Result<Self, NotFormals> {

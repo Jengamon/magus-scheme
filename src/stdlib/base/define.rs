@@ -2,7 +2,7 @@ use gc_arena::Gc;
 
 use crate::{
     bytecode::Bytecode,
-    compiler::{Compiler, ProgramData, ProgramPtr, Syntax, SyntaxContext, SyntaxReturn},
+    compiler::{Arg, Compiler, ProgramData, ProgramPtr, Syntax, SyntaxContext, SyntaxReturn},
     environment::StackEnvironmentPtr,
     runtime::lambda::CompiledLambda,
     stdlib::{Formals, base::lambda_helper},
@@ -156,16 +156,64 @@ impl Syntax for SetBang {
             return Err(anyhow::anyhow!("define must be given 2 arguments"));
         };
 
-        // Inform the compiler that a name is being defined in scope
-        compiler.define_variable(name);
+        // handle upvalues with a special command
+        if let Some(arg) = compiler.is_argument(name) {
+            // find or assign the upvalue
+            let upvalue_index = match arg {
+                Arg::Index { scope, index } => {
+                    let Some(argument_scope) = compiler.argument_scope_mut(scope) else {
+                        unreachable!("[ICE] invalid argument scope");
+                    };
 
-        Ok(SyntaxReturn::Code(
-            compiler
-                .compile_code(ctx, value)?
-                .into_bytecode()
-                .into_iter()
-                .chain([Bytecode::SetBang { symbol: name }, Bytecode::PushVoid])
-                .collect(),
-        ))
+                    if let Ok(Some(upv)) = argument_scope.is_upvalue(name) {
+                        upv
+                    } else {
+                        let upvalue_index = ctx.add_upvalue();
+                        argument_scope.set_upvalue(Some(index), upvalue_index);
+                        upvalue_index
+                    }
+                }
+                Arg::Rest { scope } => {
+                    let Some(argument_scope) = compiler.argument_scope_mut(scope) else {
+                        unreachable!("[ICE] invalid argument scope");
+                    };
+
+                    if let Ok(Some(upv)) = argument_scope.is_upvalue(name) {
+                        upv
+                    } else {
+                        let upvalue_index = ctx.add_upvalue();
+                        argument_scope.set_upvalue(None, upvalue_index);
+                        upvalue_index
+                    }
+                }
+            };
+
+            // Use SetBangUpvalue
+            Ok(SyntaxReturn::Code(
+                compiler
+                    .compile_code(ctx, value)?
+                    .into_bytecode()
+                    .into_iter()
+                    .chain([
+                        Bytecode::SetBangUpvalue {
+                            index: upvalue_index,
+                        },
+                        Bytecode::PushVoid,
+                    ])
+                    .collect(),
+            ))
+        } else {
+            // Inform the compiler that a name is being defined in scope
+            compiler.define_variable(name);
+
+            Ok(SyntaxReturn::Code(
+                compiler
+                    .compile_code(ctx, value)?
+                    .into_bytecode()
+                    .into_iter()
+                    .chain([Bytecode::SetBang { symbol: name }, Bytecode::PushVoid])
+                    .collect(),
+            ))
+        }
     }
 }

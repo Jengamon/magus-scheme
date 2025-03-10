@@ -116,6 +116,10 @@ pub enum Bytecode {
     SetBang {
         symbol: lasso::Spur,
     },
+    /// Set the value of an upvalue if it exists
+    SetBangUpvalue {
+        index: usize,
+    },
     /// Branching instruction
     ///
     /// Jump forward by a certain number of instructions if the value popped from the top of the stack is false (any other
@@ -165,6 +169,7 @@ impl Bytecode {
             Self::Force => 4,
             Self::Define { .. } => 2,
             Self::SetBang { .. } => 2,
+            Self::SetBangUpvalue { .. } => 2,
             Self::If { .. } => 2,
             Self::Jump { .. } => 2,
             Self::Duplicate => 1,
@@ -199,6 +204,7 @@ impl fmt::Display for Bytecode {
             Bytecode::FillHole { id } => write!(f, "FILL {id}"),
             Bytecode::Define { symbol } => write!(f, "DEFN {}", symbol.into_inner()),
             Bytecode::SetBang { symbol } => write!(f, "SET! {}", symbol.into_inner()),
+            Bytecode::SetBangUpvalue { index } => write!(f, "SETU {}", index),
             Bytecode::If { jump } => write!(f, "JMIF {jump}"),
             Bytecode::Jump { jump } => write!(f, "JUMP {jump}"),
             Bytecode::Force => write!(f, "FORS"),

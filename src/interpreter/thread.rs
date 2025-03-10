@@ -913,6 +913,19 @@ impl<'gc> Thread<'gc> {
 
                             advance_to_next_inst!();
                         }
+                        Bytecode::SetBangUpvalue { index } => {
+                            // Pop the top of stack and store in given upvalue
+                            let Some(value) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+                            if frame.upvalues.borrow().len() <= index {
+                                todo!("TODO upvalue misreference miscompilation");
+                            }
+                            frame.upvalues.borrow_mut(&ctx)[index] = value;
+
+                            advance_to_next_inst!();
+                        }
                         Bytecode::SetBang { symbol } => {
                             // Pop the top of stack and store in env as a given symbol
                             let Some(value) = self.stack.pop() else {

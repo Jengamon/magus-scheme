@@ -485,7 +485,7 @@ pub struct Scope {
     rest: Option<lasso::Spur>,
 
     upvalues: Rc<RefCell<fxhash::FxHashMap<Option<usize>, usize>>>,
-    variables_defined: Rc<RefCell<fxhash::FxHashSet<lasso::Spur>>>,
+    variables_defined: Rc<RefCell<fxhash::FxHashMap<lasso::Spur, Option<usize>>>>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -1006,6 +1006,36 @@ impl<'gc> Compiler<'gc> {
                     };
                 }
 
+                // If the name is defined in a parent scope that is *not* the global scope,
+                // then make it an upvalue
+
+                if let Some(scope) = self
+                    .scopes
+                    .iter_mut()
+                    .rev()
+                    // *ignore* the current scope, as these upvalues have not been created yet.
+                    .skip(1)
+                    .find(|s| s.variables_defined.borrow().contains_key(spur))
+                {
+                    // Some parent scope defined this name, use it's already assigned upvalue, or defined a new upvalue
+                    let upvalue_index = if let Some(v) =
+                        dbg!(&scope.variables_defined).borrow().get(spur).unwrap()
+                    {
+                        *v
+                    } else {
+                        let upvalue_index = ctx.add_upvalue();
+                        scope
+                            .variables_defined
+                            .borrow_mut()
+                            .insert(*spur, Some(upvalue_index));
+                        upvalue_index
+                    };
+
+                    return Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
+                        index: upvalue_index,
+                    }])));
+                }
+
                 Ok(SyntaxReturn::Code(Box::from([Bytecode::Reference {
                     symbol: *spur,
                 }])))
@@ -1258,8 +1288,6 @@ impl<'gc> Compiler<'gc> {
     pub fn lambda_prelude(&self) -> impl IntoIterator<Item = Bytecode> {
         // This should be called when all upvalues are known
         if let Some(argument_scope) = self.scopes.last() {
-            dbg!(argument_scope);
-
             argument_scope
                 .args
                 .iter()
@@ -1307,8 +1335,14 @@ impl<'gc> Compiler<'gc> {
                 .variables_defined
                 .borrow()
                 .iter()
-                .flat_map(|vn| {
-                    if let Some(up_index) = argument_scope
+                .flat_map(|(vn, upv)| {
+                    if let Some(upv) = upv {
+                        vec![
+                            Bytecode::Reference { symbol: *vn },
+                            Bytecode::SetUpvalue { index: *upv },
+                            Bytecode::Pop,
+                        ]
+                    } else if let Some(up_index) = argument_scope
                         .args
                         .iter()
                         .position(|s| s == vn)
@@ -1441,7 +1475,7 @@ impl<'gc> Compiler<'gc> {
             || self.scopes.iter().any(|args| {
                 args.args.contains(&symbol)
                     || args.rest.is_some_and(|r| r == symbol)
-                    || args.variables_defined.borrow().contains(&symbol)
+                    || args.variables_defined.borrow().contains_key(&symbol)
             })
         {
             return None;
@@ -1469,7 +1503,12 @@ impl<'gc> Compiler<'gc> {
 
     pub fn define_variable(&mut self, symbol: lasso::Spur) {
         if let Some(scope) = self.scopes.last_mut() {
-            scope.variables_defined.borrow_mut().insert(symbol);
+            // insert None if not defined
+            scope
+                .variables_defined
+                .borrow_mut()
+                .entry(symbol)
+                .or_default();
         } else {
             self.global_variables_defined.insert(symbol);
         }

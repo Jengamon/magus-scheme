@@ -1,0 +1,8 @@
+---
+4
+---
+(import (only (scheme base) define lambda))
+; ....purely definition upvalues *also* have to work too..
+; ....but shouldn't be *too* hard with the groundwork we currently have
+(define (x) (define a 4) (lambda () a))
+((x))

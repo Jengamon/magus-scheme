@@ -3,7 +3,7 @@ pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, Monotonic
 pub use control::{Apply, CallCc};
 pub use equality::{IsEq, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
-pub use math::{Add, Mul, Subtract};
+pub use math::{Add, Divide, Multiply, Subtract};
 pub use predicates::{IsNull, IsPair};
 pub use structure::{Cons, Values};
 
@@ -429,9 +429,9 @@ mod math {
 
     #[derive(Debug, Collect)]
     #[collect(require_static)]
-    pub struct Mul;
+    pub struct Multiply;
 
-    impl NativeLambda for Mul {
+    impl NativeLambda for Multiply {
         fn arity(&self) -> Arity {
             Arity::AtLeast(0)
         }
@@ -459,6 +459,67 @@ mod math {
                     ))?
                 };
             }
+            Ok(LambdaReturn::Return(vec![
+                match result {
+                    Either::Left(num) => Value::Number(num.into_ptr(&ctx)),
+                    Either::Right(flt) => Value::Inexact(flt),
+                }
+                .into_ptr(&ctx),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Divide;
+
+    impl NativeLambda for Divide {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            if args.len() == 1 {
+                let value = match *args[0].borrow() {
+                    Value::Number(num) => Value::Number(Gc::new(&ctx, num.recip())),
+                    Value::Inexact(flt) => Value::Inexact(flt.recip()),
+                    _ => Err(anyhow::anyhow!(
+                        "cannot reciprocate something that is not a number"
+                    ))?,
+                };
+                return Ok(LambdaReturn::Return(vec![value.into_ptr(&ctx)]));
+            }
+
+            let mut result = match *args[0].borrow() {
+                Value::Number(num) => Either::Left((*num).clone()),
+                Value::Inexact(flt) => Either::Right(flt),
+                _ => Err(anyhow::anyhow!(
+                    "cannot divide something that is not a number"
+                ))?,
+            };
+
+            for arg in args.iter().skip(1) {
+                result = if let Value::Number(n) = *arg.borrow() {
+                    match result {
+                        Either::Left(l) => Either::Left(&l / &*n),
+                        Either::Right(f) => Either::Right(f / n.to_inexact()),
+                    }
+                } else if let Value::Inexact(f) = *arg.borrow() {
+                    match result {
+                        Either::Left(l) => Either::Right(l.to_inexact() / f),
+                        Either::Right(l) => Either::Right(l / f),
+                    }
+                } else {
+                    Err(anyhow::anyhow!(
+                        "cannot divide something that is not a number"
+                    ))?
+                };
+            }
+
             Ok(LambdaReturn::Return(vec![
                 match result {
                     Either::Left(num) => Value::Number(num.into_ptr(&ctx)),

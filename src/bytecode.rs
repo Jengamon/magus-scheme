@@ -225,6 +225,9 @@ pub enum Constant {
     Symbol(lasso::Spur),
     Char(char),
     Number(i64),
+    // TODO Support exact rational numbers
+    // (We can use BigRational directly here b/c Copy is not required as it is in Value)
+    // (well it's more likely (due to how our frontend works) to support Rational64 instead)
     Inexact(f64),
     String(Arc<str>),
     Bytevector(Arc<[u8]>),

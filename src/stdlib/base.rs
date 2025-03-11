@@ -14,8 +14,9 @@ use crate::{
 pub use conditionals::If;
 pub use define::{Define, SetBang};
 pub use procedures::{
-    Add, Apply, Ascending, Caar, Cadr, CallCc, Car, Cdar, Cddr, Cdr, Cons, Descending, Equal, IsEq,
-    IsEqv, IsNull, IsPair, MonotonicAscending, MonotonicDescending, Mul, Subtract, Values,
+    Add, Apply, Ascending, Caar, Cadr, CallCc, Car, Cdar, Cddr, Cdr, Cons, Descending, Divide,
+    Equal, IsEq, IsEqv, IsNull, IsPair, MonotonicAscending, MonotonicDescending, Multiply,
+    Subtract, Values,
 };
 pub use quote::Quote;
 
@@ -143,6 +144,7 @@ impl Module for Base {
             "+",
             "-",
             "*",
+            "/",
             "=",
             "<",
             ">",
@@ -187,7 +189,8 @@ impl Module for Base {
             "call-with-current-continuation" | "call/cc" => lambda!(CallCc),
             "+" => lambda!(Add),
             "-" => lambda!(Subtract),
-            "*" => lambda!(Mul),
+            "*" => lambda!(Multiply),
+            "/" => lambda!(Divide),
             "=" => lambda!(Equal),
             "<" => lambda!(MonotonicAscending),
             "<=" => lambda!(Ascending),

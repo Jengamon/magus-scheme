@@ -113,7 +113,6 @@ impl Number {
     fn simplify(r: BigRational) -> Number {
         static ONE: LazyLock<BigInt> = LazyLock::new(|| BigInt::new(Sign::Plus, vec![1]));
         static NEG_ONE: LazyLock<BigInt> = LazyLock::new(|| BigInt::new(Sign::Minus, vec![1]));
-
         if r.denom() == &*ONE {
             Number::Integer(r.numer().clone())
         } else if r.denom() == &*NEG_ONE {
@@ -124,11 +123,19 @@ impl Number {
         }
     }
 
-    pub fn gcd(self, rhs: &Number) -> Number {
+    pub fn recip(&self) -> Number {
+        static ONE: LazyLock<BigInt> = LazyLock::new(|| BigInt::new(Sign::Plus, vec![1]));
+        Self::simplify(match self {
+            Self::Integer(i) => BigRational::new(ONE.clone(), i.clone()),
+            Self::Rational(r) => r.recip(),
+        })
+    }
+
+    pub fn gcd(&self, rhs: &Number) -> Number {
         todo!()
     }
 
-    pub fn lcm(self, rhs: &Number) -> Number {
+    pub fn lcm(&self, rhs: &Number) -> Number {
         todo!()
     }
 }
@@ -268,6 +275,7 @@ impl std::ops::Sub for &Number {
         }
     }
 }
+
 impl std::ops::Sub<f64> for &Number {
     type Output = f64;
     fn sub(self, rhs: f64) -> Self::Output {
@@ -280,7 +288,7 @@ impl std::ops::Sub<&Number> for f64 {
         self - rhs.to_inexact()
     }
 }
-// TODO Make these op implementations a macro
+
 impl std::ops::Mul<f64> for Number {
     type Output = f64;
     fn mul(self, rhs: f64) -> Self::Output {
@@ -317,6 +325,48 @@ impl std::ops::Mul<&Number> for f64 {
     type Output = f64;
     fn mul(self, rhs: &Number) -> Self::Output {
         self * rhs.to_inexact()
+    }
+}
+
+impl std::ops::Div<f64> for Number {
+    type Output = f64;
+    fn div(self, rhs: f64) -> Self::Output {
+        self.to_inexact() / rhs
+    }
+}
+impl std::ops::Div<Number> for f64 {
+    type Output = f64;
+    fn div(self, rhs: Number) -> Self::Output {
+        self / rhs.to_inexact()
+    }
+}
+impl std::ops::Div for &Number {
+    type Output = Number;
+    fn div(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Number::Integer(i), Number::Integer(i2)) => {
+                Number::simplify(BigRational::new(i.clone(), i2.clone()))
+            }
+            (Number::Rational(r), Number::Integer(i)) => {
+                Number::simplify(r / BigRational::from_integer(i.clone()))
+            }
+            (Number::Integer(i), Number::Rational(r)) => {
+                Number::simplify(BigRational::from_integer(i.clone()) / r)
+            }
+            (Number::Rational(r), Number::Rational(r2)) => Number::simplify(r / r2),
+        }
+    }
+}
+impl std::ops::Div<f64> for &Number {
+    type Output = f64;
+    fn div(self, rhs: f64) -> Self::Output {
+        self.to_inexact() / rhs
+    }
+}
+impl std::ops::Div<&Number> for f64 {
+    type Output = f64;
+    fn div(self, rhs: &Number) -> Self::Output {
+        self / rhs.to_inexact()
     }
 }
 

@@ -80,8 +80,12 @@ impl Syntax for Define {
                     &formals,
                     args.iter().skip(1).copied(),
                 );
+
+                // Inform the compiler that a name is being defined in scope
+                compiler.define_variable(name);
                 let index =
                     ctx.add_lambda(Gc::new(ctx, CompiledLambda::new(formals.arity(), chunk?)));
+
                 Ok(SyntaxReturn::Code(Box::from([
                     Bytecode::PushLambda { index },
                     Bytecode::Define { symbol: name },
@@ -110,8 +114,12 @@ impl Syntax for Define {
                     &formals,
                     args.iter().skip(1).copied(),
                 );
+
+                // Inform the compiler that a name is being defined in scope
+                compiler.define_variable(name);
                 let index =
                     ctx.add_lambda(Gc::new(ctx, CompiledLambda::new(formals.arity(), chunk?)));
+
                 Ok(SyntaxReturn::Code(Box::from([
                     Bytecode::PushLambda { index },
                     Bytecode::Define { symbol: name },
@@ -204,7 +212,7 @@ impl Syntax for SetBang {
             ))
         } else {
             // Inform the compiler that a name is being defined in scope
-            compiler.define_variable(name);
+            // compiler.define_variable(name);
 
             Ok(SyntaxReturn::Code(
                 compiler

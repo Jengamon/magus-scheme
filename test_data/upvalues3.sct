@@ -1,0 +1,6 @@
+---
+5
+---
+(import (only (scheme base) define lambda))
+; upvalues should be overriden by variables
+(define a 3) (((lambda (a) (define a 5) (lambda () a)) 4))

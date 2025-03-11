@@ -853,6 +853,13 @@ impl<'gc> Thread<'gc> {
                             self.stack.push(value);
                             advance_to_next_inst!();
                         }
+                        Bytecode::Pop => {
+                            let Some(_value) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+                            advance_to_next_inst!();
+                        }
                         Bytecode::Call { args } => {
                             let Some(val) = self.stack.pop() else {
                                 make_error!(SchemeErrorType::NonCallable);

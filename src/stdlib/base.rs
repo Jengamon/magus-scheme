@@ -35,8 +35,6 @@ pub fn lambda_helper<'gc>(
     body: impl IntoIterator<Item = ProgramPtr<'gc>>,
 ) -> anyhow::Result<ChunkPtr<'gc>> {
     compiler.hygenic(ctx, import_env, |ctx, compiler, import_env| {
-        // build a chunk
-
         compiler.define_arguments(formals.non_rest_params(), formals.rest_param());
 
         let mut labels = fxhash::FxHashMap::default();
@@ -63,14 +61,18 @@ pub fn lambda_helper<'gc>(
         }
 
         // join argument defs, then program code (done here, so that upvalues are known)
-        let arguments = compiler.arguments().into_iter().collect::<Vec<_>>();
+        let prelude = compiler.lambda_prelude().into_iter().collect::<Vec<_>>();
         // adjust code labels for arguments code
         for k in labels.keys().copied().collect::<Vec<_>>() {
             let v = labels.remove(&k).expect("[ICE] mislabeled data");
-            labels.insert(k + arguments.len(), v);
+            labels.insert(k + prelude.len(), v);
         }
         // get the code all nice and joind together
-        let code: Vec<_> = arguments.into_iter().chain(program_code).collect();
+        let code: Vec<_> = prelude
+            .into_iter()
+            .chain(program_code)
+            .chain(compiler.lambda_postlude())
+            .collect();
 
         Ok(Chunk::new(
             ctx,

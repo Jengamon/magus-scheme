@@ -478,20 +478,21 @@ struct LocalWorld<'gc> {
 }
 
 type SyntaxDef = HashMap<lasso::Spur, ArcSyntax>;
-type VariableDef = HashSet<lasso::Spur>;
+type VariableDef = fxhash::FxHashSet<lasso::Spur>;
 #[derive(Debug, Clone, Default)]
-pub struct ArgumentScope {
+pub struct Scope {
     args: Rc<[lasso::Spur]>,
     rest: Option<lasso::Spur>,
 
     upvalues: Rc<RefCell<fxhash::FxHashMap<Option<usize>, usize>>>,
+    variables_defined: Rc<RefCell<fxhash::FxHashSet<lasso::Spur>>>,
 }
 
 #[derive(thiserror::Error, Debug)]
 #[error("name not defined in scope")]
 pub struct Undefined;
 
-impl ArgumentScope {
+impl Scope {
     // A scope should be able to set an argument as an upvalue which changes the code emitted when it is defined
     // so that the code emitted when referencing it can also change to enable this
 
@@ -557,14 +558,14 @@ pub struct Compiler<'gc> {
     syntax_items: SyntaxDef,
     // variables that are in scope
     #[collect(require_static)]
-    variables_defined: VariableDef,
+    global_variables_defined: VariableDef,
     // arguments that are in scope
     #[collect(require_static)]
-    argument_scopes: Vec<ArgumentScope>,
+    scopes: Vec<Scope>,
 
     // checkpoints store macro and variable definitions
     #[collect(require_static)]
-    checkpoints: Vec<(SyntaxDef, VariableDef, Vec<ArgumentScope>)>,
+    checkpoints: Vec<(SyntaxDef, VariableDef, Vec<Scope>)>,
     // import environments in-scope
     environments: Vec<StackEnvironmentPtr<'gc>>,
     // which environment to use
@@ -814,8 +815,8 @@ impl<'gc> Compiler<'gc> {
         Self {
             local_world: LocalWorld::default(),
             syntax_items: Default::default(),
-            variables_defined: Default::default(),
-            argument_scopes: Default::default(),
+            global_variables_defined: Default::default(),
+            scopes: Default::default(),
             checkpoints: Default::default(),
             // The very first environment pointer is always the default environment
             environments: vec![Gc::new(mc, RefLock::new(Environment::new(mc, None)))],
@@ -962,8 +963,7 @@ impl<'gc> Compiler<'gc> {
                     match arg {
                         Arg::Index { scope, index } if scope != 0 => {
                             // Find the argument scope, and define upvalues
-                            let Some(argument_scope) =
-                                self.argument_scopes.iter_mut().rev().nth(scope)
+                            let Some(argument_scope) = self.scopes.iter_mut().rev().nth(scope)
                             else {
                                 unreachable!("[ICE] upvalue scope error");
                             };
@@ -977,14 +977,13 @@ impl<'gc> Compiler<'gc> {
                                     upvalue_index
                                 };
 
-                            Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
+                            return Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
                                 index: upvalue_index,
-                            }])))
+                            }])));
                         }
                         Arg::Rest { scope } if scope != 0 => {
                             // Find the argument scope, and define upvalues
-                            let Some(argument_scope) =
-                                self.argument_scopes.iter_mut().rev().nth(scope)
+                            let Some(argument_scope) = self.scopes.iter_mut().rev().nth(scope)
                             else {
                                 unreachable!("[ICE] upvalue scope error");
                             };
@@ -998,19 +997,18 @@ impl<'gc> Compiler<'gc> {
                                     upvalue_index
                                 };
 
-                            Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
+                            return Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
                                 index: upvalue_index,
-                            }])))
+                            }])));
                         }
-                        _ => Ok(SyntaxReturn::Code(Box::from([Bytecode::Reference {
-                            symbol: *spur,
-                        }]))),
-                    }
-                } else {
-                    Ok(SyntaxReturn::Code(Box::from([Bytecode::Reference {
-                        symbol: *spur,
-                    }])))
+                        // Otherwise, handle like a "normal" reference
+                        _ => {}
+                    };
                 }
+
+                Ok(SyntaxReturn::Code(Box::from([Bytecode::Reference {
+                    symbol: *spur,
+                }])))
             }
             ProgramData::Bool(b) => Ok(SyntaxReturn::Code(Box::from([Bytecode::PushBool {
                 bool: *b,
@@ -1257,8 +1255,11 @@ impl<'gc> Compiler<'gc> {
     }
 
     /// Helper function for pushing arguments to certain names (while also handling upvalues)
-    pub fn arguments(&self) -> impl IntoIterator<Item = Bytecode> {
-        if let Some(argument_scope) = self.argument_scopes.last() {
+    pub fn lambda_prelude(&self) -> impl IntoIterator<Item = Bytecode> {
+        // This should be called when all upvalues are known
+        if let Some(argument_scope) = self.scopes.last() {
+            dbg!(argument_scope);
+
             argument_scope
                 .args
                 .iter()
@@ -1292,6 +1293,48 @@ impl<'gc> Compiler<'gc> {
                         .unwrap_or_default(),
                 )
                 .collect::<Vec<_>>()
+        } else {
+            Vec::default()
+        }
+    }
+
+    /// Definition overrides for upvalues are handled here
+    pub fn lambda_postlude(&self) -> impl IntoIterator<Item = Bytecode> {
+        if let Some(argument_scope) = self.scopes.last() {
+            // If a variable name is the same as an upvalue's name, we Reference the variable,
+            // then SetUpvalue to that reference
+            argument_scope
+                .variables_defined
+                .borrow()
+                .iter()
+                .flat_map(|vn| {
+                    if let Some(up_index) = argument_scope
+                        .args
+                        .iter()
+                        .position(|s| s == vn)
+                        .and_then(|pos| argument_scope.upvalues.borrow().get(&Some(pos)).copied())
+                    {
+                        vec![
+                            Bytecode::Reference { symbol: *vn },
+                            Bytecode::SetUpvalue { index: up_index },
+                            Bytecode::Pop,
+                        ]
+                    } else if let Some(up_index) = argument_scope
+                        .rest
+                        .filter(|s| s == vn)
+                        .and_then(|_| argument_scope.upvalues.borrow().get(&None).copied())
+                    {
+                        vec![
+                            Bytecode::Reference { symbol: *vn },
+                            Bytecode::SetUpvalue { index: up_index },
+                            Bytecode::Pop,
+                        ]
+                    } else {
+                        // just a normal variable
+                        vec![]
+                    }
+                })
+                .collect()
         } else {
             Vec::default()
         }
@@ -1346,39 +1389,38 @@ impl<'gc> Compiler<'gc> {
         let checkpoint = Checkpoint(self.checkpoints.len());
         self.checkpoints.push((
             self.syntax_items.clone(),
-            self.variables_defined.clone(),
-            self.argument_scopes.clone(),
+            self.global_variables_defined.clone(),
+            self.scopes.clone(),
         ));
         checkpoint
     }
 
     /// Restore the syntax items, variables, and argument symbols defined at the point the checkpoint was created.
     pub fn restore_checkpoint(&mut self, checkpoint: Checkpoint) {
-        let Some((syntax_items, variables_defined, argument_scopes)) =
-            self.checkpoints.get(checkpoint.0)
+        let Some((syntax_items, variables_defined, scopes)) = self.checkpoints.get(checkpoint.0)
         else {
             unreachable!()
         };
 
         self.syntax_items = syntax_items.clone();
-        self.variables_defined = variables_defined.clone();
-        self.argument_scopes = argument_scopes.clone();
+        self.global_variables_defined = variables_defined.clone();
+        self.scopes = scopes.clone();
     }
 
     pub fn is_argument(&self, symbol: lasso::Spur) -> Option<Arg> {
-        if let Some(scope) =
-            self.argument_scopes
-                .iter()
-                .rev()
-                .enumerate()
-                .find_map(|(idx, args)| {
-                    matches!(args.rest, Some(rest) if symbol == rest).then_some(idx)
-                })
+        if let Some(scope) = self
+            .scopes
+            .iter()
+            .rev()
+            .enumerate()
+            .find_map(|(idx, args)| {
+                matches!(args.rest, Some(rest) if symbol == rest).then_some(idx)
+            })
         {
             return Some(Arg::Rest { scope });
         }
 
-        self.argument_scopes
+        self.scopes
             .iter()
             .rev()
             .enumerate()
@@ -1395,11 +1437,12 @@ impl<'gc> Compiler<'gc> {
     //
     // since the environment is not determined until the script is run
     pub fn get_macro(&self, symbol: lasso::Spur) -> Option<ArcSyntax> {
-        if self.variables_defined.contains(&symbol)
-            || self
-                .argument_scopes
-                .iter()
-                .any(|args| args.args.contains(&symbol) || args.rest.is_some_and(|r| r == symbol))
+        if self.global_variables_defined.contains(&symbol)
+            || self.scopes.iter().any(|args| {
+                args.args.contains(&symbol)
+                    || args.rest.is_some_and(|r| r == symbol)
+                    || args.variables_defined.borrow().contains(&symbol)
+            })
         {
             return None;
         }
@@ -1408,8 +1451,8 @@ impl<'gc> Compiler<'gc> {
     }
 
     pub fn define_macro(&mut self, symbol: lasso::Spur, syntax: ArcSyntax) {
-        self.variables_defined.remove(&symbol);
-        for arg_scope in self.argument_scopes.iter_mut() {
+        self.global_variables_defined.remove(&symbol);
+        if let Some(arg_scope) = self.scopes.last_mut() {
             arg_scope.args = arg_scope
                 .args
                 .iter()
@@ -1419,12 +1462,17 @@ impl<'gc> Compiler<'gc> {
             if arg_scope.rest.is_some_and(|r| r == symbol) {
                 arg_scope.rest.take();
             }
+            arg_scope.variables_defined.borrow_mut().remove(&symbol);
         }
         self.syntax_items.insert(symbol, syntax);
     }
 
     pub fn define_variable(&mut self, symbol: lasso::Spur) {
-        self.variables_defined.insert(symbol);
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.variables_defined.borrow_mut().insert(symbol);
+        } else {
+            self.global_variables_defined.insert(symbol);
+        }
     }
 
     pub fn define_arguments(
@@ -1433,20 +1481,20 @@ impl<'gc> Compiler<'gc> {
         rest: Option<lasso::Spur>,
     ) {
         // Create and push a new argument scope
-        self.argument_scopes.push(ArgumentScope {
+        self.scopes.push(Scope {
             args: args.into_iter().collect(),
             rest,
-            upvalues: Rc::new(RefCell::new(fxhash::FxHashMap::default())),
+            ..Default::default()
         });
     }
 
     /// Get the [`ArgumentScope`] of a given scope where 0 is local, 1 is parent, etc..
-    pub fn argument_scope(&self, scope: usize) -> Option<&ArgumentScope> {
-        self.argument_scopes.iter().rev().nth(scope)
+    pub fn argument_scope(&self, scope: usize) -> Option<&Scope> {
+        self.scopes.iter().rev().nth(scope)
     }
 
     /// Get the [`ArgumentScope`] of a given scope where 0 is local, 1 is parent, etc..
-    pub fn argument_scope_mut(&mut self, scope: usize) -> Option<&mut ArgumentScope> {
-        self.argument_scopes.iter_mut().rev().nth(scope)
+    pub fn argument_scope_mut(&mut self, scope: usize) -> Option<&mut Scope> {
+        self.scopes.iter_mut().rev().nth(scope)
     }
 }

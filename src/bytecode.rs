@@ -139,8 +139,10 @@ pub enum Bytecode {
 
     /// Duplicate the reference to the value at the top of the stack
     Duplicate,
-    // /// Pop the value at the top of the stack
-    // Pop,
+    /// Pop the value at the top of the stack
+    // This should be a rare instruction to emit, mostly used to get upvalues working
+    // nicely with definitions
+    Pop,
     // /// Explicitly end an execution frame
     // Return,
 }
@@ -173,7 +175,7 @@ impl Bytecode {
             Self::If { .. } => 2,
             Self::Jump { .. } => 2,
             Self::Duplicate => 1,
-            // Self::Pop => 1,
+            Self::Pop => 1,
             // Self::Return => 4,
         }
     }
@@ -209,6 +211,7 @@ impl fmt::Display for Bytecode {
             Bytecode::Jump { jump } => write!(f, "JUMP {jump}"),
             Bytecode::Force => write!(f, "FORS"),
             Bytecode::Duplicate => write!(f, "DUPL"),
+            Bytecode::Pop => write!(f, "SPOP"),
         }
     }
 }

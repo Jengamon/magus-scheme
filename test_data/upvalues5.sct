@@ -1,0 +1,7 @@
+---
+5
+---
+(import (only (scheme base) define set!))
+; set! shouldn't upvalue local values
+(define (y a) (set! a 5) a)
+(y 3)

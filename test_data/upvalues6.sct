@@ -1,0 +1,7 @@
+---
+1
+---
+(import (only (scheme base) define set! lambda))
+; set! should however interfere with upvalued subexpressions
+(define (y a) (set! a 1) (lambda () a))
+((y 3))

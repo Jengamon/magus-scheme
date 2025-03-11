@@ -168,7 +168,7 @@ impl Syntax for SetBang {
         if let Some(arg) = compiler.is_argument(name) {
             // find or assign the upvalue
             let upvalue_index = match arg {
-                Arg::Index { scope, index } => {
+                Arg::Index { scope, index } if scope != 0 => {
                     let Some(argument_scope) = compiler.argument_scope_mut(scope) else {
                         unreachable!("[ICE] invalid argument scope");
                     };
@@ -181,7 +181,7 @@ impl Syntax for SetBang {
                         upvalue_index
                     }
                 }
-                Arg::Rest { scope } => {
+                Arg::Rest { scope } if scope != 0 => {
                     let Some(argument_scope) = compiler.argument_scope_mut(scope) else {
                         unreachable!("[ICE] invalid argument scope");
                     };
@@ -193,6 +193,20 @@ impl Syntax for SetBang {
                         argument_scope.set_upvalue(None, upvalue_index);
                         upvalue_index
                     }
+                }
+                _ => {
+                    // But treat as defining something (so that upvalues are treated like define, and change the object)
+                    compiler.define_variable(name);
+
+                    // Treat as normal ref
+                    return Ok(SyntaxReturn::Code(
+                        compiler
+                            .compile_code(ctx, value)?
+                            .into_bytecode()
+                            .into_iter()
+                            .chain([Bytecode::SetBang { symbol: name }, Bytecode::PushVoid])
+                            .collect(),
+                    ));
                 }
             };
 

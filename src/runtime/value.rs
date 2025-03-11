@@ -320,9 +320,9 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
             Value::Inexact(fp) => write!(f, "{fp}"),
             Value::String(s) => write!(f, "\"{}\"", s.borrow().replace('\"', "\\\"")),
             Value::Symbol(sym) if is_valid_scheme_identifier(self.resolver.resolve(&sym.0)) => {
-                write!(f, "'{}", self.resolver.resolve(&sym.0))
+                write!(f, "{}", self.resolver.resolve(&sym.0))
             }
-            Value::Symbol(sym) => write!(f, "'|{}|", self.resolver.resolve(&sym.0)),
+            Value::Symbol(sym) => write!(f, "|{}|", self.resolver.resolve(&sym.0)),
             Value::Bool(b) => write!(f, "#{}", if b { "t" } else { "f" }),
             Value::Char(c) => write!(f, "#\\{c}"),
             Value::Vector(ref vec) if vec.is_circular(self.value_ptr) => {

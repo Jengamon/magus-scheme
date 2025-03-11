@@ -1,6 +1,7 @@
 // TODO Split, if this file gets too large, into separate files
 pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, MonotonicDescending};
 pub use control::{Apply, CallCc};
+pub use conversions::{Exact, Inexact};
 pub use equality::{IsEq, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
 pub use math::{Add, Divide, Multiply, Subtract};
@@ -845,6 +846,68 @@ mod structure {
                 })
                 .into_ptr(&ctx),
             ]))
+        }
+    }
+}
+
+mod conversions {
+    use gc_arena::{Collect, Gc};
+
+    use crate::{
+        Value,
+        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        value::Number,
+    };
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Exact;
+
+    impl NativeLambda for Exact {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let ptr = match *args[0].borrow() {
+                Value::Number(_) => args[0],
+                Value::Inexact(i) => Number::from_inexact(i)
+                    .map(|n| Value::Number(Gc::new(&ctx, n)).into_ptr(&ctx))
+                    .ok_or(anyhow::anyhow!(
+                        "non-real numbers (infinities / NaN) have no exact representation"
+                    ))?,
+                _ => Err(anyhow::anyhow!("argument is not a number"))?,
+            };
+
+            Ok(LambdaReturn::Return(vec![ptr]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Inexact;
+
+    impl NativeLambda for Inexact {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let ptr = match *args[0].borrow() {
+                Value::Inexact(_) => args[0],
+                Value::Number(i) => Value::Inexact(i.to_inexact()).into_ptr(&ctx),
+                _ => Err(anyhow::anyhow!("argument is not a number"))?,
+            };
+
+            Ok(LambdaReturn::Return(vec![ptr]))
         }
     }
 }

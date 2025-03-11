@@ -15,8 +15,8 @@ pub use conditionals::If;
 pub use define::{Define, SetBang};
 pub use procedures::{
     Add, Apply, Ascending, Caar, Cadr, CallCc, Car, Cdar, Cddr, Cdr, Cons, Descending, Divide,
-    Equal, IsEq, IsEqv, IsNull, IsPair, MonotonicAscending, MonotonicDescending, Multiply,
-    Subtract, Values,
+    Equal, Exact, Inexact, IsEq, IsEqv, IsNull, IsPair, MonotonicAscending, MonotonicDescending,
+    Multiply, Subtract, Values,
 };
 pub use quote::Quote;
 
@@ -163,6 +163,8 @@ impl Module for Base {
             "cons",
             "values",
             "apply",
+            "exact",
+            "inexact",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -209,6 +211,8 @@ impl Module for Base {
             "cons" => lambda!(Cons),
             "values" => lambda!(Values),
             "apply" => lambda!(Apply),
+            "exact" => lambda!(Exact),
+            "inexact" => lambda!(Inexact),
             _ => None,
         }
     }

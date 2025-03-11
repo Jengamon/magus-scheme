@@ -21,9 +21,16 @@ use super::{error::SchemeErrorPtr, value::ContinuationPtr};
 #[derive(thiserror::Error, Debug)]
 pub enum LambdaError {
     #[error(transparent)]
-    NonContinuable(#[from] anyhow::Error),
+    NonContinuable(anyhow::Error),
     #[error(transparent)]
-    Continuable(anyhow::Error),
+    Continuable(#[from] anyhow::Error),
+}
+
+impl LambdaError {
+    /// Create a non-continuable Rust lambda error
+    pub fn non_continuable(err: impl Into<anyhow::Error>) -> Self {
+        Self::NonContinuable(err.into())
+    }
 }
 
 pub type DynamicWind<'gc> = Option<(Lambda<'gc>, Lambda<'gc>)>;

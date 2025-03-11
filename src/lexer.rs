@@ -782,7 +782,7 @@ pub enum SyntaxToken {
     StartVector,
     #[regex(r"(?i)#u8\(")]
     StartBytevector,
-    #[regex(r#"[a-zA-Z!$%&*/:<=>?^_~][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*"#, |l| Box::from(l.slice()))]
+    #[regex(r#"[a-zA-Z!$%&*/:<=>?@^_~][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*"#, |l| Box::from(l.slice()))]
     #[regex(r#"\|([^|\\]|\\[xXabntr|])*\|"#, process_piped_ident)]
     #[token("+", |l| Box::from(l.slice()))]
     #[token("-", |l| Box::from(l.slice()))]

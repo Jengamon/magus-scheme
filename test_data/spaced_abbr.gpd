@@ -1,6 +1,3 @@
-Expected { expected: [StartNestedComment, Quote, Quasiquote, Unquote, UnquoteSplicing, Identifier, Number, String, Character, Boolean, DatumComment, Comment, DatumLabel, DatumLabelValue], text: Some("@"), at: 9..10 }
-; allow spaces in abbreviations
-Expected { expected: [StartNestedComment, Quote, Quasiquote, Unquote, UnquoteSplicing, Identifier, Number, String, Character, Boolean, DatumComment, Comment, DatumLabel, DatumLabelValue], text: Some("@"), at: 18..19 }
 ---
 ROOT@0..25
   DATUM@0..24
@@ -13,12 +10,12 @@ ROOT@0..25
             SYMBOL@2..6 "list"
           WHITESPACE@6..7 " "
           DATUM@7..14
+; allow spaces in abbreviations
             ABBREV@7..14
               ABBREV_SYM@7..8 ","
               WHITESPACE@8..9 " "
-              ERROR@9..10 "@"
-              DATUM@10..14
-                SYMBOL@10..14 "name"
+              DATUM@9..14
+                SYMBOL@9..14 "@name"
           WHITESPACE@14..15 " "
           DATUM@15..23
             ABBREV@15..23
@@ -27,9 +24,8 @@ ROOT@0..25
                 ABBREV@16..23
                   ABBREV_SYM@16..17 ","
                   WHITESPACE@17..18 " "
-                  ERROR@18..19 "@"
-                  DATUM@19..23
-                    SYMBOL@19..23 "name"
+                  DATUM@18..23
+                    SYMBOL@18..23 "@name"
           RPAREN@23..24 ")"
   LINEEND@24..25 "\n"
 ---

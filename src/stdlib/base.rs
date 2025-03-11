@@ -89,6 +89,38 @@ pub fn lambda_helper<'gc>(
 }
 
 #[derive(Debug)]
+pub struct Begin;
+
+// Because begin "forces" an order to it's subexpressions (first-to-last)
+// definitions are allowed in any order
+//
+// We treat (begin <expr or def>...) and (begin <expr1> <expr2>...) the same
+impl Syntax for Begin {
+    fn evaluate<'gc>(
+        &self,
+        ctx: &mut SyntaxContext<'_, 'gc>,
+        compiler: &mut Compiler<'gc>,
+        _import_env: StackEnvironmentPtr<'gc>,
+        args: &[ProgramPtr<'gc>],
+    ) -> anyhow::Result<SyntaxReturn<'gc>> {
+        if args.is_empty() {
+            return Ok(SyntaxReturn::Code(Box::from([Bytecode::PushVoid])));
+        }
+
+        let mut program_code = Vec::new();
+        for program in args {
+            program_code.extend(compiler.compile_code(ctx, *program)?.into_bytecode());
+        }
+
+        Ok(SyntaxReturn::Code(program_code.into_boxed_slice()))
+    }
+
+    fn is_container(&self, _ptr: ProgramPtr<'_>) -> bool {
+        true
+    }
+}
+
+#[derive(Debug)]
 pub struct Lambda;
 
 impl Syntax for Lambda {
@@ -136,6 +168,7 @@ impl Module for Base {
         [
             "call-with-current-continuation",
             "call/cc",
+            "begin",
             "define",
             "lambda",
             "quote",
@@ -219,6 +252,7 @@ impl Module for Base {
 
     fn syntax(&self, interner: &mut lasso::Rodeo, symbol: lasso::Spur) -> Option<ArcSyntax> {
         match interner.resolve(&symbol) {
+            "begin" => Some(Arc::new(Begin)),
             "define" => Some(Arc::new(Define)),
             "lambda" => Some(Arc::new(Lambda)),
             "set!" => Some(Arc::new(SetBang)),

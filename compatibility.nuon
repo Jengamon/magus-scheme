@@ -25,7 +25,7 @@
     [ "base", "", assoc, false, "", "" ],
     [ "base", "", assq, false, "", "" ],
     [ "base", "", assv, false, "", "" ],
-    [ "base", "", begin, false, "", "" ],
+    [ "base", "syntax", begin, true, "sequence definitions and expressions from first to last", "" ],
     [ "base", "", binary-port?, false, "", "" ],
     [ "base", "", boolean=?, false, "", "" ],
     [ "base", "", boolean?, false, "", "" ],

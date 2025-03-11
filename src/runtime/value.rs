@@ -371,6 +371,12 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
             }
             Value::Cons(ref cons) => {
                 // we know we aren't cyclical at *all*, so just dfs
+
+                // special handling for null
+                if Gc::ptr_eq(self.value_ptr, self.null_ptr) {
+                    return write!(f, "'()");
+                }
+
                 write!(f, "(")?;
                 let mut cons = *cons;
                 loop {

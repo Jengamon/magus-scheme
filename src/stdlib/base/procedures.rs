@@ -471,7 +471,7 @@ mod math {
 }
 
 mod list {
-    use gc_arena::Collect;
+    use gc_arena::{Collect, Gc};
 
     use crate::{
         Value, ValuePtr,
@@ -526,7 +526,11 @@ mod list {
                 return Err(anyhow::anyhow!("caar only operates on a pair"))?;
             };
 
-            let Some(Value::Cons(c)) = c.car.map(|p| *p.borrow()) else {
+            let Some(Value::Cons(c)) = c
+                .car
+                .filter(|p| !Gc::ptr_eq(*p, ctx.thread_ctx.null_value))
+                .map(|p| *p.borrow())
+            else {
                 return Err(anyhow::anyhow!("caar only operates on a pair"))?;
             };
 
@@ -557,7 +561,11 @@ mod list {
                 return Err(anyhow::anyhow!("cadr only operates on a pair"))?;
             };
 
-            let Some(Value::Cons(c)) = c.cdr.map(|p| *p.borrow()) else {
+            let Some(Value::Cons(c)) = c
+                .cdr
+                .filter(|p| !Gc::ptr_eq(*p, ctx.thread_ctx.null_value))
+                .map(|p| *p.borrow())
+            else {
                 return Err(anyhow::anyhow!("cadr only operates on a pair"))?;
             };
 
@@ -588,7 +596,11 @@ mod list {
                 return Err(anyhow::anyhow!("cdar only operates on a pair"))?;
             };
 
-            let Some(Value::Cons(c)) = c.car.map(|p| *p.borrow()) else {
+            let Some(Value::Cons(c)) = c
+                .car
+                .filter(|p| !Gc::ptr_eq(*p, ctx.thread_ctx.null_value))
+                .map(|p| *p.borrow())
+            else {
                 return Err(anyhow::anyhow!("cdar only operates on a pair"))?;
             };
 
@@ -619,7 +631,11 @@ mod list {
                 return Err(anyhow::anyhow!("cddr only operates on a pair"))?;
             };
 
-            let Some(Value::Cons(c)) = c.cdr.map(|p| *p.borrow()) else {
+            let Some(Value::Cons(c)) = c
+                .cdr
+                .filter(|p| !Gc::ptr_eq(*p, ctx.thread_ctx.null_value))
+                .map(|p| *p.borrow())
+            else {
                 return Err(anyhow::anyhow!("cddr only operates on a pair"))?;
             };
 

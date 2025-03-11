@@ -1,0 +1,11 @@
+error: Rust code produced an error: cadr only operates on a pair
+
+Backtrace:
+ - <<synthesized>> <<native>>
+---
+---
+(import (only (scheme base) define cadr))
+; cadr and friends should fail when accessing null (it is an impl detail that null is a Cons behind the scenes)
+(define (list . in) in) ; I can't wait for define-library
+(cadr (list 3)) ; this would work for the line below:
+#;(cadr (list 3 4))

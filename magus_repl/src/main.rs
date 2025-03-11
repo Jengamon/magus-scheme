@@ -178,19 +178,24 @@ fn execute(
                 // expose what each spur means
                 let mut shown = HashSet::new();
                 println!("==SYMBOLS REFERENCED==");
-                for code in chunk.code.iter() {
+                for code in chunk.code.iter().copied().chain(
+                    chunk
+                        .lambdas
+                        .iter()
+                        .flat_map(|l| l.chunk().code.iter().copied().collect::<Vec<_>>()),
+                ) {
                     match code {
-                        Bytecode::Reference { symbol } if !shown.contains(symbol) => {
-                            shown.insert(*symbol);
-                            println!("{} -> `{}`", symbol.into_inner(), interner.resolve(symbol));
+                        Bytecode::Reference { symbol } if !shown.contains(&symbol) => {
+                            shown.insert(symbol);
+                            println!("{} -> `{}`", symbol.into_inner(), interner.resolve(&symbol));
                         }
-                        Bytecode::Define { symbol } if !shown.contains(symbol) => {
-                            shown.insert(*symbol);
-                            println!("{} -> `{}`", symbol.into_inner(), interner.resolve(symbol));
+                        Bytecode::Define { symbol } if !shown.contains(&symbol) => {
+                            shown.insert(symbol);
+                            println!("{} -> `{}`", symbol.into_inner(), interner.resolve(&symbol));
                         }
-                        Bytecode::SetBang { symbol } if !shown.contains(symbol) => {
-                            shown.insert(*symbol);
-                            println!("{} -> `{}`", symbol.into_inner(), interner.resolve(symbol));
+                        Bytecode::SetBang { symbol } if !shown.contains(&symbol) => {
+                            shown.insert(symbol);
+                            println!("{} -> `{}`", symbol.into_inner(), interner.resolve(&symbol));
                         }
                         _ => {}
                     }

@@ -159,8 +159,7 @@ pub enum GeneralParseReadError {
     Utf8(#[from] std::str::Utf8Error),
 }
 
-/// Produce a [`GAst`] from something that implements ['Read`], lossily
-/// decoding as UTF-8
+/// Produce a [`GAst`] from something that implements ['Read`]
 pub fn general_parse_read(mut source: impl Read) -> Result<GAst, GeneralParseReadError> {
     let mut bytes = vec![];
     source.read_to_end(&mut bytes)?;

@@ -27,6 +27,7 @@ pub enum Execution<'gc> {
         #[collect(require_static)]
         arity: Arity,
         pc: usize,
+        upvalue_index: Option<usize>,
     },
     Native {
         native: NativeLambdaPtr<'gc>,
@@ -50,6 +51,7 @@ impl<'gc> Execution<'gc> {
                 chunk: gc.chunk,
                 arity: gc.arity,
                 pc: 0,
+                upvalue_index: Some(gc.upvalue_id.expect("cannot use unlabeled lambda")),
             },
         }
     }
@@ -58,16 +60,25 @@ impl<'gc> Execution<'gc> {
 impl PartialEq for Execution<'_> {
     fn eq(&self, other: &Self) -> bool {
         match self {
-            Execution::Bytecode { chunk, arity, pc } => {
+            Execution::Bytecode {
+                chunk,
+                arity,
+                pc,
+                upvalue_index,
+            } => {
                 let Self::Bytecode {
                     chunk: ochunk,
                     arity: oarity,
                     pc: opc,
+                    upvalue_index: oupvalue_index,
                 } = other
                 else {
                     return false;
                 };
-                Gc::ptr_eq(*chunk, *ochunk) && arity == oarity && pc == opc
+                Gc::ptr_eq(*chunk, *ochunk)
+                    && arity == oarity
+                    && pc == opc
+                    && upvalue_index == oupvalue_index
             }
             Execution::Native { native } => {
                 let Self::Native { native: onative } = other else {
@@ -100,8 +111,6 @@ pub struct ThreadFrame<'gc> {
     bottom: usize,
     // TODO add a "promise slot" that when a frame is exiting, will fill the promise with the value it is
     // exiting the frame with.
-    // Upvalues are stored per-frame, but are duplicated across frames (which is why the GcReflock pattern)
-    upvalues: Gc<'gc, RefLock<Vec<ValuePtr<'gc>>>>,
 }
 
 impl ThreadFrame<'_> {
@@ -132,7 +141,6 @@ impl PartialEq for ThreadFrame<'_> {
                 || self.exception.is_none() && other.exception.is_none())
             && Gc::ptr_eq(self.env, other.env)
             && self.bottom == other.bottom
-            && Gc::ptr_eq(self.upvalues, other.upvalues)
     }
 }
 impl Eq for ThreadFrame<'_> {}
@@ -200,7 +208,7 @@ impl<'gc> Iterator for StackExpander<'gc> {
 pub type ThreadPtr<'gc> = Gc<'gc, RefLock<Thread<'gc>>>;
 pub type Stack<'gc> = Vec<ValuePtr<'gc>>;
 /// Runs all code
-#[derive(Debug, Collect, Default)]
+#[derive(Debug, Collect)]
 #[collect(no_drop)]
 pub struct Thread<'gc> {
     stack: Stack<'gc>,
@@ -208,6 +216,18 @@ pub struct Thread<'gc> {
     error: Option<SchemeErrorPtr<'gc>>,
     // used in the creation of self-referential datastructures and recursive structures
     holes: fxhash::FxHashMap<usize, ValuePtr<'gc>>,
+    // Upvalues for executing code
+    upvalues: Vec<ValuePtr<'gc>>,
+    // Mapping for lambdas to upvalue
+    upvalue_mapping: fxhash::FxHashMap<usize, fxhash::FxHashMap<usize, usize>>,
+    // counter for the upvalue mapping
+    next_upvalue_index: usize,
+}
+
+impl Default for Thread<'_> {
+    fn default() -> Self {
+        Self::new_empty()
+    }
 }
 
 // Public-facing API
@@ -219,6 +239,7 @@ impl<'gc> Thread<'gc> {
                     chunk,
                     pc: 0,
                     arity: Arity::Exact(0),
+                    upvalue_index: None,
                 },
                 env: Gc::new(
                     mc,
@@ -229,9 +250,21 @@ impl<'gc> Thread<'gc> {
                 dynamic_wind: None,
                 exception: None,
                 bottom: 0,
-                upvalues: Gc::new(mc, RefLock::new(Vec::with_capacity(chunk.upvalues))),
             }],
-            ..Default::default()
+            upvalues: Vec::with_capacity(chunk.upvalues),
+            ..Self::new_empty()
+        }
+    }
+
+    pub fn new_empty() -> Self {
+        Self {
+            frames: vec![],
+            upvalues: Vec::new(),
+            stack: vec![],
+            error: None,
+            holes: fxhash::FxHashMap::default(),
+            upvalue_mapping: Default::default(),
+            next_upvalue_index: 0,
         }
     }
 
@@ -253,6 +286,12 @@ impl<'gc> Thread<'gc> {
         Ok(())
     }
 
+    fn allocate_upvalue_index(counter: &mut usize) -> usize {
+        let c = *counter;
+        *counter += 1;
+        c
+    }
+
     /// Creates a frame of evaluation for included code
     ///
     /// Clobbers the current frame if `tail` is true
@@ -267,6 +306,7 @@ impl<'gc> Thread<'gc> {
             chunk,
             pc: 0,
             arity: Arity::Exact(0),
+            upvalue_index: None,
         };
 
         if tail {
@@ -274,8 +314,6 @@ impl<'gc> Thread<'gc> {
                 // Adjust the frame's parent to point to *this* chunk's import env
                 last.env.borrow_mut(mc).reparent(Some(chunk.import_env));
                 last.execution = execution;
-                // Create an independant upvalues array
-                last.upvalues = Gc::new(mc, RefLock::new(Vec::with_capacity(chunk.upvalues)));
                 return;
             }
         }
@@ -291,8 +329,6 @@ impl<'gc> Thread<'gc> {
             dynamic_wind: None,
             exception: None,
             bottom: self.stack.len(),
-            // Create an independant upvalues array
-            upvalues: Gc::new(mc, RefLock::new(Vec::with_capacity(chunk.upvalues))),
         });
     }
 
@@ -502,16 +538,6 @@ impl<'gc> Thread<'gc> {
                 ctx,
                 RefLock::new(StackEnvironment::new(ctx, Self::current_env(&self.frames))),
             ),
-            // Copy parent frame upvalues (if available)
-            upvalues: self.frames.last().map(|f| f.upvalues).unwrap_or_else(|| {
-                Gc::new(
-                    ctx,
-                    RefLock::new(Vec::with_capacity(match lambda {
-                        Lambda::Compiled(c) => c.chunk.upvalues,
-                        _ => 0,
-                    })),
-                )
-            }),
         };
 
         if is_tail {
@@ -678,7 +704,12 @@ impl<'gc> Thread<'gc> {
 
             // handle execution
             match &mut frame.execution {
-                Execution::Bytecode { chunk, pc, arity } => {
+                Execution::Bytecode {
+                    chunk,
+                    pc,
+                    arity,
+                    upvalue_index,
+                } => {
                     // If framepointer is oob, then that means execution of this frame is finished
                     if chunk.code.len() <= *pc {
                         self.handle_frame_end(&ctx, true);
@@ -727,7 +758,20 @@ impl<'gc> Thread<'gc> {
                         Bytecode::PushLambda { index } => {
                             self.stack.push(Gc::new(
                                 &ctx,
-                                RefLock::new(Value::Lambda(Lambda::Compiled(chunk.lambdas[index]))),
+                                RefLock::new(Value::Lambda(Lambda::Compiled({
+                                    let l = chunk.lambdas[index];
+                                    let l = if let Some(upvalue_index) = *upvalue_index {
+                                        l.label(&ctx, upvalue_index)
+                                    } else {
+                                        l.label(
+                                            &ctx,
+                                            Self::allocate_upvalue_index(
+                                                &mut self.next_upvalue_index,
+                                            ),
+                                        )
+                                    };
+                                    l
+                                }))),
                             ));
                             advance_to_next_inst!();
                         }
@@ -755,10 +799,30 @@ impl<'gc> Thread<'gc> {
                             }
                         }
                         Bytecode::SetUpvalue { index } => {
-                            let upvalues_len = frame.upvalues.borrow().len();
+                            let upvalues_len = self.upvalues.len();
+                            // // Assign a new upvalue scope if this one already exists
+                            // let Some(upvalue_index) = *upvalue_index else {
+                            //     todo!("not in upvalue scope");
+                            // };
+                            // if let Some(mapping) = self.upvalue_mapping.get(&lupvalue_index) {
+                            //     if mapping.get(&index).is_some() {
+                            //         // duplicate and make unique
+                            //         let new_scope =
+                            //             Self::allocate_upvalue_index(&mut self.next_upvalue_index);
+                            //         self.upvalue_mapping.insert(new_scope, mapping.clone());
+                            //         *upvalue_index = Some(new_scope);
+                            //         // lupvalue_index = new_scope;
+                            //     }
+                            // }
+                            // dbg!((&self.upvalue_mapping, *upvalue_index));
+                            self.upvalue_mapping
+                                .entry(upvalue_index.expect("not in upvaluable scope"))
+                                .or_default()
+                                .insert(index, upvalues_len);
+                            let index = upvalues_len;
                             if upvalues_len <= index {
                                 // Fill upvalues with undefineds
-                                frame.upvalues.borrow_mut(&ctx).extend(std::iter::repeat_n(
+                                self.upvalues.extend(std::iter::repeat_n(
                                     Gc::new(&ctx, RefLock::new(Value::Undefined)),
                                     index - upvalues_len + 1,
                                 ));
@@ -767,11 +831,20 @@ impl<'gc> Thread<'gc> {
                                 make_error!(SchemeErrorType::NoValue(inst));
                                 continue;
                             };
-                            frame.upvalues.borrow_mut(&ctx)[index] = val;
+                            self.upvalues[index] = val;
                             advance_to_next_inst!();
                         }
                         Bytecode::FetchUpvalue { index } => {
-                            if let Some(val) = frame.upvalues.borrow().get(index) {
+                            // Get the *actual* index or error
+                            // dbg!((&self.upvalue_mapping, *upvalue_index));
+                            let Some(index) = self
+                                .upvalue_mapping
+                                .get(upvalue_index.as_ref().expect("not in upvaluable scope"))
+                                .and_then(|upm| upm.get(&index).copied())
+                            else {
+                                todo!("TODO upvalue misreference miscompilation");
+                            };
+                            if let Some(val) = self.upvalues.get(index) {
                                 if !matches!(*val.borrow(), Value::Undefined) {
                                     self.stack.push(*val);
                                     advance_to_next_inst!();
@@ -880,7 +953,23 @@ impl<'gc> Thread<'gc> {
                             };
 
                             match *val.borrow() {
-                                Value::Lambda(l) => {
+                                Value::Lambda(mut l) => {
+                                    // dbg!((&self.upvalue_mapping, *upvalue_index, &l));
+                                    // Generate copy of lambda scope if it already exists (for new upvalues)
+                                    if let Some(mapping) =
+                                        l.get_label().and_then(|l| self.upvalue_mapping.get(&l))
+                                    {
+                                        // if we are compiled and *set* upvalues, we need a copy of the scope
+                                        if matches!(l, Lambda::Compiled(c) if c.chunk.code.iter().any(|bc| matches!(bc, Bytecode::SetUpvalue { .. })))
+                                        {
+                                            let new_scope = Self::allocate_upvalue_index(
+                                                &mut self.next_upvalue_index,
+                                            );
+                                            self.upvalue_mapping.insert(new_scope, mapping.clone());
+                                            l = l.label(&ctx, new_scope);
+                                        }
+                                        // otherwise, we can continue as normal
+                                    }
                                     let pc = *pc;
                                     let code = std::rc::Rc::clone(&chunk.code);
                                     // advance to next inst *before* pushing lambda
@@ -939,10 +1028,19 @@ impl<'gc> Thread<'gc> {
                                 make_error!(SchemeErrorType::NoValue(inst));
                                 continue;
                             };
-                            if frame.upvalues.borrow().len() <= index {
+                            // Get the *actual* index or error
+                            let Some(index) = self
+                                .upvalue_mapping
+                                .get(upvalue_index.as_ref().expect("not in upvaluable scope"))
+                                .and_then(|upm| upm.get(&index).copied())
+                            else {
+                                todo!("TODO upvalue misreference miscompilation");
+                            };
+                            if self.upvalues.len() <= index {
                                 todo!("TODO upvalue misreference miscompilation");
                             }
-                            frame.upvalues.borrow_mut(&ctx)[index] = value;
+                            // Get the *actual* index, or error
+                            self.upvalues[index] = value;
 
                             advance_to_next_inst!();
                         }
@@ -1071,6 +1169,11 @@ impl<'gc> Thread<'gc> {
                         }) => {
                             let args_len = args.len();
                             self.stack.extend(args);
+                            // label the lambda
+                            let lambda = lambda.label(
+                                &ctx,
+                                Self::allocate_upvalue_index(&mut self.next_upvalue_index),
+                            );
                             if let Err(err) = self.call_lambda(&ctx, lambda, args_len, false) {
                                 make_error!(SchemeErrorType::LambdaException(err));
                                 continue;
@@ -1085,6 +1188,11 @@ impl<'gc> Thread<'gc> {
                         }) => {
                             let args_len = args.len();
                             self.stack.extend(args);
+                            // label the lambda
+                            let lambda = lambda.label(
+                                &ctx,
+                                Self::allocate_upvalue_index(&mut self.next_upvalue_index),
+                            );
                             if let Err(err) = self.call_lambda(&ctx, lambda, args_len, true) {
                                 make_error!(SchemeErrorType::LambdaException(err));
                                 continue;

@@ -80,6 +80,7 @@ Chunk {
                     },
                 },
             },
+            upvalue_id: None,
         },
     ],
     promises: [],

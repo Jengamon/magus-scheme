@@ -75,6 +75,7 @@ Chunk {
                     },
                 },
             },
+            upvalue_id: None,
         },
         CompiledLambda {
             arity: Exact(
@@ -154,6 +155,7 @@ Chunk {
                                 },
                             },
                         },
+                        upvalue_id: None,
                     },
                 ],
                 promises: [],
@@ -210,6 +212,7 @@ Chunk {
                     },
                 },
             },
+            upvalue_id: None,
         },
         CompiledLambda {
             arity: AtLeast(
@@ -289,6 +292,7 @@ Chunk {
                                 },
                             },
                         },
+                        upvalue_id: None,
                     },
                     CompiledLambda {
                         arity: Exact(
@@ -368,6 +372,7 @@ Chunk {
                                             },
                                         },
                                     },
+                                    upvalue_id: None,
                                 },
                             ],
                             promises: [],
@@ -424,6 +429,7 @@ Chunk {
                                 },
                             },
                         },
+                        upvalue_id: None,
                     },
                 ],
                 promises: [],
@@ -493,6 +499,7 @@ Chunk {
                     },
                 },
             },
+            upvalue_id: None,
         },
         CompiledLambda {
             arity: Exact(
@@ -572,6 +579,7 @@ Chunk {
                                 },
                             },
                         },
+                        upvalue_id: None,
                     },
                     CompiledLambda {
                         arity: Exact(
@@ -651,6 +659,7 @@ Chunk {
                                             },
                                         },
                                     },
+                                    upvalue_id: None,
                                 },
                             ],
                             promises: [],
@@ -707,6 +716,7 @@ Chunk {
                                 },
                             },
                         },
+                        upvalue_id: None,
                     },
                     CompiledLambda {
                         arity: AtLeast(
@@ -786,6 +796,7 @@ Chunk {
                                             },
                                         },
                                     },
+                                    upvalue_id: None,
                                 },
                                 CompiledLambda {
                                     arity: Exact(
@@ -865,6 +876,7 @@ Chunk {
                                                         },
                                                     },
                                                 },
+                                                upvalue_id: None,
                                             },
                                         ],
                                         promises: [],
@@ -921,6 +933,7 @@ Chunk {
                                             },
                                         },
                                     },
+                                    upvalue_id: None,
                                 },
                             ],
                             promises: [],
@@ -990,6 +1003,7 @@ Chunk {
                                 },
                             },
                         },
+                        upvalue_id: None,
                     },
                 ],
                 promises: [],
@@ -1080,6 +1094,7 @@ Chunk {
                     },
                 },
             },
+            upvalue_id: None,
         },
     ],
     promises: [],

@@ -182,11 +182,16 @@ pub struct CompiledLambda<'gc> {
     #[collect(require_static)]
     pub(crate) arity: Arity,
     pub(crate) chunk: ChunkPtr<'gc>,
+    pub(crate) upvalue_id: Option<usize>,
 }
 
 impl<'gc> CompiledLambda<'gc> {
     pub fn new(arity: Arity, chunk: ChunkPtr<'gc>) -> Self {
-        Self { arity, chunk }
+        Self {
+            arity,
+            chunk,
+            upvalue_id: None,
+        }
     }
 
     pub fn arity(&self) -> Arity {
@@ -195,6 +200,17 @@ impl<'gc> CompiledLambda<'gc> {
 
     pub fn chunk(&self) -> ChunkPtr<'gc> {
         self.chunk
+    }
+
+    pub fn label(&self, mc: &Mutation<'gc>, upvalue_id: usize) -> CompiledLambdaPtr<'gc> {
+        Gc::new(
+            mc,
+            CompiledLambda {
+                arity: self.arity,
+                chunk: self.chunk,
+                upvalue_id: Some(upvalue_id),
+            },
+        )
     }
 }
 
@@ -244,6 +260,32 @@ impl Lambda<'_> {
         match self {
             Self::Native(n) => n.borrow().arity(),
             Self::Compiled(c) => c.arity,
+        }
+    }
+
+    /// Check if a lambda needs a label
+    pub fn needs_label(self) -> bool {
+        match self {
+            Self::Compiled(c) => c.upvalue_id.is_none(),
+            _ => false,
+        }
+    }
+
+    /// Get a lambda's label (if any)
+    pub fn get_label(self) -> Option<usize> {
+        match self {
+            Self::Compiled(c) => c.upvalue_id,
+            _ => None,
+        }
+    }
+}
+
+impl<'gc> Lambda<'gc> {
+    // convenience function to label compiled lambdas
+    pub fn label(self, mc: &Mutation<'gc>, upvalue_id: usize) -> Self {
+        match self {
+            Self::Native(_) => self,
+            Self::Compiled(c) => Self::Compiled(c.label(mc, upvalue_id)),
         }
     }
 }

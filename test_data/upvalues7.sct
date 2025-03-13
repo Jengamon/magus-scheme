@@ -1,0 +1,10 @@
+---
+(1 2 3)
+(3 2 1)
+---
+(import (only (scheme base) define lambda values))
+; upvalues should be unique per-call
+(define (p . xs) (lambda () xs))
+(define inner (p 1 2 3))
+(define inner2 (p 3 2 1))
+(values (inner) (inner2))

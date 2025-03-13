@@ -124,7 +124,7 @@ mod control {
 
     impl NativeLambda for Apply {
         fn arity(&self) -> Arity {
-            Arity::AtLeast(1)
+            Arity::AtLeast(2)
         }
 
         fn run<'gc>(

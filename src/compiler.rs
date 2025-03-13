@@ -76,13 +76,13 @@ pub enum ProgramData<'gc> {
     Symbol(#[collect(require_static)] lasso::Spur),
     Bool(bool),
     Char(char),
-    // TODO bytevector, vector
     Bytevector(Rc<[u8]>),
     Labeled {
         label: usize,
         item: ProgramPtr<'gc>,
     },
     LabelRef(usize),
+    Vector(Vec<ProgramPtr<'gc>>),
     EmptyList,
     List {
         /// A list is generally the form of an invocation, and we want to detect anything
@@ -104,23 +104,23 @@ pub struct Program<'gc> {
     pub source: Option<SourceData>,
 }
 
-impl<'gc> Program<'gc> {
-    pub fn display<R: lasso::Resolver>(
-        program: ProgramPtr<'gc>,
-        resolver: R,
-    ) -> DisplayableProgram<'gc, R> {
-        DisplayableProgram {
-            program,
-            resolver: Rc::new(resolver),
-        }
-    }
-}
+// impl<'gc> Program<'gc> {
+//     pub fn display<R: lasso::Resolver>(
+//         program: ProgramPtr<'gc>,
+//         resolver: R,
+//     ) -> DisplayableProgram<'gc, R> {
+//         DisplayableProgram {
+//             program,
+//             resolver: Rc::new(resolver),
+//         }
+//     }
+// }
 
-#[derive(Debug)]
-pub struct DisplayableProgram<'gc, R: lasso::Resolver> {
-    program: ProgramPtr<'gc>,
-    resolver: Rc<R>,
-}
+// #[derive(Debug)]
+// pub struct DisplayableProgram<'gc, R: lasso::Resolver> {
+//     program: ProgramPtr<'gc>,
+//     resolver: Rc<R>,
+// }
 
 // TODO Provide nice ways of "mutation" that create new programs
 // (or just provide a visitor API that instead can return a value)
@@ -1031,6 +1031,15 @@ impl<'gc> Compiler<'gc> {
             }]))),
             ProgramData::Char(c) => {
                 simple_constant!(*c => Char)
+            }
+            ProgramData::Vector(v) => {
+                let mut code = vec![];
+                let length = v.len();
+                for res in v.iter().map(|program| self.compile_code(ctx, *program)) {
+                    code.extend(res?.into_bytecode());
+                }
+                code.push(Bytecode::MakeVector { length });
+                Ok(SyntaxReturn::Code(code.into()))
             }
             ProgramData::Labeled { .. } => Err(CompileError::Labeled(program.source)),
             ProgramData::LabelRef(_) => Err(CompileError::LabelRef(program.source)),

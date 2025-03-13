@@ -13,7 +13,7 @@ use crate::{
             NativeLambdaPtr,
         },
     },
-    value::{ConsCell, Continuation, ContinuationPtr, ValuePtr},
+    value::{self, ConsCell, Continuation, ContinuationPtr, ValuePtr},
 };
 
 use super::{Context, Includer};
@@ -814,6 +814,19 @@ impl<'gc> Thread<'gc> {
                             let cdr = self.stack.pop();
                             self.stack
                                 .push(Value::Cons(ConsCell { car, cdr }).into_ptr(&ctx));
+                            advance_to_next_inst!();
+                        }
+                        Bytecode::MakeVector { length } => {
+                            if self.stack.len() < length {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            }
+
+                            let items = self.stack.drain(self.stack.len() - length..);
+                            let vector = value::Vector::new(im_rc::Vector::from_iter(items))
+                                .into_value(&ctx)
+                                .into_ptr(&ctx);
+                            self.stack.push(vector);
                             advance_to_next_inst!();
                         }
                         Bytecode::MakeHole { id } => {

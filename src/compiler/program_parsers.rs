@@ -461,6 +461,28 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
                     )));
                 }
             }
+
+            fn visit_vector(&mut self, vector: &crate::Vector) {
+                let mut items = vec![];
+                for d in vector.datum() {
+                    self.visit_datum(&d);
+                    match self.ptr.take() {
+                        Some(Ok(p)) => {
+                            items.push(p);
+                        }
+                        None | Some(Err(_)) => {
+                            self.ptr = Some(Err(GAstProgramError::Unparseable(
+                                vector.syntax().text_range(),
+                            )));
+                            return;
+                        }
+                    }
+                }
+                self.ptr = Some(Ok(Gc::new(
+                    self.mc,
+                    Program::new(ProgramData::Vector(items), source_data!(self, vector)),
+                )));
+            }
         }
 
         let mut programs = vec![];

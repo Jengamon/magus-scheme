@@ -64,6 +64,15 @@ impl Syntax for Quote {
                     }
                     vec![Bytecode::MakeHole { id: *label }]
                 }
+                ProgramData::Vector(v) => {
+                    let mut data = vec![];
+                    let length = v.len();
+                    for it in v.iter() {
+                        data.extend(quote_program(*it, ctx, labels)?);
+                    }
+                    data.push(Bytecode::MakeVector { length });
+                    data
+                }
                 ProgramData::EmptyList => vec![Bytecode::PushNull],
                 ProgramData::List { head, body } => {
                     let mut data = vec![Bytecode::PushNull];

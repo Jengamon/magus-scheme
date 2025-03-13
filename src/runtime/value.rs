@@ -80,7 +80,7 @@ pub enum Value<'gc> {
     Symbol(Symbol),
     Bool(bool),
     Char(char),
-    Vector(Vector<'gc>),
+    Vector(VectorPtr<'gc>),
     Bytevector(Bytevector<'gc>),
     Record(()),
     // Strings might not need to be in the GC, so
@@ -127,8 +127,8 @@ impl PartialEq for Value<'_> {
             Value::Symbol(sym) => matches!(other, Value::Symbol(osym) if osym == sym),
             Value::Bool(b) => matches!(other, Value::Bool(ob) if ob == b),
             Value::Char(c) => matches!(other, Value::Char(oc) if oc == c),
-            Value::Vector(Vector { vec: vp }) => {
-                matches!(other, Value::Vector(Vector { vec: ovp }) if Gc::ptr_eq(*vp, *ovp))
+            Value::Vector(vp) => {
+                matches!(other, Value::Vector(ovp) if Gc::ptr_eq(*vp, *ovp))
             }
             Value::Bytevector(_) => todo!(),
             Value::Record(_) => todo!(),
@@ -333,6 +333,21 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
             Value::Vector(ref vec) => {
                 // just dfs the structure, we know it isn't circular
                 write!(f, "#(")?;
+                for (idx, elem) in vec.vec.iter().enumerate() {
+                    if idx != 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(
+                        f,
+                        "{}",
+                        ResolvedValue {
+                            value: *elem.borrow(),
+                            value_ptr: *elem,
+                            null_ptr: self.null_ptr,
+                            resolver: Rc::clone(&self.resolver)
+                        }
+                    )?;
+                }
                 write!(f, ")")
             }
             Value::Bytevector(bv) => {
@@ -457,10 +472,20 @@ impl<'gc> From<Gc<'gc, Static<im_rc::Vector<u8>>>> for Bytevector<'gc> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Vector<'gc> {
-    pub vec: Gc<'gc, im_rc::Vector<ValuePtr<'gc>>>,
+    pub vec: im_rc::Vector<ValuePtr<'gc>>,
 }
+impl<'gc> Vector<'gc> {
+    pub fn new(value: im_rc::Vector<ValuePtr<'gc>>) -> Self {
+        Self { vec: value }
+    }
+
+    pub fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {
+        Value::Vector(Gc::new(mc, self))
+    }
+}
+pub type VectorPtr<'gc> = Gc<'gc, Vector<'gc>>;
 
 #[allow(unsafe_code)]
 unsafe impl<'gc> Collect<'gc> for Vector<'gc> {

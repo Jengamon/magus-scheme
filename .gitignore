@@ -2,3 +2,4 @@
 *.local
 *.local.*
 /locale_data
+*.snap.new

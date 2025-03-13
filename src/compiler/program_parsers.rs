@@ -445,6 +445,22 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
                     }
                 }
             }
+
+            fn visit_bytevector(&mut self, bytevector: &crate::Bytevector) {
+                if bytevector.is_valid() {
+                    self.ptr = Some(Ok(Gc::new(
+                        self.mc,
+                        Program::new(
+                            ProgramData::Bytevector(bytevector.bytes().flatten().collect()),
+                            source_data!(self, bytevector),
+                        ),
+                    )));
+                } else {
+                    self.ptr = Some(Err(GAstProgramError::Unparseable(
+                        bytevector.syntax().text_range(),
+                    )));
+                }
+            }
         }
 
         let mut programs = vec![];

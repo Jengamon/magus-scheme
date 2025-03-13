@@ -37,6 +37,7 @@ impl Syntax for Quote {
             Ok(match &ptr.data {
                 ProgramData::Integer(i) => constant_eval!(*i => Number),
                 ProgramData::Inexact(f) => constant_eval!(*f => Inexact),
+                ProgramData::Bytevector(bv) => constant_eval!(Arc::from(bv.as_ref()) => Bytevector),
                 ProgramData::String(s) => {
                     constant_eval!(Arc::from(ctx.interner.resolve(s)) => String)
                 }

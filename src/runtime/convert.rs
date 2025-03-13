@@ -129,9 +129,13 @@ impl<'gc> IntoValue<'gc> for bytecode::Constant {
             Self::Number(i) => i.into_value(mc),
             Self::Inexact(f) => f.into_value(mc),
             Self::String(s) => s.into_value(mc),
-            Self::Bytevector(bv) => {
-                Value::Bytevector(Gc::new(mc, RefLock::new(bv.to_vec())).into())
-            }
+            Self::Bytevector(bv) => Value::Bytevector(
+                Gc::new(
+                    mc,
+                    gc_arena::Static(im_rc::Vector::from_iter(bv.iter().copied())),
+                )
+                .into(),
+            ),
         }
     }
 }

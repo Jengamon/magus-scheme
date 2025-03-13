@@ -137,7 +137,7 @@ impl<'gc> std::ops::Deref for NativeLambdaContext<'_, 'gc> {
 /// A native lambda is a Rust-implemented lambda
 ///
 /// # Notes
-/// - implementations are defined by a [`World`](crate::compiler::World) and are thus shared across all scripts
+/// - implementations are defined by a [`World`] and are thus shared across all scripts
 ///   that use that `World`, depending on how that `World` defines them
 #[expect(private_bounds)]
 pub trait NativeLambda: std::fmt::Debug + Collectable {
@@ -174,7 +174,7 @@ pub trait NativeLambda: std::fmt::Debug + Collectable {
 pub type NativeLambdaPtr<'gc> = Gc<'gc, RefLock<dyn NativeLambda>>;
 pub type LambdaResult<'gc> = Result<LambdaReturn<'gc>, LambdaError>;
 
-/// A compiled lambda is a wrapper around a [`ChunkPtr`](crate::bytecode::ChunkPtr) with additional information about arity
+/// A compiled lambda is a wrapper around a [`ChunkPtr`] with additional information about arity
 pub type CompiledLambdaPtr<'gc> = Gc<'gc, CompiledLambda<'gc>>;
 #[derive(Debug, Collect)]
 #[collect(no_drop)]

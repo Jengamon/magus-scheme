@@ -1,4 +1,3 @@
-use core::fmt;
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -77,7 +76,8 @@ pub enum ProgramData<'gc> {
     Symbol(#[collect(require_static)] lasso::Spur),
     Bool(bool),
     Char(char),
-    // TODO bytevector
+    // TODO bytevector, vector
+    Bytevector(Rc<[u8]>),
     Labeled {
         label: usize,
         item: ProgramPtr<'gc>,
@@ -122,24 +122,6 @@ pub struct DisplayableProgram<'gc, R: lasso::Resolver> {
     resolver: Rc<R>,
 }
 
-impl<T: lasso::Resolver> fmt::Display for DisplayableProgram<'_, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.program.data {
-            ProgramData::Integer(i) => write!(f, "{i}"),
-            ProgramData::Inexact(fl) => write!(f, "{fl}"),
-            ProgramData::String(spur) => todo!(),
-            ProgramData::Symbol(spur) => todo!(),
-            ProgramData::Bool(_) => todo!(),
-            ProgramData::Char(_) => todo!(),
-            ProgramData::Labeled { label, item } => todo!(),
-            ProgramData::LabelRef(_) => todo!(),
-            ProgramData::EmptyList => todo!(),
-            ProgramData::List { head, body } => todo!(),
-            ProgramData::DottedList { pre_dot, dot } => todo!(),
-        }
-    }
-}
-
 // TODO Provide nice ways of "mutation" that create new programs
 // (or just provide a visitor API that instead can return a value)
 
@@ -149,59 +131,59 @@ impl<'gc> Program<'gc> {
     }
 }
 
-pub trait ProgramVisitor {
-    fn visit_program_data(&mut self, program: &ProgramData<'_>) {
-        match program {
-            ProgramData::Integer(int) => self.visit_integer(*int),
-            ProgramData::Inexact(inexact) => self.visit_inexact(*inexact),
-            ProgramData::String(string_id) => self.visit_string(*string_id),
-            ProgramData::Symbol(symbol_id) => self.visit_symbol(*symbol_id),
-            ProgramData::Bool(b) => self.visit_bool(*b),
-            ProgramData::Char(c) => self.visit_char(*c),
-            ProgramData::Labeled { label, item } => self.visit_labeled(*label, *item),
-            ProgramData::LabelRef(label_ref) => self.visit_label_ref(*label_ref),
-            ProgramData::EmptyList => self.visit_empty_list(),
-            ProgramData::List { head, body } => self.visit_list(*head, body.as_slice()),
-            ProgramData::DottedList { pre_dot, dot } => {
-                self.visit_dotted_list(pre_dot.as_slice(), *dot)
-            }
-        }
-    }
-    fn visit_program(&mut self, ptr: ProgramPtr<'_>) {
-        self.visit_program_data(&ptr.data)
-    }
-    fn visit_integer(&mut self, integer: i64) {
-        let _ = integer;
-    }
-    fn visit_inexact(&mut self, inexact: f64) {
-        let _ = inexact;
-    }
-    fn visit_string(&mut self, string_id: lasso::Spur) {
-        let _ = string_id;
-    }
-    fn visit_symbol(&mut self, symbol_id: lasso::Spur) {
-        let _ = symbol_id;
-    }
-    fn visit_bool(&mut self, b: bool) {
-        let _ = b;
-    }
-    fn visit_char(&mut self, c: char) {
-        let _ = c;
-    }
-    fn visit_labeled(&mut self, label: usize, item: ProgramPtr<'_>) {
-        let _ = (label, item);
-    }
-    fn visit_label_ref(&mut self, label_ref: usize) {
-        let _ = label_ref;
-    }
-    fn visit_empty_list(&mut self) {}
-    fn visit_list(&mut self, head: ListHead<'_>, body: &[ProgramPtr<'_>]) {
-        let _ = (head, body);
-    }
-    fn visit_dotted_list(&mut self, pre_dot: &[ProgramPtr<'_>], dot: ProgramPtr<'_>) {
-        let _ = (pre_dot, dot);
-    }
-}
+// pub trait ProgramVisitor {
+//     fn visit_program_data(&mut self, program: &ProgramData<'_>) {
+//         match program {
+//             ProgramData::Integer(int) => self.visit_integer(*int),
+//             ProgramData::Inexact(inexact) => self.visit_inexact(*inexact),
+//             ProgramData::String(string_id) => self.visit_string(*string_id),
+//             ProgramData::Symbol(symbol_id) => self.visit_symbol(*symbol_id),
+//             ProgramData::Bool(b) => self.visit_bool(*b),
+//             ProgramData::Char(c) => self.visit_char(*c),
+//             ProgramData::Labeled { label, item } => self.visit_labeled(*label, *item),
+//             ProgramData::LabelRef(label_ref) => self.visit_label_ref(*label_ref),
+//             ProgramData::EmptyList => self.visit_empty_list(),
+//             ProgramData::List { head, body } => self.visit_list(*head, body.as_slice()),
+//             ProgramData::DottedList { pre_dot, dot } => {
+//                 self.visit_dotted_list(pre_dot.as_slice(), *dot)
+//             }
+//         }
+//     }
+//     fn visit_program(&mut self, ptr: ProgramPtr<'_>) {
+//         self.visit_program_data(&ptr.data)
+//     }
+//     fn visit_integer(&mut self, integer: i64) {
+//         let _ = integer;
+//     }
+//     fn visit_inexact(&mut self, inexact: f64) {
+//         let _ = inexact;
+//     }
+//     fn visit_string(&mut self, string_id: lasso::Spur) {
+//         let _ = string_id;
+//     }
+//     fn visit_symbol(&mut self, symbol_id: lasso::Spur) {
+//         let _ = symbol_id;
+//     }
+//     fn visit_bool(&mut self, b: bool) {
+//         let _ = b;
+//     }
+//     fn visit_char(&mut self, c: char) {
+//         let _ = c;
+//     }
+//     fn visit_labeled(&mut self, label: usize, item: ProgramPtr<'_>) {
+//         let _ = (label, item);
+//     }
+//     fn visit_label_ref(&mut self, label_ref: usize) {
+//         let _ = label_ref;
+//     }
+//     fn visit_empty_list(&mut self) {}
+//     fn visit_list(&mut self, head: ListHead<'_>, body: &[ProgramPtr<'_>]) {
+//         let _ = (head, body);
+//     }
+//     fn visit_dotted_list(&mut self, pre_dot: &[ProgramPtr<'_>], dot: ProgramPtr<'_>) {
+//         let _ = (pre_dot, dot);
+//     }
+// }
 
 // TODO If we use/had specialization, we maybe could provide default impls if T: Default
 
@@ -952,6 +934,9 @@ impl<'gc> Compiler<'gc> {
             ProgramData::Inexact(f) => {
                 simple_constant!(*f => Inexact)
             }
+            ProgramData::Bytevector(bv) => {
+                simple_constant!(Arc::from(bv.as_ref()) => Bytevector)
+            }
             ProgramData::String(spur) => {
                 let index =
                     ctx.push_constant(Constant::String(Arc::from(ctx.interner.resolve(spur))));
@@ -1528,12 +1513,12 @@ impl<'gc> Compiler<'gc> {
         });
     }
 
-    /// Get the [`ArgumentScope`] of a given scope where 0 is local, 1 is parent, etc..
+    /// Get the [`Scope`] of a given scope where 0 is local, 1 is parent, etc..
     pub fn argument_scope(&self, scope: usize) -> Option<&Scope> {
         self.scopes.iter().rev().nth(scope)
     }
 
-    /// Get the [`ArgumentScope`] of a given scope where 0 is local, 1 is parent, etc..
+    /// Get the [`Scope`] of a given scope where 0 is local, 1 is parent, etc..
     pub fn argument_scope_mut(&mut self, scope: usize) -> Option<&mut Scope> {
         self.scopes.iter_mut().rev().nth(scope)
     }

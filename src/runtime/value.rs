@@ -4,7 +4,7 @@ use core::fmt;
 use std::rc::Rc;
 use std::string::String as StdString;
 
-use gc_arena::{Collect, Gc, Mutation, RefLock};
+use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
 use lasso::IntoResolver;
 
 use crate::environment::StackEnvironmentPtr;
@@ -228,19 +228,12 @@ impl<'gc> Value<'gc> {
         }
     }
 
-    // pub fn as_lambda(&self) -> Option<LambdaPtr<'gc>> {
+    // pub fn as_symbol(&self) -> Option<Symbol> {
     //     match self {
-    //         Self::Lambda(lam) => Some(*lam),
+    //         Self::Symbol(sym) => Some(*sym),
     //         _ => None,
     //     }
     // }
-
-    pub fn as_symbol(&self) -> Option<Symbol> {
-        match self {
-            Self::Symbol(sym) => Some(*sym),
-            _ => None,
-        }
-    }
 }
 
 enum ConsInner<'a, 'gc> {
@@ -339,15 +332,16 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
             }
             Value::Vector(ref vec) => {
                 // just dfs the structure, we know it isn't circular
-                todo!()
+                write!(f, "#(")?;
+                write!(f, ")")
             }
             Value::Bytevector(bv) => {
                 write!(f, "#u8(")?;
-                for (idx, elem) in bv.vec.borrow().iter().enumerate() {
+                for (idx, elem) in bv.vec.iter().enumerate() {
                     if idx != 0 {
                         write!(f, " ")?;
                     }
-                    write!(f, "#x{:02x}", elem)?;
+                    write!(f, "{}", elem)?;
                 }
                 write!(f, ")")?;
                 Ok(())
@@ -452,33 +446,35 @@ impl From<lasso::Spur> for Symbol {
     }
 }
 
-// TODO same as for Vector
-#[derive(Collect, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Collect)]
 #[collect(no_drop)]
 pub struct Bytevector<'gc> {
-    pub vec: Gc<'gc, RefLock<Vec<u8>>>,
+    pub vec: Gc<'gc, Static<im_rc::Vector<u8>>>,
 }
-impl<'gc> From<Gc<'gc, RefLock<Vec<u8>>>> for Bytevector<'gc> {
-    fn from(value: Gc<'gc, RefLock<Vec<u8>>>) -> Self {
+impl<'gc> From<Gc<'gc, Static<im_rc::Vector<u8>>>> for Bytevector<'gc> {
+    fn from(value: Gc<'gc, Static<im_rc::Vector<u8>>>) -> Self {
         Self { vec: value }
     }
 }
 
-// TODO Explore Clojure Immutable Vectors and
-// Relaxed Radix Balanced Trees for the backing implementation
-// (note that while these datatypes are immutable, they are immutable from
-// Rust's perspective [using Gc w/o RefLock]. we can still have something like vector-set! "mutate"
-// a value by changing what the `vec` pointer is pointing to)
-#[derive(Collect, Clone, Copy, Debug)]
-#[collect(no_drop)]
+#[derive(Clone, Copy, Debug)]
 pub struct Vector<'gc> {
-    pub vec: Gc<'gc, RefLock<Vec<ValuePtr<'gc>>>>,
+    pub vec: Gc<'gc, im_rc::Vector<ValuePtr<'gc>>>,
+}
+
+#[allow(unsafe_code)]
+unsafe impl<'gc> Collect<'gc> for Vector<'gc> {
+    fn trace<T: gc_arena::collect::Trace<'gc>>(&self, cc: &mut T) {
+        for ptr in self.vec.iter() {
+            ptr.trace(cc);
+        }
+    }
 }
 
 impl<'gc> Vector<'gc> {
     fn is_circular_impl(&self, self_ptr: ValuePtr<'gc>, stack: &mut Vec<ValuePtr<'gc>>) -> bool {
         stack.push(self_ptr);
-        for val in self.vec.borrow().iter().copied() {
+        for val in self.vec.iter().copied() {
             match *val.borrow() {
                 Value::Cons(cell) => {
                     if cell.is_circular_impl(val, stack) {

@@ -211,17 +211,17 @@ fn execute(
                 println!("==LAMBDAS==");
                 for (idx, l) in chunk.lambdas.iter().enumerate() {
                     println!("==LAMBDA {idx}==");
-                    for code in l.chunk().code.iter() {
-                        println!("{code}")
+                    for (idx, code) in l.chunk().code.iter().enumerate() {
+                        println!("{idx}: {code}")
                     }
                     println!("==END LAMBDA {idx}==");
                 }
                 println!("==END LAMBDAS==");
                 // nice mnemonic format??
                 println!("==CHUNK CODE (upvalues: {})==", chunk.upvalues);
-                for code in chunk.code.iter() {
+                for (idx, code) in chunk.code.iter().enumerate() {
                     // Use display
-                    println!("{code}");
+                    println!("{idx}: {code}");
                 }
                 println!("==END CHUNK==");
                 let thread = ctx.thread;

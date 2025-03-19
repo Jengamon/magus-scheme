@@ -37,23 +37,20 @@ A script is only allowed to import libraries defined by modules from its World, 
 in their script (or include) on the same `Compiler`.
 
 ### Runtime
-
-The runtime is responsible for reading and executing on a World's GAst.
+The runtime is responsible for reading and executing on a GAst.
 
 It consists of 2 parts:
 - Compiler
 - VM
 
-TODO List
-- [x] compiler can produce VM bytecode
-- [-] vm can interpret code
+GAst is wrapped with a filename to form a Program.
 
 #### Compiler
 It is the job of the compiler to:
 - interpret macros
 - produce runnable code from a world and source
 
-It takes in a World, and a filename, and returns code that can be ran on an interpreter.
+It takes in a World, Includer, and a Program, and returns code that can be ran on an interpreter thread.
 
 #### VM/Treewalk
 
@@ -65,6 +62,9 @@ Numbers are of particular interest to Schemers, and I'm happy to say that we sup
 all forms of numbers (and with how we store them, the Scheme `ieee-float` feature). However,
 we currently do not have a runtime that supports numbers beyond exact integers (for my purposes,
 this is fine).
+
+TODO Work on allowing writing of rationals in a Program
+TODO (future) Work on using BigIntegers in the Frontend
 
 **UPDATE** (2025-03-01): We don't actually support polar numbers. We should, eventually.
 
@@ -100,7 +100,7 @@ If I were to define in `hygiene.scm`:
 
 ## Improve UX
 
-Make code prettier. As a prerequisite for this, spin out the lexer and general parser together into their own crate.
+Make code prettier. As a prerequisite (?) for this, spin out the lexer and general parser together into their own crate.
 The below operations should be provided by a single executable (as they are pretty similar in goal).
 
 ### Formatter
@@ -109,6 +109,8 @@ Soooo to make code look nice we should do this, taking advantage of the CST we u
 We can model it after the one currently in REPL (which is modelled after https://justinethier.github.io/cyclone/docs/Scheme-code-conventions.html).
 
 The idea is to have this and then have the repl use this to display code instead (so preserving comments)
+
+(Possibly we can just write something for [`topiary`](https://topiary.tweag.io/), which would mean we'd only need the lexer)
 
 ### Linter
 

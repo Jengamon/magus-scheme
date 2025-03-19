@@ -1,4 +1,4 @@
-use gc_arena::{Collect, Gc, Mutation, RefLock};
+use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
 
 use crate::{
     Fuel, Value,
@@ -9,8 +9,8 @@ use crate::{
         convert::IntoValue,
         error::{SchemeError, SchemeErrorPtr, SchemeErrorType, StackFrame},
         lambda::{
-            Arity, DynamicWind, Lambda, LambdaError, LambdaReturn, NativeLambdaContext,
-            NativeLambdaPtr,
+            Arity, DynamicWind, ImportFallback, Lambda, LambdaError, LambdaReturn,
+            NativeLambdaContext, NativeLambdaPtr,
         },
     },
     value::{self, ConsCell, Continuation, ContinuationPtr, ValuePtr},
@@ -28,6 +28,7 @@ pub enum Execution<'gc> {
         arity: Arity,
         pc: usize,
         upvalue_index: Option<usize>,
+        fallback: ImportFallback<'gc>,
     },
     Native {
         native: NativeLambdaPtr<'gc>,
@@ -52,6 +53,7 @@ impl<'gc> Execution<'gc> {
                 arity: gc.arity,
                 pc: 0,
                 upvalue_index: Some(gc.upvalue_id.expect("cannot use unlabeled lambda")),
+                fallback: gc.fallback,
             },
         }
     }
@@ -65,12 +67,14 @@ impl PartialEq for Execution<'_> {
                 arity,
                 pc,
                 upvalue_index,
+                fallback,
             } => {
                 let Self::Bytecode {
                     chunk: ochunk,
                     arity: oarity,
                     pc: opc,
                     upvalue_index: oupvalue_index,
+                    fallback: ofallback,
                 } = other
                 else {
                     return false;
@@ -79,6 +83,8 @@ impl PartialEq for Execution<'_> {
                     && arity == oarity
                     && pc == opc
                     && upvalue_index == oupvalue_index
+                    && (matches!((fallback, ofallback), (None, None))
+                        || matches!((fallback, ofallback), (Some(f), Some(of)) if Gc::ptr_eq(*f, *of)))
             }
             Execution::Native { native } => {
                 let Self::Native { native: onative } = other else {
@@ -240,6 +246,7 @@ impl<'gc> Thread<'gc> {
                     pc: 0,
                     arity: Arity::Exact(0),
                     upvalue_index: None,
+                    fallback: None,
                 },
                 env: Gc::new(
                     mc,
@@ -307,6 +314,7 @@ impl<'gc> Thread<'gc> {
             pc: 0,
             arity: Arity::Exact(0),
             upvalue_index: None,
+            fallback: None,
         };
 
         if tail {
@@ -629,6 +637,28 @@ impl<'gc> Thread<'gc> {
         }
     }
 
+    fn fallback_handling(
+        frames: &[ThreadFrame<'gc>],
+        symbol: lasso::Spur,
+    ) -> Option<ValuePtr<'gc>> {
+        frames
+            .iter()
+            .rev()
+            .filter_map(|frame| {
+                if let Execution::Bytecode {
+                    fallback: Some(fallback),
+                    ..
+                } = &frame.execution
+                {
+                    Some(*fallback)
+                } else {
+                    None
+                }
+            })
+            .find_map(|fb| fb.get(&Static(symbol)).copied())
+            .filter(|&fallback| !matches!(*fallback.borrow(), Value::Undefined))
+    }
+
     fn error_handler(&self) -> Option<Lambda<'gc>> {
         self.frames.iter().rev().find_map(|f| f.handler)
     }
@@ -711,6 +741,7 @@ impl<'gc> Thread<'gc> {
                     pc,
                     arity,
                     upvalue_index,
+                    ..
                 } => {
                     // If framepointer is oob, then that means execution of this frame is finished
                     if chunk.code.len() <= *pc {
@@ -872,6 +903,17 @@ impl<'gc> Thread<'gc> {
                                         interner.resolve(&symbol),
                                     )));
                                 }
+                            } else if let Some(fallback) =
+                                Self::fallback_handling(&self.frames, symbol)
+                            {
+                                self.stack.push(fallback);
+                                let Some(frame) = self.frames.last_mut() else {
+                                    unreachable!()
+                                };
+                                let Execution::Bytecode { pc, .. } = &mut frame.execution else {
+                                    unreachable!()
+                                };
+                                *pc += 1;
                             } else {
                                 make_error!(SchemeErrorType::EnvLoad(Box::from(
                                     interner.resolve(&symbol),

@@ -1,20 +1,20 @@
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     num::NonZero,
     rc::Rc,
     sync::Arc,
 };
 
-use fxhash::FxHashMap;
+use fxhash::{FxHashMap, FxHashSet};
 use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
 
 use crate::{
-    Fuel, ValuePtr,
+    Fuel, Value, ValuePtr,
     bytecode::{Bytecode, Chunk, ChunkPtr, Constant, SourceData},
     environment::{Environment, StackEnvironment, StackEnvironmentPtr},
     interpreter::{Includer, ValuePointers, thread::Thread},
-    runtime::lambda::CompiledLambdaPtr,
+    runtime::lambda::{CompiledLambda, CompiledLambdaPtr, ImportFallbackMap, Lambda},
 };
 
 mod program_parsers;
@@ -1013,6 +1013,8 @@ pub enum DefineLibraryError {
     OutOfFuel(LibraryName),
     #[error("no name in library: {0}")]
     UndefinedExport(Box<str>),
+    #[error("library interpretation error: {0}")]
+    InterpError(Box<str>),
     #[error(transparent)]
     Compile(#[from] Box<CompileError>),
     #[error(transparent)]
@@ -1065,9 +1067,6 @@ impl<'gc> Compiler<'gc> {
         programs: impl IntoIterator<Item = ProgramPtr<'gc>>,
     ) -> Result<ChunkPtr<'gc>, CompileError> {
         let mut programs = programs.into_iter().peekable();
-
-        // TODO Read programs in order, while the program is List with head Import or DefineLibrary
-        // interp as library system, otherwise, compile and turn off lib system (use compile_code)
 
         // Module system loop
         loop {
@@ -1155,8 +1154,6 @@ impl<'gc> Compiler<'gc> {
             }
             code.extend(self.compile_code(&mut context, program)?.into_bytecode());
         }
-
-        // TODO Generate labels
 
         // when we create our chunk, our import env is *always* the initial default environment
         Ok(Chunk::new(
@@ -1356,8 +1353,6 @@ impl<'gc> Compiler<'gc> {
     ) -> Result<(), ImportError> {
         // - import: reads import sets, then searches local world (once implemented), then world, for the requisite module
         //   and importing the names as defined by spec
-        // TODO Lookup in local libraries first
-        // then if failed, look up in World
 
         fn get_library_name(imp: &ImportSet) -> Option<LibraryName> {
             match imp {
@@ -1548,6 +1543,8 @@ impl<'gc> Compiler<'gc> {
             )),
         );
 
+        // TODO Supporting IncludeLibraryDeclarations means this should be a while let loop, and it
+        // should pop from a Vec (we will reverse the declarations once in the vec?)
         for decl in library_decls {
             match decl {
                 LibraryDeclaration::Import(imports) => {
@@ -1597,10 +1594,18 @@ impl<'gc> Compiler<'gc> {
                     if !thread.borrow().is_finished() {
                         // we ran outta fuel
                         return Err(DefineLibraryError::OutOfFuel(name.clone()));
+                    } else if let Some(Err(e)) = thread.borrow().result() {
+                        // Rendered to string b/c DefineLibraryError is currently not using the 'gc lifetime
+                        // TODO Should it?
+                        return Err(DefineLibraryError::InterpError(Box::from(
+                            e.display(ecc.interner, []).to_string().as_str(),
+                        )));
                     }
                 }
                 LibraryDeclaration::Export(names) => {
-                    let find_item = |name: &lasso::Spur| -> Option<ExportItem<'gc>> {
+                    let mut memo_nameddeps =
+                        FxHashMap::<lasso::Spur, (bool, FxHashSet<lasso::Spur>)>::default();
+                    let mut find_item = |name: &lasso::Spur| -> Option<ExportItem<'gc>> {
                         // search first for macros, then as a value in the global scope
                         if let Some(syntax) = lib_compiler.syntax_items.get(name) {
                             if let Some(key) = syntax.is_transformer() {
@@ -1614,7 +1619,197 @@ impl<'gc> Compiler<'gc> {
                                 Some(ExportItem::Macro(Arc::clone(syntax)))
                             }
                         } else if let Some(binding) = global_env.borrow().get(*name) {
-                            binding.read(|v| Some(ExportItem::Value(*v)))
+                            // TODO A lambda can depend on references, so go through the code of compiled lambdas and
+                            // add as a "dependency" any reference it or its lambdas depend on? (as long as it is not defined in scope!)
+                            binding.read(|v| {
+                                if let Value::Lambda(Lambda::Compiled(c)) = *v.borrow() {
+                                    // TODO Go through the bytecode of the chunk, then any lambda chunks it defines and
+                                    // find any references that refer to things in global scope. Make a copy of
+                                    // compiled lambda and add these values to that lambda as a fallback for when name
+                                    // resolution fails to the proper chunk (so dependent lambda chunks should properly get their own, separate
+                                    // fallbacks)
+                                    fn get_defined(
+                                        code: &[Bytecode],
+                                    ) -> fxhash::FxHashSet<lasso::Spur>
+                                    {
+                                        code.iter()
+                                            .filter_map(|c| {
+                                                if let Bytecode::Define { symbol } = c {
+                                                    Some(*symbol)
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect()
+                                    }
+                                    fn get_global_refs(
+                                        name: lasso::Spur,
+                                        code: &[Bytecode],
+                                    ) -> fxhash::FxHashSet<lasso::Spur>
+                                    {
+                                        // defined not as an argument
+                                        let defined: fxhash::FxHashSet<_> = code
+                                            .iter()
+                                            .scan(fxhash::FxHashSet::from_iter([name]), |s, c| {
+                                                if let Bytecode::Define { symbol } = c {
+                                                    s.insert(*symbol);
+                                                    Some(None)
+                                                } else if let Bytecode::Reference { symbol } = c {
+                                                    if !s.contains(symbol) {
+                                                        Some(Some(*symbol))
+                                                    } else {
+                                                        Some(None)
+                                                    }
+                                                } else {
+                                                    Some(None)
+                                                }
+                                            })
+                                            .flatten()
+                                            .collect();
+                                        // let referenced = code
+                                        //     .iter()
+                                        //     .filter_map(|c| {
+                                        //         if let Bytecode::Reference { symbol } = c {
+                                        //             Some(*symbol)
+                                        //         } else {
+                                        //             None
+                                        //         }
+                                        //     })
+                                        //     .collect::<fxhash::FxHashSet<_>>();
+                                        // eprintln!("{:?} {:#?}", &code, &defined);
+                                        defined
+                                    }
+
+                                    fn get_deps(
+                                        name: lasso::Spur,
+                                        c: &CompiledLambda<'_>,
+                                    ) -> FxHashSet<lasso::Spur>
+                                    {
+                                        let mut dependants = get_global_refs(name, &c.chunk.code);
+                                        let referenced_lambdas = c
+                                            .chunk
+                                            .code
+                                            .iter()
+                                            .filter_map(|c| {
+                                                if let Bytecode::PushLambda { index } = c {
+                                                    Some(*index)
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect::<FxHashSet<_>>();
+                                        // Check depending values and add any names that *those* depend on (if they are also compiled lambdas)
+                                        for lmbr in referenced_lambdas {
+                                            dependants.extend(get_global_refs(
+                                                name,
+                                                &c.chunk.lambdas[lmbr].chunk.code,
+                                            ));
+                                        }
+                                        dependants
+                                    }
+
+                                    let dependants = if let Some((full, deps)) =
+                                        memo_nameddeps.get(name)
+                                    {
+                                        let mut dependants = deps.clone();
+                                        if *full {
+                                            dependants
+                                        } else {
+                                            for dname in dependants.clone().into_iter() {
+                                                if let Some(Value::Lambda(Lambda::Compiled(c))) =
+                                                    global_env
+                                                        .borrow()
+                                                        .get(dname)
+                                                        .map(|bnd| *(*bnd.get().borrow()).borrow())
+                                                {
+                                                    let subdeps = get_deps(dname, &c);
+                                                    dependants.extend(subdeps);
+                                                }
+                                            }
+                                            memo_nameddeps
+                                                .insert(*name, (true, dependants.clone()));
+                                            dependants
+                                        }
+                                    } else {
+                                        let mut dependants = get_deps(*name, &c);
+                                        for name in dependants.clone().into_iter() {
+                                            if let Some(Value::Lambda(Lambda::Compiled(c))) =
+                                                global_env
+                                                    .borrow()
+                                                    .get(name)
+                                                    .map(|bnd| *(*bnd.get().borrow()).borrow())
+                                            {
+                                                let subdeps = get_deps(name, &c);
+                                                memo_nameddeps
+                                                    .insert(name, (false, subdeps.clone()));
+                                                dependants.extend(subdeps);
+                                            }
+                                        }
+                                        memo_nameddeps.insert(*name, (true, dependants.clone()));
+                                        dependants
+                                    };
+
+                                    eprintln!(
+                                        "{} -> {:?}",
+                                        ecc.interner.resolve(name),
+                                        dependants
+                                            .iter()
+                                            .map(|s| ecc.interner.resolve(s))
+                                            .collect::<Vec<_>>()
+                                    );
+
+                                    let mut map = ImportFallbackMap::default();
+                                    for dependant in dependants {
+                                        if let Some(val) = global_env.borrow().get(dependant) {
+                                            map.insert(Static(dependant), *val.get().borrow());
+                                        }
+                                    }
+
+                                    let fallback = if !map.is_empty() {
+                                        Some(Gc::new(mc, map))
+                                    } else {
+                                        None
+                                    };
+
+                                    // Recreate the chunk with compiled lambdas referencing this fallback
+                                    // TODO Might be *too* permisive, but w/e for now
+                                    let new_lambdas = c.chunk.lambdas.iter().map(|l| {
+                                        Gc::new(
+                                            mc,
+                                            CompiledLambda::with_fallback(
+                                                l.arity, l.chunk, fallback,
+                                            ),
+                                        )
+                                    });
+
+                                    let chunk = c.chunk;
+                                    let new_chunk = Chunk::new(
+                                        mc,
+                                        chunk.code.iter().copied(),
+                                        chunk.constants.iter().cloned(),
+                                        new_lambdas,
+                                        chunk.promises.iter().cloned(),
+                                        chunk.upvalues,
+                                        chunk.import_env,
+                                        chunk.labels.as_ref().clone(),
+                                    );
+
+                                    let mut lambda = Gc::new(
+                                        mc,
+                                        CompiledLambda::with_fallback(c.arity, new_chunk, fallback),
+                                    );
+
+                                    if let Some(label) = c.upvalue_id {
+                                        lambda = lambda.label(mc, label);
+                                    }
+
+                                    Some(ExportItem::Value(
+                                        Value::Lambda(Lambda::Compiled(lambda)).into_ptr(mc),
+                                    ))
+                                } else {
+                                    Some(ExportItem::Value(*v))
+                                }
+                            })
                         } else {
                             None
                         }

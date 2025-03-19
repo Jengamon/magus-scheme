@@ -349,7 +349,7 @@ fn repl() -> anyhow::Result<()> {
         ))
         .with_validator(Box::new(SchemeValidator));
     let mut prompt = MagusPrompt::default();
-    println!("Type `.q` or `.quit` to exit. Type `.help` for more commands.");
+    println!("Type `#q` or `#quit` to exit. Type `#help` for more commands.");
 
     // compiler setup
     let (mut interpreter, world) = repl_stuff();
@@ -381,28 +381,29 @@ fn repl() -> anyhow::Result<()> {
     });
 
     const HELP_STRING: &str = "### HELP ###
-.q, .quit - quit repl
-.gc - check GC stats
-.env - (todo) check current root environment
-.collect - force GC collection";
+#?, #help - this help message
+#q, #quit - quit repl
+#gc - check GC stats
+#env - (todo) check current root environment
+#collect - force GC collection";
 
     let mut double_ctrl_c = false;
     loop {
         match readline.read_line(&prompt) {
             Ok(Signal::Success(cmd))
-                if [".gc", ".env", ".collect", ".quit", ".q", ".help"]
+                if ["#gc", "#env", "#collect", "#quit", "#q", "#help", "#?"]
                     .contains(&cmd.to_lowercase().as_str()) =>
             {
                 double_ctrl_c = false;
                 match cmd.to_lowercase().as_str() {
-                    ".help" => {
+                    "#help" | "#?" => {
                         println!("{}", HELP_STRING)
                     }
-                    ".quit" | ".q" => break,
-                    ".env" => {
+                    "#quit" | "#q" => break,
+                    "#env" => {
                         eprintln!("TO BE WRITTEN")
                     }
-                    ".gc" => {
+                    "#gc" => {
                         let metrics = interpreter.metrics();
                         println!(
                             "### GC metrics ###\n\nPhase: {:?}\nTotal GC allocations: {} bytes (unfreed ptrs: {})\nAllocation debt: {}",
@@ -412,7 +413,7 @@ fn repl() -> anyhow::Result<()> {
                             metrics.allocation_debt(),
                         )
                     }
-                    ".collect" => {
+                    "#collect" => {
                         interpreter.finish_cycle();
                     }
                     _ => {

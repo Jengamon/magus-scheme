@@ -64,6 +64,7 @@ Chunk {
                         ),
                     },
                 },
+                fallback: None,
             },
             upvalue_id: None,
         },
@@ -163,6 +164,7 @@ Chunk {
             ),
         },
     },
+    fallback: None,
 }
 ---
 (import (only (scheme base) define lambda))

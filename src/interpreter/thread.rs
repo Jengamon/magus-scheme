@@ -2,15 +2,15 @@ use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
 
 use crate::{
     Fuel, Value,
-    bytecode::{Bytecode, ChunkPtr, SourceData},
+    bytecode::{Bytecode, ChunkPtr, ImportFallback, SourceData},
     compiler::World,
     environment::{StackEnvironment, StackEnvironmentPtr},
     runtime::{
         convert::IntoValue,
         error::{SchemeError, SchemeErrorPtr, SchemeErrorType, StackFrame},
         lambda::{
-            Arity, DynamicWind, ImportFallback, Lambda, LambdaError, LambdaReturn,
-            NativeLambdaContext, NativeLambdaPtr,
+            Arity, DynamicWind, Lambda, LambdaError, LambdaReturn, NativeLambdaContext,
+            NativeLambdaPtr,
         },
     },
     value::{self, ConsCell, Continuation, ContinuationPtr, ValuePtr},
@@ -45,7 +45,7 @@ impl Execution<'_> {
 }
 
 impl<'gc> Execution<'gc> {
-    fn from_lambda(lambda: Lambda<'gc>) -> Self {
+    fn from_lambda(lambda: Lambda<'gc>, prev_fallback: ImportFallback<'gc>) -> Self {
         match lambda {
             Lambda::Native(gc) => Self::Native { native: gc },
             Lambda::Compiled(gc) => Self::Bytecode {
@@ -53,7 +53,7 @@ impl<'gc> Execution<'gc> {
                 arity: gc.arity,
                 pc: 0,
                 upvalue_index: Some(gc.upvalue_id.expect("cannot use unlabeled lambda")),
-                fallback: gc.fallback,
+                fallback: gc.chunk.fallback.or(prev_fallback),
             },
         }
     }
@@ -246,7 +246,7 @@ impl<'gc> Thread<'gc> {
                     pc: 0,
                     arity: Arity::Exact(0),
                     upvalue_index: None,
-                    fallback: None,
+                    fallback: chunk.fallback,
                 },
                 env: Gc::new(
                     mc,
@@ -314,7 +314,7 @@ impl<'gc> Thread<'gc> {
             pc: 0,
             arity: Arity::Exact(0),
             upvalue_index: None,
-            fallback: None,
+            fallback: chunk.fallback,
         };
 
         if tail {
@@ -537,7 +537,13 @@ impl<'gc> Thread<'gc> {
                     .take_while(|v| matches!(*v.borrow(), Value::Void))
                     .count(),
             ),
-            execution: Execution::from_lambda(lambda),
+            execution: Execution::from_lambda(
+                lambda,
+                self.frames.last().and_then(|f| match f.execution {
+                    Execution::Bytecode { fallback, .. } => fallback,
+                    _ => None,
+                }),
+            ),
             handler: None,
             dynamic_wind: None,
             args: Box::from(args.as_slice()),
@@ -655,6 +661,7 @@ impl<'gc> Thread<'gc> {
                     None
                 }
             })
+            // .inspect(|fb| eprintln!("FBFB: {:?}", fb.keys()))
             .find_map(|fb| fb.get(&Static(symbol)).copied())
             .filter(|&fallback| !matches!(*fallback.borrow(), Value::Undefined))
     }

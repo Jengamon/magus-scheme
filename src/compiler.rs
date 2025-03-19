@@ -11,10 +11,10 @@ use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
 
 use crate::{
     Fuel, Value, ValuePtr,
-    bytecode::{Bytecode, Chunk, ChunkPtr, Constant, SourceData},
+    bytecode::{Bytecode, Chunk, ChunkPtr, Constant, ImportFallbackMap, SourceData},
     environment::{Environment, StackEnvironment, StackEnvironmentPtr},
     interpreter::{Includer, ValuePointers, thread::Thread},
-    runtime::lambda::{CompiledLambda, CompiledLambdaPtr, ImportFallbackMap, Lambda},
+    runtime::lambda::{CompiledLambda, CompiledLambdaPtr, Lambda},
 };
 
 mod program_parsers;
@@ -1749,14 +1749,14 @@ impl<'gc> Compiler<'gc> {
                                         dependants
                                     };
 
-                                    eprintln!(
-                                        "{} -> {:?}",
-                                        ecc.interner.resolve(name),
-                                        dependants
-                                            .iter()
-                                            .map(|s| ecc.interner.resolve(s))
-                                            .collect::<Vec<_>>()
-                                    );
+                                    // eprintln!(
+                                    //     "{} -> {:?}",
+                                    //     ecc.interner.resolve(name),
+                                    //     dependants
+                                    //         .iter()
+                                    //         .map(|s| ecc.interner.resolve(s))
+                                    //         .collect::<Vec<_>>()
+                                    // );
 
                                     let mut map = ImportFallbackMap::default();
                                     for dependant in dependants {
@@ -1772,32 +1772,24 @@ impl<'gc> Compiler<'gc> {
                                     };
 
                                     // Recreate the chunk with compiled lambdas referencing this fallback
-                                    // TODO Might be *too* permisive, but w/e for now
-                                    let new_lambdas = c.chunk.lambdas.iter().map(|l| {
-                                        Gc::new(
-                                            mc,
-                                            CompiledLambda::with_fallback(
-                                                l.arity, l.chunk, fallback,
-                                            ),
-                                        )
-                                    });
-
+                                    // TODO Might be *too* permissive, but w/e for now
+                                    // and this might be *uber* buggy, but this *kinda* works, so fix things from
+                                    // this starting point
                                     let chunk = c.chunk;
-                                    let new_chunk = Chunk::new(
+                                    let new_chunk = Chunk::with_fallback(
                                         mc,
                                         chunk.code.iter().copied(),
                                         chunk.constants.iter().cloned(),
-                                        new_lambdas,
+                                        chunk.lambdas.iter().cloned(),
                                         chunk.promises.iter().cloned(),
                                         chunk.upvalues,
                                         chunk.import_env,
                                         chunk.labels.as_ref().clone(),
+                                        fallback,
                                     );
 
-                                    let mut lambda = Gc::new(
-                                        mc,
-                                        CompiledLambda::with_fallback(c.arity, new_chunk, fallback),
-                                    );
+                                    let mut lambda =
+                                        Gc::new(mc, CompiledLambda::new(c.arity, new_chunk));
 
                                     if let Some(label) = c.upvalue_id {
                                         lambda = lambda.label(mc, label);

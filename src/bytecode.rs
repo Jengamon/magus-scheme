@@ -1,12 +1,12 @@
 //! Execution model for Scheme code
 
 use core::fmt;
-use std::{rc::Rc, sync::Arc};
+use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use fxhash::FxHashMap;
-use gc_arena::{Collect, Gc, Mutation};
+use gc_arena::{Collect, Gc, Mutation, Static};
 
-use crate::{environment::StackEnvironmentPtr, runtime::lambda::CompiledLambdaPtr};
+use crate::{ValuePtr, environment::StackEnvironmentPtr, runtime::lambda::CompiledLambdaPtr};
 
 /*
 compiled form is at its root primitive forms:
@@ -276,8 +276,14 @@ pub struct Chunk<'gc> {
     /// Hash map of code locations to SourceData
     #[collect(require_static)]
     pub labels: Rc<FxHashMap<usize, SourceData>>,
+    /// When importing a lambda, it might refer to things in its defining library scope
+    /// that aren't imported into the program scope. For these references, libraries
+    /// can store the names here, so that if all else fails, the values can still be referenced.
+    pub(crate) fallback: ImportFallback<'gc>,
 }
 pub type ChunkPtr<'gc> = Gc<'gc, Chunk<'gc>>;
+pub type ImportFallbackMap<'gc> = HashMap<Static<lasso::Spur>, ValuePtr<'gc>>;
+pub type ImportFallback<'gc> = Option<Gc<'gc, ImportFallbackMap<'gc>>>;
 
 impl<'gc> Chunk<'gc> {
     #[allow(clippy::too_many_arguments)]
@@ -299,6 +305,33 @@ impl<'gc> Chunk<'gc> {
             upvalues,
             import_env: import_stack_env,
             labels: Rc::new(labels),
+            fallback: None,
+        };
+
+        Gc::new(mc, chunk)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_fallback(
+        mc: &Mutation<'gc>,
+        code: impl IntoIterator<Item = Bytecode>,
+        constants: impl IntoIterator<Item = Constant>,
+        lambdas: impl IntoIterator<Item = CompiledLambdaPtr<'gc>>,
+        promises: impl IntoIterator<Item = Box<[Bytecode]>>,
+        upvalues: usize,
+        import_stack_env: StackEnvironmentPtr<'gc>,
+        labels: FxHashMap<usize, SourceData>,
+        fallback: ImportFallback<'gc>,
+    ) -> ChunkPtr<'gc> {
+        let chunk = Self {
+            code: code.into_iter().collect(),
+            constants: constants.into_iter().collect(),
+            lambdas: lambdas.into_iter().collect(),
+            promises: promises.into_iter().collect(),
+            upvalues,
+            import_env: import_stack_env,
+            labels: Rc::new(labels),
+            fallback,
         };
 
         Gc::new(mc, chunk)

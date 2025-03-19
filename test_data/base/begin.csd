@@ -79,6 +79,7 @@ Chunk {
                         ),
                     },
                 },
+                fallback: None,
             },
             upvalue_id: None,
         },
@@ -109,6 +110,7 @@ Chunk {
             ),
         },
     },
+    fallback: None,
 }
 ---
 ; begin allows sequencing values in ways that might be

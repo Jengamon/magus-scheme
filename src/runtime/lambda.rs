@@ -177,8 +177,6 @@ pub type LambdaResult<'gc> = Result<LambdaReturn<'gc>, LambdaError>;
 
 /// A compiled lambda is a wrapper around a [`ChunkPtr`] with additional information about arity
 pub type CompiledLambdaPtr<'gc> = Gc<'gc, CompiledLambda<'gc>>;
-pub type ImportFallbackMap<'gc> = HashMap<Static<lasso::Spur>, ValuePtr<'gc>>;
-pub type ImportFallback<'gc> = Option<Gc<'gc, ImportFallbackMap<'gc>>>;
 #[derive(Debug, Collect)]
 #[collect(no_drop)]
 pub struct CompiledLambda<'gc> {
@@ -186,10 +184,6 @@ pub struct CompiledLambda<'gc> {
     pub(crate) arity: Arity,
     pub(crate) chunk: ChunkPtr<'gc>,
     pub(crate) upvalue_id: Option<usize>,
-    /// When importing a lambda, it might refer to things in its defining library scope
-    /// that aren't imported into the program scope. For these references, libraries
-    /// can store the names here, so that if all else fails, the values can still be referenced.
-    pub(crate) fallback: ImportFallback<'gc>,
 }
 
 impl<'gc> CompiledLambda<'gc> {
@@ -198,20 +192,6 @@ impl<'gc> CompiledLambda<'gc> {
             arity,
             chunk,
             upvalue_id: None,
-            fallback: None,
-        }
-    }
-
-    pub fn with_fallback(
-        arity: Arity,
-        chunk: ChunkPtr<'gc>,
-        fallback: ImportFallback<'gc>,
-    ) -> Self {
-        Self {
-            arity,
-            chunk,
-            upvalue_id: None,
-            fallback,
         }
     }
 
@@ -230,7 +210,6 @@ impl<'gc> CompiledLambda<'gc> {
                 arity: self.arity,
                 chunk: self.chunk,
                 upvalue_id: Some(upvalue_id),
-                fallback: self.fallback,
             },
         )
     }

@@ -1,9 +1,7 @@
 //! We provide 2 kinds of lambdas: native and compiled
 
 use core::fmt;
-use std::collections::HashMap;
-
-use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
+use gc_arena::{Collect, Gc, Mutation, RefLock};
 
 use crate::{
     Fuel, ValuePtr,

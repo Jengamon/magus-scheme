@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     num::NonZero,
     rc::Rc,
     sync::Arc,
@@ -1051,6 +1051,56 @@ impl<'gc> Compiler<'gc> {
         }
     }
 
+    /// Compile an list of programs into a [`Chunk`] (not allowing any imports)
+    ///
+    /// # Parameters
+    /// - `mc`
+    /// - `ecc`: [`ExternalCompilerContext`]
+    /// - `value_pointers`: the pointers to the values used to represent `'()`, `#t`, and `#f`
+    /// - `max_fuel`: amount of fuel given to *each* `define-library` statement for any necessary code. `None` means to run to completion
+    /// - `programs`: pointers to the members of a program
+    pub fn compile_no_import(
+        &mut self,
+        mc: &Mutation<'gc>,
+        ecc: &mut ExternalCompilerContext<'_>,
+        programs: impl IntoIterator<Item = ProgramPtr<'gc>>,
+    ) -> Result<ChunkPtr<'gc>, CompileError> {
+        // compile code loop
+        let mut constants = Vec::new();
+        let mut lambdas = Vec::new();
+        let mut promises = Vec::new();
+        let mut upvalues = 0;
+        let mut context = SyntaxContext {
+            mc,
+            interner: ecc.interner,
+            world: ecc.world,
+            constants: &mut constants,
+            lambdas: &mut lambdas,
+            promises: &mut promises,
+            upvalues: &mut upvalues,
+        };
+        let mut code = vec![];
+        let mut labels = FxHashMap::default();
+        for program in programs {
+            if let Some(source) = program.source {
+                labels.insert(code.len(), source);
+            }
+            code.extend(self.compile_code(&mut context, program)?.into_bytecode());
+        }
+
+        // when we create our chunk, our import env is *always* the initial default environment
+        Ok(Chunk::new(
+            mc,
+            code,
+            constants,
+            lambdas,
+            promises,
+            upvalues,
+            self.default_environment_ptr(),
+            labels,
+        ))
+    }
+
     /// Compile an list of programs into a [`Chunk`]
     ///
     /// # Parameters
@@ -1132,40 +1182,7 @@ impl<'gc> Compiler<'gc> {
             }
         }
 
-        // compile code loop
-        let mut constants = Vec::new();
-        let mut lambdas = Vec::new();
-        let mut promises = Vec::new();
-        let mut upvalues = 0;
-        let mut context = SyntaxContext {
-            mc,
-            interner: ecc.interner,
-            world: ecc.world,
-            constants: &mut constants,
-            lambdas: &mut lambdas,
-            promises: &mut promises,
-            upvalues: &mut upvalues,
-        };
-        let mut code = vec![];
-        let mut labels = FxHashMap::default();
-        for program in programs {
-            if let Some(source) = program.source {
-                labels.insert(code.len(), source);
-            }
-            code.extend(self.compile_code(&mut context, program)?.into_bytecode());
-        }
-
-        // when we create our chunk, our import env is *always* the initial default environment
-        Ok(Chunk::new(
-            mc,
-            code,
-            constants,
-            lambdas,
-            promises,
-            upvalues,
-            self.default_environment_ptr(),
-            labels,
-        ))
+        self.compile_no_import(mc, ecc, programs)
     }
 
     /// Compile code in the current context
@@ -1560,9 +1577,10 @@ impl<'gc> Compiler<'gc> {
                 LibraryDeclaration::Begin(code) => {
                     // this is the "fun" one. we use the repl substitution trick to make `global_env` our global environment
                     // when using thread. But first, we gotta compile in our compiler.
+
+                    // So that we can't import/define-library *within* begin, use compile code for each program, then build the chunk
                     let chunk = lib_compiler
-                        .compile(mc, ecc, library_def, code.iter().copied())
-                        // we have to box this error b/c CompileError can contain a DefineLibraryError
+                        .compile_no_import(mc, ecc, code.iter().copied())
                         .map_err(Box::new)?;
 
                     let thread = Gc::new(mc, RefLock::new(Thread::new(mc, chunk)));

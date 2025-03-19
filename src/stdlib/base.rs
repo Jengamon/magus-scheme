@@ -275,7 +275,7 @@ pub fn register_module(
     interpreter: &mut Interpreter,
     handle: &CompilerHandle,
     world: &mut World,
-    max_fuel: Option<isize>,
+    max_fuel: Option<i32>,
 ) -> anyhow::Result<()> {
     let name = LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme base));
     // Insert our module into the given world.
@@ -302,7 +302,7 @@ pub fn register_module(
             interner,
         };
         let library_def = LibraryDefinitionContext {
-            max_fuel: None,
+            max_fuel,
             value_pointers,
         };
         compiler.define_library(mc, &name, &mut ecc, false, &library_def, library_decls)?;

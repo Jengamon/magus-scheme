@@ -13,8 +13,8 @@ use magus::{
     library_name, stdlib, ContainsDatum, Fuel, GAstNode, Module, Value,
 };
 use reedline::{
-    FileBackedHistory, Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus,
-    PromptViMode, Reedline, Signal, Validator,
+    Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus, PromptViMode, Reedline,
+    Signal, SqliteBackedHistory, Validator,
 };
 use yansi::{Condition, Paint};
 
@@ -212,7 +212,7 @@ fn execute(
                 for (idx, l) in chunk.lambdas.iter().enumerate() {
                     println!("==LAMBDA {idx}==");
                     for (idx, code) in l.chunk().code.iter().enumerate() {
-                        println!("{idx}: {code}")
+                        println!("{idx:>3}: {code}")
                     }
                     println!("==END LAMBDA {idx}==");
                 }
@@ -221,7 +221,7 @@ fn execute(
                 println!("==CHUNK CODE (upvalues: {})==", chunk.upvalues);
                 for (idx, code) in chunk.code.iter().enumerate() {
                     // Use display
-                    println!("{idx}: {code}");
+                    println!("{idx:>3}: {code}");
                 }
                 println!("==END CHUNK==");
                 let thread = ctx.thread;
@@ -335,7 +335,8 @@ fn execute_file(path: impl AsRef<std::path::Path>) -> anyhow::Result<()> {
 fn repl() -> anyhow::Result<()> {
     let mut readline = Reedline::create()
         .with_history(Box::new(
-            FileBackedHistory::new(200).expect("failed to configure history file"),
+            SqliteBackedHistory::with_file("history.local.db".into(), None, None)
+                .expect("failed to configure history file"),
         ))
         .with_validator(Box::new(SchemeValidator));
     let mut prompt = MagusPrompt::default();

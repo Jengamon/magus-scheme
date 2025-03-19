@@ -895,8 +895,8 @@ impl ImportSet {
 pub enum ImportError {
     #[error("invalid library import")]
     InvalidImport,
-    #[error("library not found")]
-    LibraryNotFound(LibraryName),
+    #[error("library not found: ({0})")]
+    LibraryNotFound(Box<str>),
     // TODO store module name in error
     #[error("name not found in module: {name}")]
     NameNotFound { name: Box<str> },
@@ -1420,7 +1420,14 @@ impl<'gc> Compiler<'gc> {
                     }
                     Ok(())
                 } else {
-                    Err(ImportError::LibraryNotFound($library_name.clone()))
+                    Err(ImportError::LibraryNotFound(Box::from($library_name.0.iter().map(|ni| match ni {
+                        LibraryNameItem::Identifier(i) => {
+                            interner.resolve(&i).to_string()
+                        }
+                        LibraryNameItem::Integer(i) => {
+                            i.to_string()
+                        }
+                    }).collect::<Vec<_>>().join(" ").as_str())))
                 }
             };
             (only $set:expr, $symbols:expr) => {
@@ -1472,7 +1479,14 @@ impl<'gc> Compiler<'gc> {
                         }
                         Ok(())
                     } else {
-                        Err(ImportError::LibraryNotFound(library_name.clone()))
+                        Err(ImportError::LibraryNotFound(Box::from(library_name.0.iter().map(|ni| match ni {
+                            LibraryNameItem::Identifier(i) => {
+                                interner.resolve(&i).to_string()
+                            }
+                            LibraryNameItem::Integer(i) => {
+                                i.to_string()
+                            }
+                        }).collect::<Vec<_>>().join(" ").as_str())))
                     }
                 }
             };

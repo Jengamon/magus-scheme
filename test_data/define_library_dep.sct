@@ -3,6 +3,7 @@
 ---
 (define-library (scooter)
     (import (scheme base))
+    (export is-based?)
     (begin
         (define (find-number n xs)
             (if (null? xs)
@@ -10,7 +11,6 @@
                 (if (= n (car xs))
                     #t
                     (find-number n (cdr xs)))))
-        (define (is-based? . xs) (find-number 42 xs)))
-    (export is-based?))
+        (define (is-based? . xs) (find-number 42 xs))))
 (import (only (scooter) is-based?))
 (is-based? 1 2 3 5 8 9 1 42 3 8 9)

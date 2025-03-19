@@ -1015,9 +1015,9 @@ pub enum DefineLibraryError {
     UndefinedExport(Box<str>),
     #[error("library interpretation error: {0}")]
     InterpError(Box<str>),
-    #[error(transparent)]
+    #[error("library compilation error: {0}")]
     Compile(#[from] Box<CompileError>),
-    #[error(transparent)]
+    #[error("library import error: {0}")]
     Import(#[from] ImportError),
 }
 

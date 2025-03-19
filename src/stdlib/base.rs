@@ -5,9 +5,15 @@ use std::{collections::HashSet, sync::Arc};
 use gc_arena::{Gc, RefLock, unsize};
 
 use crate::{
+    CompilerHandle, Interpreter, LibraryName, World,
     bytecode::{Bytecode, Chunk, ChunkPtr},
-    compiler::{ArcSyntax, Compiler, Module, ProgramPtr, Syntax, SyntaxContext, SyntaxReturn},
+    compiler::{
+        ArcSyntax, Compiler, ExternalCompilerContext, LibraryDeclaration, LibraryDefinitionContext,
+        Module, ParseProgram, ProgramPtr, Syntax, SyntaxContext, SyntaxReturn,
+    },
     environment::StackEnvironmentPtr,
+    interpreter::NullIncluder,
+    library_name,
     runtime::{convert::IntoValue, lambda},
 };
 
@@ -115,7 +121,7 @@ impl Syntax for Begin {
         Ok(SyntaxReturn::Code(program_code.into_boxed_slice()))
     }
 
-    fn is_container(&self, _ptr: ProgramPtr<'_>) -> bool {
+    fn is_container(&self, _ptr: ProgramPtr<'_>, _compiler: &Compiler<'_>) -> bool {
         true
     }
 }
@@ -261,4 +267,47 @@ impl Module for Base {
             _ => None,
         }
     }
+}
+
+const SCHEME_BASE: &str = include_str!("scheme_base.scm");
+/// Registers this module (and it's Scheme implementations) under the name `(scheme base)`
+pub fn register_module(
+    interpreter: &mut Interpreter,
+    handle: &CompilerHandle,
+    world: &mut World,
+    max_fuel: Option<isize>,
+) -> anyhow::Result<()> {
+    let name = LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme base));
+    // Insert our module into the given world.
+    world.insert(name.clone(), Base)?;
+    // This is the world used to compile the Scheme implementation of things.
+    let world = {
+        let mut world = World::default();
+        world.insert(name.clone(), Base)?;
+        world
+    };
+    interpreter.try_enter(|mc, arena, interner| {
+        let programs = ("base_scheme.scm", SCHEME_BASE).parse_program(mc, interner, false)?;
+        let library_decls = programs
+            .into_iter()
+            .map(|p| LibraryDeclaration::convert(p, interner))
+            .collect::<Result<Vec<_>, _>>()?;
+        let value_pointers = arena.value_pointers();
+        let compiler = arena
+            .compiler_mut(handle)
+            .ok_or(anyhow::anyhow!("invalid compiler handle"))?;
+        let mut ecc = ExternalCompilerContext {
+            world: &world,
+            includer: &NullIncluder,
+            interner,
+        };
+        let library_def = LibraryDefinitionContext {
+            max_fuel: None,
+            value_pointers,
+        };
+        compiler.define_library(mc, &name, &mut ecc, false, &library_def, library_decls)?;
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    Ok(())
 }

@@ -1,9 +1,9 @@
 use datatest_stable::Utf8Path;
 use magus::{
-    Fuel, Value,
-    compiler::{Compiler, LibraryName, ParseProgram, World},
+    ExternalCompilerContext, Fuel, Value,
+    compiler::{Compiler, LibraryDefinitionContext, LibraryName, ParseProgram, World},
     general_parser::general_parse,
-    interpreter::{Interpreter, NullIncluder},
+    interpreter::{Interpreter, NullIncluder, ValuePointers},
     lexer::Token,
     library_name, stdlib,
 };
@@ -35,10 +35,21 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
     let includer = NullIncluder;
     let comp = interp.new_compiler();
     let file_name = format!("{path}.scm");
-    let chunk = interp.compiler_context::<anyhow::Error>(&comp, |mc, comp, interner| {
-        let programs = (file_name.as_str(), data.source()).parse_program(mc, interner, false)?;
-        Ok(comp.compile(mc, interner, &test_world, &includer, programs)?)
-    })?;
+    let chunk =
+        interp.compiler_context::<anyhow::Error>(&comp, |mc, comp, value_pointers, interner| {
+            let programs =
+                (file_name.as_str(), data.source()).parse_program(mc, interner, false)?;
+            let mut ecc = ExternalCompilerContext {
+                world: &test_world,
+                includer: &includer,
+                interner,
+            };
+            let library_def = LibraryDefinitionContext {
+                max_fuel: None,
+                value_pointers,
+            };
+            Ok(comp.compile(mc, &mut ecc, &library_def, programs)?)
+        })?;
     let mut fuel = Fuel::with(1_000_000);
     let thread = interp.new_thread(&chunk);
     // Run thread until out-of-fuel or finished
@@ -192,7 +203,17 @@ fn compile_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()
         let programs =
             (format!("{path}.scm"), data.source()).parse_program(mc, &mut interner, false)?;
         let mut compiler = Compiler::new(mc);
-        match compiler.compile(mc, &mut interner, &test_world, &includer, programs) {
+        let mut ecc = ExternalCompilerContext {
+            world: &test_world,
+            includer: &includer,
+            interner: &mut interner,
+        };
+        let value_pointers = ValuePointers::fake(mc);
+        let library_def = LibraryDefinitionContext {
+            max_fuel: None,
+            value_pointers,
+        };
+        match compiler.compile(mc, &mut ecc, &library_def, programs) {
             Ok(chunk) => {
                 let chunk_debug = format!("{chunk:#?}");
                 chunk_text = Some(chunk_debug.clone());

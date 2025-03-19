@@ -7,13 +7,13 @@ use std::{
 };
 
 use fxhash::FxHashMap;
-use gc_arena::{Collect, Gc, Mutation, RefLock};
+use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
 
 use crate::{
-    ValuePtr,
+    Fuel, ValuePtr,
     bytecode::{Bytecode, Chunk, ChunkPtr, Constant, SourceData},
-    environment::{Environment, StackEnvironmentPtr},
-    interpreter::Includer,
+    environment::{Environment, StackEnvironment, StackEnvironmentPtr},
+    interpreter::{Includer, ValuePointers, thread::Thread},
     runtime::lambda::CompiledLambdaPtr,
 };
 
@@ -323,7 +323,7 @@ pub trait Syntax: std::fmt::Debug {
     ) -> anyhow::Result<SyntaxReturn<'gc>>;
 
     /// Registers this syntax item as a definition
-    fn is_definition(&self, _ptr: ProgramPtr<'_>) -> bool {
+    fn is_definition(&self, _ptr: ProgramPtr<'_>, _compiler: &Compiler<'_>) -> bool {
         false
     }
 
@@ -331,8 +331,13 @@ pub trait Syntax: std::fmt::Debug {
     ///
     /// Affects how definitions are registered. A container syntax is considered a
     /// definition if all of it's components are definitions (or containers of only definitions)
-    fn is_container(&self, _ptr: ProgramPtr<'_>) -> bool {
+    fn is_container(&self, _ptr: ProgramPtr<'_>, _compiler: &Compiler<'_>) -> bool {
         false
+    }
+
+    /// Marks this syntax as deriving from a local Transformer
+    fn is_transformer(&self) -> Option<TransformerKey> {
+        None
     }
 }
 // TODO we are very stringent, and might relax this in the future...
@@ -351,6 +356,78 @@ impl LibraryName {
     pub fn is_valid(&self) -> bool {
         !self.0.is_empty()
     }
+
+    pub fn convert(ptr: ProgramPtr<'_>, interner: &mut lasso::Rodeo) -> Option<Self> {
+        let import = interner.get_or_intern_static("import");
+        let define_library = interner.get_or_intern_static("define-library");
+        match &ptr.data {
+            ProgramData::List { head, body }
+                if matches!(head, ListHead::Import)
+                    && body.iter().all(|p| {
+                        matches!(p.data, ProgramData::Integer(i) if i >= 0)
+                            || matches!(p.data, ProgramData::Symbol(_))
+                    }) =>
+            {
+                let body_items = body.iter().map(|p| match p.data {
+                    ProgramData::Symbol(s) => LibraryNameItem::Identifier(s),
+                    ProgramData::Integer(i) if i >= 0 => LibraryNameItem::Integer(i as u64),
+                    _ => unreachable!(),
+                });
+
+                Some(LibraryName(
+                    std::iter::once(LibraryNameItem::Identifier(import))
+                        .chain(body_items)
+                        .collect(),
+                ))
+            }
+            ProgramData::List { head, body }
+                if matches!(head, ListHead::DefineLibrary)
+                    && body.iter().all(|p| {
+                        matches!(p.data, ProgramData::Integer(i) if i >= 0)
+                            || matches!(p.data, ProgramData::Symbol(_))
+                    }) =>
+            {
+                let body_items = body.iter().map(|p| match p.data {
+                    ProgramData::Symbol(s) => LibraryNameItem::Identifier(s),
+                    ProgramData::Integer(i) if i >= 0 => LibraryNameItem::Integer(i as u64),
+                    _ => unreachable!(),
+                });
+
+                Some(LibraryName(
+                    std::iter::once(LibraryNameItem::Identifier(define_library))
+                        .chain(body_items)
+                        .collect(),
+                ))
+            }
+            ProgramData::List { head, body }
+                if matches!(head, ListHead::Program(p) if matches!(p.data, ProgramData::Symbol(_)) || matches!(p.data, ProgramData::Integer(i) if i >= 0))
+                    && body.iter().all(|p| {
+                        matches!(p.data, ProgramData::Integer(i) if i >= 0)
+                            || matches!(p.data, ProgramData::Symbol(_))
+                    }) =>
+            {
+                let body_items = body.iter().map(|p| match p.data {
+                    ProgramData::Symbol(s) => LibraryNameItem::Identifier(s),
+                    ProgramData::Integer(i) if i >= 0 => LibraryNameItem::Integer(i as u64),
+                    _ => unreachable!(),
+                });
+
+                let ListHead::Program(list_head) = head else {
+                    unreachable!()
+                };
+                let first_item = match list_head.data {
+                    ProgramData::Symbol(s) => LibraryNameItem::Identifier(s),
+                    ProgramData::Integer(i) if i >= 0 => LibraryNameItem::Integer(i as u64),
+                    _ => unreachable!(),
+                };
+
+                Some(LibraryName(
+                    std::iter::once(first_item).chain(body_items).collect(),
+                ))
+            }
+            _ => None,
+        }
+    }
 }
 impl FromIterator<LibraryNameItem> for LibraryName {
     fn from_iter<T: IntoIterator<Item = LibraryNameItem>>(iter: T) -> Self {
@@ -368,7 +445,7 @@ macro_rules! library_name {
     ($intern:expr => $( $s:tt )+) => {
         [
             $(
-                library_name!(@parsing $intern => $s)
+                $crate::library_name!(@parsing $intern => $s)
             ),+
         ]
     };
@@ -438,25 +515,34 @@ impl World {
     }
 }
 
-/// The result of a `define-library`
-#[derive(Debug)]
-struct SchemeLibrary<'gc> {
-    exported_items: HashMap<lasso::Spur, ValuePtr<'gc>>,
+#[derive(Debug, Clone, Collect)]
+#[collect(no_drop)]
+enum ExportItem<'gc> {
+    Value(ValuePtr<'gc>),
+    Macro(#[collect(require_static)] ArcSyntax),
+    Transformer(TransformerPtr<'gc>),
 }
 
-#[allow(unsafe_code)]
-unsafe impl<'gc> Collect<'gc> for SchemeLibrary<'gc> {
-    fn trace<T: gc_arena::collect::Trace<'gc>>(&self, cc: &mut T) {
-        for value in self.exported_items.values() {
-            value.trace(cc);
-        }
-    }
+/// The result of a `define-library`
+#[derive(Debug, Collect, Clone)]
+#[collect(no_drop)]
+struct SchemeLibrary<'gc> {
+    exported_items: HashMap<Static<lasso::Spur>, ExportItem<'gc>>,
 }
+
+// #[allow(unsafe_code)]
+// unsafe impl<'gc> Collect<'gc> for SchemeLibrary<'gc> {
+//     fn trace<T: gc_arena::collect::Trace<'gc>>(&self, cc: &mut T) {
+//         for value in self.exported_items.values() {
+//             value.trace(cc);
+//         }
+//     }
+// }
 
 /// A container for Scheme-defined modules (using `define-library` at the top level)
 #[derive(Collect, Debug, Default)]
 #[collect(no_drop)]
-struct LocalWorld<'gc> {
+pub struct LocalWorld<'gc> {
     modules: HashMap<LibraryName, SchemeLibrary<'gc>>,
 }
 
@@ -498,16 +584,69 @@ impl Scope {
     }
 }
 
+/// A local representation of a [`Transformer`] used to store in an [`ArcSyntax`]
+#[derive(Debug)]
+struct PrivateTransformer {
+    key: TransformerKey,
+    _knob: Arc<()>,
+}
+
+// We just delegate to the Transformer object stored in the compiler. As this struct is private, the *only*
+// way it gets created is from some Syntax or the compiler installing it.
+impl Syntax for PrivateTransformer {
+    fn evaluate<'gc>(
+        &self,
+        ctx: &mut SyntaxContext<'_, 'gc>,
+        compiler: &mut Compiler<'gc>,
+        import_env: StackEnvironmentPtr<'gc>,
+        args: &[ProgramPtr<'gc>],
+    ) -> anyhow::Result<SyntaxReturn<'gc>> {
+        compiler
+            .stash
+            .transformers
+            .get(self.key)
+            .copied()
+            .ok_or(anyhow::anyhow!(
+                "transformer {:?} not found in compiler",
+                self.key
+            ))
+            .and_then(|trans| trans.evaluate(ctx, compiler, import_env, args))
+    }
+
+    fn is_definition(&self, ptr: ProgramPtr<'_>, compiler: &Compiler<'_>) -> bool {
+        compiler
+            .stash
+            .transformers
+            .get(self.key)
+            .map(|trans| trans.is_definition(ptr, compiler))
+            .unwrap_or_default()
+    }
+
+    fn is_container(&self, ptr: ProgramPtr<'_>, compiler: &Compiler<'_>) -> bool {
+        compiler
+            .stash
+            .transformers
+            .get(self.key)
+            .map(|trans| trans.is_container(ptr, compiler))
+            .unwrap_or_default()
+    }
+
+    fn is_transformer(&self) -> Option<TransformerKey> {
+        Some(self.key)
+    }
+}
+
 slotmap::new_key_type! {
 pub struct TransformerKey;
-pub struct ProgramKey;
+// pub struct ProgramKey;
 }
 /// Compiler Stash
 #[derive(Debug, Default)]
 pub struct Stash<'gc> {
+    transformer_knobs: slotmap::SecondaryMap<TransformerKey, Arc<()>>,
     // TODO Include a knob system to automatically drop unused transfomers and programs
     transformers: slotmap::SlotMap<TransformerKey, TransformerPtr<'gc>>,
-    programs: slotmap::SlotMap<ProgramKey, ProgramPtr<'gc>>,
+    // programs: slotmap::SlotMap<ProgramKey, ProgramPtr<'gc>>,
 }
 // TODO Allow storing and accessing these
 #[allow(unsafe_code)]
@@ -522,7 +661,7 @@ unsafe impl<'gc> Collect<'gc> for Stash<'gc> {
         }
 
         trace_slotmap!(transformers);
-        trace_slotmap!(programs);
+        // trace_slotmap!(programs);
     }
 }
 
@@ -586,10 +725,16 @@ pub enum CompileError {
     DottedList(Option<SourceData>),
     #[error("a macro encountered an error: {0}")]
     Macro(Arc<anyhow::Error>, Option<SourceData>),
+    #[error("no library name in library declaration")]
+    NoLibraryName(Option<SourceData>),
     #[error(transparent)]
     ImportSet(#[from] ImportSetError),
     #[error(transparent)]
     Import(#[from] ImportError),
+    #[error(transparent)]
+    LibraryDeclaration(#[from] LibraryDeclarationError),
+    #[error(transparent)]
+    Library(#[from] DefineLibraryError),
 }
 
 #[derive(Debug, Clone)]
@@ -746,30 +891,6 @@ impl ImportSet {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum LibraryDeclaration<'gc> {
-    Import(Rc<[ImportSet]>),
-    IncludeLibraryDeclarations(Rc<[Rc<str>]>),
-    Include {
-        filenames: Rc<[Rc<str>]>,
-        case_insensitive: bool,
-    },
-    Begin(Rc<[ProgramPtr<'gc>]>),
-}
-
-impl<'gc> LibraryDeclaration<'gc> {
-    pub fn convert(interner: &mut lasso::Rodeo, ptr: ProgramPtr<'gc>) -> Option<Self> {
-        // let import = interner.get_or_intern_static("import");
-        // let include_library_definitions =
-        //     interner.get_or_intern_static("include-library-definitions");
-        // let include = interner.get_or_intern_static("include");
-        // let include_ci = interner.get_or_intern_static("include-ci");
-        // let begin = interner.get_or_intern_static("begin");
-        let _ = (interner, ptr);
-        None
-    }
-}
-
 #[derive(thiserror::Error, Debug)]
 pub enum ImportError {
     #[error("invalid library import")]
@@ -783,6 +904,103 @@ pub enum ImportError {
     FailedToDefine(lasso::Spur),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ExportSet {
+    Name(lasso::Spur),
+    Rename { from: lasso::Spur, to: lasso::Spur },
+}
+impl ExportSet {
+    pub fn convert(ptr: ProgramPtr<'_>, interner: &mut lasso::Rodeo) -> Option<ExportSet> {
+        let rename = interner.get_or_intern_static("rename");
+        match &ptr.data {
+            ProgramData::Symbol(s) => Some(ExportSet::Name(*s)),
+            ProgramData::List { head, body }
+                if body.len() == 2
+                    && body
+                        .iter()
+                        .all(|p| matches!(p.data, ProgramData::Symbol(_)))
+                    && matches!(head, ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == rename)) =>
+            {
+                // rename
+                let ProgramData::Symbol(from) = body[0].data else {
+                    unreachable!()
+                };
+                let ProgramData::Symbol(to) = body[1].data else {
+                    unreachable!()
+                };
+                Some(ExportSet::Rename { from, to })
+            }
+            _ => None,
+        }
+    }
+}
+#[derive(Debug, Clone)]
+pub enum LibraryDeclaration<'gc> {
+    Import(Rc<[ImportSet]>),
+    IncludeLibraryDeclarations(Rc<[Rc<str>]>),
+    Include {
+        filenames: Rc<[Rc<str>]>,
+        case_insensitive: bool,
+    },
+    Begin(Rc<[ProgramPtr<'gc>]>),
+    Export(Rc<[ExportSet]>),
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum LibraryDeclarationError {
+    #[error("not a library declaration")]
+    NotALibraryDeclaration(Option<SourceData>),
+    #[error("not an export set")]
+    NotAnExportSet(Option<SourceData>),
+    #[error(transparent)]
+    ImportSetError(#[from] ImportSetError),
+}
+
+impl<'gc> LibraryDeclaration<'gc> {
+    pub fn convert(
+        ptr: ProgramPtr<'gc>,
+        interner: &mut lasso::Rodeo,
+    ) -> Result<Self, LibraryDeclarationError> {
+        let export = interner.get_or_intern_static("export");
+        // let include_library_definitions =
+        //     interner.get_or_intern_static("include-library-definitions");
+        // let include = interner.get_or_intern_static("include");
+        // let include_ci = interner.get_or_intern_static("include-ci");
+        let begin = interner.get_or_intern_static("begin");
+
+        match &ptr.data {
+            ProgramData::List { head, body } => match head {
+                ListHead::Import => {
+                    let imports = body
+                        .iter()
+                        .map(|p| ImportSet::convert(*p, interner))
+                        .collect::<Result<_, _>>()?;
+                    Ok(LibraryDeclaration::Import(imports))
+                }
+                ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == export) =>
+                {
+                    // export
+                    // read elements as ExportSets
+                    let exports = body
+                        .iter()
+                        .map(|p| {
+                            ExportSet::convert(*p, interner)
+                                .ok_or(LibraryDeclarationError::NotAnExportSet(p.source))
+                        })
+                        .collect::<Result<_, _>>()?;
+                    Ok(LibraryDeclaration::Export(exports))
+                }
+                ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == begin) => {
+                    // begin
+                    Ok(LibraryDeclaration::Begin(Rc::from(body.as_slice())))
+                }
+                _ => Err(LibraryDeclarationError::NotALibraryDeclaration(ptr.source)),
+            },
+            _ => Err(LibraryDeclarationError::NotALibraryDeclaration(ptr.source)),
+        }
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum DefineLibraryError {
     #[error("empty library name")]
@@ -791,6 +1009,29 @@ pub enum DefineLibraryError {
     ReservedName(LibraryName),
     #[error("attempted to define an existing library")]
     AlreadyExists(LibraryName),
+    #[error("interpretation ran out of fuel")]
+    OutOfFuel(LibraryName),
+    #[error("no name in library: {0}")]
+    UndefinedExport(Box<str>),
+    #[error(transparent)]
+    Compile(#[from] Box<CompileError>),
+    #[error(transparent)]
+    Import(#[from] ImportError),
+}
+
+/// Context struct for things external to the compiler
+pub struct ExternalCompilerContext<'a> {
+    pub world: &'a World,
+    pub interner: &'a mut lasso::Rodeo,
+    pub includer: &'a dyn Includer,
+}
+
+/// Context struct for library definition parameters
+pub struct LibraryDefinitionContext<'gc> {
+    /// Maximum amount of fuel used *per* library definition. `None` means to run to completion (unlimited).
+    pub max_fuel: Option<i32>,
+    /// Pointers to null (semantic), true and false (convenience)
+    pub value_pointers: ValuePointers<'gc>,
 }
 
 impl<'gc> Compiler<'gc> {
@@ -812,16 +1053,15 @@ impl<'gc> Compiler<'gc> {
     ///
     /// # Parameters
     /// - `mc`
-    /// - `interner`
-    /// - `world`
-    /// - `includer`: an [`Includer`] for external files
-    /// - `program`: pointers to the members of a program
+    /// - `ecc`: [`ExternalCompilerContext`]
+    /// - `value_pointers`: the pointers to the values used to represent `'()`, `#t`, and `#f`
+    /// - `max_fuel`: amount of fuel given to *each* `define-library` statement for any necessary code. `None` means to run to completion
+    /// - `programs`: pointers to the members of a program
     pub fn compile(
         &mut self,
         mc: &Mutation<'gc>,
-        interner: &mut lasso::Rodeo,
-        world: &World,
-        includer: &impl Includer,
+        ecc: &mut ExternalCompilerContext<'_>,
+        library_def: &LibraryDefinitionContext<'gc>,
         programs: impl IntoIterator<Item = ProgramPtr<'gc>>,
     ) -> Result<ChunkPtr<'gc>, CompileError> {
         let mut programs = programs.into_iter().peekable();
@@ -849,11 +1089,11 @@ impl<'gc> Compiler<'gc> {
 
                     let sets: Result<Vec<_>, _> = body
                         .iter()
-                        .map(|p| ImportSet::convert(*p, interner))
+                        .map(|p| ImportSet::convert(*p, ecc.interner))
                         .collect();
 
                     for set in sets? {
-                        self.import(mc, interner, world, &set, true)?;
+                        self.import(mc, ecc.interner, ecc.world, &set, true)?;
                     }
                 }
                 Some(p)
@@ -866,8 +1106,28 @@ impl<'gc> Compiler<'gc> {
                     ) =>
                 {
                     // define-library code, so read carefully
-                    let _program = programs.next().unwrap();
-                    // TODO the bodies of define-library become library declarations
+                    let program = programs.next().unwrap();
+                    let ProgramData::List { body, .. } = &program.data else {
+                        unreachable!();
+                    };
+
+                    let name = body
+                        .iter()
+                        .next()
+                        .and_then(|n| LibraryName::convert(*n, ecc.interner))
+                        .ok_or(CompileError::NoLibraryName(program.source))?;
+
+                    let library_decls = body
+                        .iter()
+                        .skip(1)
+                        .map(|p| LibraryDeclaration::convert(*p, ecc.interner))
+                        .collect::<Result<Vec<_>, _>>()?;
+
+                    // manually match and ignore OoF errors
+                    match self.define_library(mc, &name, ecc, true, library_def, library_decls) {
+                        Ok(_) | Err(DefineLibraryError::OutOfFuel(_)) => {}
+                        Err(e) => return Err(e.into()),
+                    }
                 }
                 _ => break,
             }
@@ -880,8 +1140,8 @@ impl<'gc> Compiler<'gc> {
         let mut upvalues = 0;
         let mut context = SyntaxContext {
             mc,
-            interner,
-            world,
+            interner: ecc.interner,
+            world: ecc.world,
             constants: &mut constants,
             lambdas: &mut lambdas,
             promises: &mut promises,
@@ -1109,33 +1369,78 @@ impl<'gc> Compiler<'gc> {
 
         macro_rules! import_lib {
             (full $library_name:expr) => {
-                    if let Some(modl) = world.library($library_name) {
-                        for symbol in modl.all_symbols(interner) {
-                            // try  to import as a syntax, then as a value, and fail the module if
-                            // a name doesn't exist
-                            if let Some(syntax) = modl.syntax(interner, symbol) {
-                                // Define a macro in scope
-                                self.define_macro(symbol, syntax);
-                            } else if let Some(val) = modl.value(mc, interner.resolve(&symbol)) {
-                                // freeze a module imported value (TODO check how this actually impacts things)
-                                self._current_env()
-                                    .borrow_mut(mc)
-                                    .define(mc, symbol, val, true).map_err(|_| ImportError::FailedToDefine(symbol))?;
-                            } else {
-                                Err(ImportError::NameNotFound{ name: Box::from(interner.resolve(&symbol))})?
+                if let Some(modl) = self.local_world.modules.get($library_name).cloned() {
+                    for symbol in modl.exported_items.keys() {
+                        if let Some(v) = modl.exported_items.get(symbol).cloned() {
+                            match v {
+                                ExportItem::Value(val) => {
+                                    self._current_env().borrow_mut(mc).define(mc, **symbol, val, true).map_err(|_| ImportError::FailedToDefine(**symbol))?;
+                                }
+                                ExportItem::Macro(syntax) => {
+                                    self.define_macro(**symbol, syntax);
+                                }
+                                ExportItem::Transformer(tptr) => {
+                                    let mcr = self.install_transformer(tptr);
+                                    self.define_macro(**symbol, mcr);
+                                }
                             }
                         }
-                        Ok(())
-                    } else {
-                        Err(ImportError::LibraryNotFound($library_name.clone()))
+                        else {
+                            Err(ImportError::NameNotFound{ name: Box::from(interner.resolve(&symbol))})?
+                        }
                     }
+                    Ok(())
+                } else if let Some(modl) = world.library($library_name) {
+                    for symbol in modl.all_symbols(interner) {
+                        // try  to import as a syntax, then as a value, and fail the module if
+                        // a name doesn't exist
+                        if let Some(syntax) = modl.syntax(interner, symbol) {
+                            // Define a macro in scope
+                            self.define_macro(symbol, syntax);
+                        } else if let Some(val) = modl.value(mc, interner.resolve(&symbol)) {
+                            // freeze a module imported value (TODO check how this actually impacts things)
+                            self._current_env()
+                                .borrow_mut(mc)
+                                .define(mc, symbol, val, true).map_err(|_| ImportError::FailedToDefine(symbol))?;
+                        } else {
+                            Err(ImportError::NameNotFound{ name: Box::from(interner.resolve(&symbol))})?
+                        }
+                    }
+                    Ok(())
+                } else {
+                    Err(ImportError::LibraryNotFound($library_name.clone()))
+                }
             };
             (only $set:expr, $symbols:expr) => {
                 {
                     let Some(library_name) = get_library_name($set) else {
                         unreachable!("[ICE] import set did not specify a library name");
                     };
-                    if let Some(modl) = world.library(&library_name) {
+                    if let Some(modl) = self.local_world.modules.get(&library_name).cloned() {
+                        for symbol in $symbols.iter().copied() {
+                            if let Some(v) = modl.exported_items.get(&Static(symbol)).cloned() {
+                                match v {
+                                    ExportItem::Value(val) => {
+                                        self._current_env()
+                                            .borrow_mut(mc)
+                                            .define(mc, symbol, val, true)
+                                            .map_err(|_| ImportError::FailedToDefine(symbol))?;
+                                    }
+                                    ExportItem::Macro(syntax) => {
+                                        self.define_macro(symbol, syntax);
+                                    }
+                                    ExportItem::Transformer(tptr) => {
+                                        let mcr = self.install_transformer(tptr);
+                                        self.define_macro(symbol, mcr);
+                                    }
+                                }
+                            }
+                            else {
+                                Err(ImportError::NameNotFound{ name: Box::from(interner.resolve(&symbol))})?
+                            }
+                        }
+                        Ok(())
+                    } else if let Some(modl) = world.library(&library_name) {
                         for symbol in $symbols.iter().copied() {
                             // dbg!(&symbol);
                             // try to import as a syntax, then as a value, and fail the module if
@@ -1147,7 +1452,8 @@ impl<'gc> Compiler<'gc> {
                                 // freeze a module imported value (TODO check how this actually impacts things)
                                 self._current_env()
                                     .borrow_mut(mc)
-                                    .define(mc, symbol, val, true).map_err(|_| ImportError::FailedToDefine(symbol))?;
+                                    .define(mc, symbol, val, true)
+                                    .map_err(|_| ImportError::FailedToDefine(symbol))?;
                             } else {
                                 Err(ImportError::NameNotFound{ name: Box::from(interner.resolve(&symbol))})?
                             }
@@ -1189,26 +1495,27 @@ impl<'gc> Compiler<'gc> {
     /// # Parameters
     /// - `mc`
     /// - `name`: library name to register
-    /// - `worlds`: [`LocalWorld`] and [`World`] to use
-    /// - `interner`:
-    /// - `is_native`: will reserved names be allowed through?
+    /// - `ecc`: [`ExternalCompilerContext`]
+    /// - `from_code`: will reserved names (null and names beginning with `scheme`, `srfi`, `magus`) be allowed through?
+    /// - `library_def`: [`LibraryDefinitionContext`]
     /// - `library_decls`: library declarations
-    fn define_library(
+    pub fn define_library(
+        &mut self,
         mc: &Mutation<'gc>,
         name: &LibraryName,
-        worlds: (&mut LocalWorld<'gc>, &World),
-        interner: &mut lasso::Rodeo,
-        includer: &impl Includer,
+        ecc: &mut ExternalCompilerContext<'_>,
         from_code: bool,
+        library_def: &LibraryDefinitionContext<'gc>,
         library_decls: impl IntoIterator<Item = LibraryDeclaration<'gc>>,
     ) -> Result<(), DefineLibraryError> {
         // The '() module is private from Scheme code
-        if !name.is_valid() {
+        if from_code && !name.is_valid() {
             return Err(DefineLibraryError::EmptyLibraryName);
         }
 
         // We reserve all modules name with the first component 'scheme, 'srfi, and 'magus
-        let reserved_starts = ["scheme", "srfi", "magus"].map(|s| interner.get_or_intern_static(s));
+        let reserved_starts =
+            ["scheme", "srfi", "magus"].map(|s| ecc.interner.get_or_intern_static(s));
         if from_code
             && matches!(name.0[0], LibraryNameItem::Identifier(ref id) if reserved_starts.contains(id))
         {
@@ -1216,19 +1523,130 @@ impl<'gc> Compiler<'gc> {
         }
 
         // If a name can be found, that is *also* an error
-        let (local_world, world) = worlds;
-        if local_world.modules.contains_key(name) || world.modules.contains_key(name) {
+        if self.local_world.modules.contains_key(name) {
             return Err(DefineLibraryError::AlreadyExists(name.clone()));
         }
+        // We don't look at the world b/c we allow native and Scheme libraries with the same name to exist.
+        // The Scheme library is searched first, then the native library. This allows for "Scheme postludes" to
+        // implement functionality and niceties using Scheme on top of natively implement functionality.
 
-        // TODO something we will *definitely* support is SRFI 1: List library
-        // cuz that's where `filter` is, but that should just show up as a Module that one can include
-        // in a world
+        // The compiler we will use to compile the library (so that the only interface between these compilers is
+        // the library export interface.)
+        let mut lib_compiler = Compiler::new(mc);
 
-        // - define-library: goes through the definition, interpreting the heads as keywords
-        //   then creates a module in the local world for that name (errors before interp if the name is already
-        //   taken by either a previous define-library or the world)
-        todo!()
+        // When compiling we use the *exact* same ecc, so that the values are compatible with *this* interpreter (as
+        // we would be using the same interner)
+
+        // For execution, we either use one big blob of fuel, or (when None) refill in units of 1,000 fuel
+        let mut fuel = Fuel::with(library_def.max_fuel.unwrap_or(1_000));
+        let mut exports = fxhash::FxHashMap::default();
+        let global_env = Gc::new(
+            mc,
+            RefLock::new(StackEnvironment::new(
+                mc,
+                Some(lib_compiler.default_environment_ptr()),
+            )),
+        );
+
+        for decl in library_decls {
+            match decl {
+                LibraryDeclaration::Import(imports) => {
+                    for import in imports.iter() {
+                        lib_compiler.import(mc, ecc.interner, ecc.world, import, true)?;
+                    }
+                }
+                LibraryDeclaration::IncludeLibraryDeclarations(_) => todo!(),
+                LibraryDeclaration::Include {
+                    filenames,
+                    case_insensitive,
+                } => todo!(),
+                LibraryDeclaration::Begin(code) => {
+                    // this is the "fun" one. we use the repl substitution trick to make `global_env` our global environment
+                    // when using thread. But first, we gotta compile in our compiler.
+                    let chunk = lib_compiler
+                        .compile(mc, ecc, library_def, code.iter().copied())
+                        // we have to box this error b/c CompileError can contain a DefineLibraryError
+                        .map_err(Box::new)?;
+
+                    let thread = Gc::new(mc, RefLock::new(Thread::new(mc, chunk)));
+                    let vp = library_def.value_pointers;
+                    let ctx = crate::interpreter::Context {
+                        mc,
+                        thread,
+                        null_value: vp.null_value,
+                        true_value: vp.true_value,
+                        false_value: vp.false_value,
+                    };
+                    // repl trick to share envs (to be made "official" with a nice interface)
+                    *thread.borrow_mut(mc).env().unwrap().borrow_mut(mc) = *global_env.borrow();
+                    // reparent the global_env to the chunk parent
+                    global_env.borrow_mut(mc).reparent(Some(chunk.import_env));
+                    while fuel.remaining() > 0 && !thread.borrow().is_finished() {
+                        thread.borrow_mut(mc).step(
+                            ctx,
+                            ecc.interner,
+                            ecc.world,
+                            ecc.includer,
+                            &mut fuel,
+                        );
+                        if library_def.max_fuel.is_none() {
+                            fuel.refill(1_000, 1_000);
+                        }
+                    }
+
+                    if !thread.borrow().is_finished() {
+                        // we ran outta fuel
+                        return Err(DefineLibraryError::OutOfFuel(name.clone()));
+                    }
+                }
+                LibraryDeclaration::Export(names) => {
+                    let find_item = |name: &lasso::Spur| -> Option<ExportItem<'gc>> {
+                        // search first for macros, then as a value in the global scope
+                        if let Some(syntax) = lib_compiler.syntax_items.get(name) {
+                            if let Some(key) = syntax.is_transformer() {
+                                lib_compiler
+                                    .stash
+                                    .transformers
+                                    .get(key)
+                                    .copied()
+                                    .map(ExportItem::Transformer)
+                            } else {
+                                Some(ExportItem::Macro(Arc::clone(syntax)))
+                            }
+                        } else if let Some(binding) = global_env.borrow().get(*name) {
+                            binding.read(|v| Some(ExportItem::Value(*v)))
+                        } else {
+                            None
+                        }
+                    };
+                    for name in names.iter() {
+                        match name {
+                            ExportSet::Name(spur) => {
+                                let item =
+                                    find_item(spur).ok_or(DefineLibraryError::UndefinedExport(
+                                        Box::from(ecc.interner.resolve(spur)),
+                                    ))?;
+                                exports.insert(*spur, item);
+                            }
+                            ExportSet::Rename { from, to } => {
+                                let item =
+                                    find_item(from).ok_or(DefineLibraryError::UndefinedExport(
+                                        Box::from(ecc.interner.resolve(from)),
+                                    ))?;
+                                exports.insert(*to, item);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we get through all the declarations without running out of fuel, *then* we define the library
+        let new_library = SchemeLibrary {
+            exported_items: exports.into_iter().map(|(k, v)| (Static(k), v)).collect(),
+        };
+        self.local_world.modules.insert(name.clone(), new_library);
+        Ok(())
     }
 
     /// Checks if an expression is considered a definition by Scheme
@@ -1236,12 +1654,12 @@ impl<'gc> Compiler<'gc> {
         let definition_symbols = self
             .syntax_items
             .iter()
-            .filter_map(|(k, syn)| syn.is_definition(program).then_some(*k))
+            .filter_map(|(k, syn)| syn.is_definition(program, self).then_some(*k))
             .collect::<fxhash::FxHashSet<_>>();
         let container_symbols = self
             .syntax_items
             .iter()
-            .filter_map(|(k, syn)| syn.is_container(program).then_some(*k))
+            .filter_map(|(k, syn)| syn.is_container(program, self).then_some(*k))
             .collect::<fxhash::FxHashSet<_>>();
 
         match &program.data {
@@ -1477,6 +1895,18 @@ impl<'gc> Compiler<'gc> {
         }
 
         self.syntax_items.get(&symbol).cloned()
+    }
+
+    /// Create an ArcSyntax from a [`TransformerPtr`]
+    pub fn install_transformer(&mut self, transformer: TransformerPtr<'gc>) -> ArcSyntax {
+        let new_knob = Arc::new(());
+        let key = self.stash.transformers.insert(transformer);
+        self.stash.transformer_knobs.insert(key, new_knob.clone());
+        let syntax = PrivateTransformer {
+            key,
+            _knob: new_knob,
+        };
+        Arc::new(syntax)
     }
 
     pub fn define_macro(&mut self, symbol: lasso::Spur, syntax: ArcSyntax) {

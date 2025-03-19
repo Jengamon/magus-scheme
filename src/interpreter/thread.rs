@@ -271,7 +271,7 @@ impl<'gc> Thread<'gc> {
     /// Creates a frame of evaluation for the given lambda
     pub fn call(
         &mut self,
-        ctx: &Context<'gc>,
+        ctx: &Context<'_, 'gc>,
         lambda: Lambda<'gc>,
         error_handler: Option<Lambda<'gc>>,
         args: &[ValuePtr<'gc>],
@@ -421,7 +421,7 @@ impl<'gc> Thread<'gc> {
     /// `should_pop` can be set to false in the case of tail calls
     // TODO Add an Option return value to indicate the frame that should be clobbered by tail calls (
     // once dynamic_wind handlers enter the fray)
-    fn handle_frame_end(&mut self, ctx: &Context<'gc>, should_pop: bool) {
+    fn handle_frame_end(&mut self, ctx: &Context<'_, 'gc>, should_pop: bool) {
         let Some(frame) = self.frames.last_mut() else {
             unreachable!("[ICE] no frame present");
         };
@@ -493,7 +493,7 @@ impl<'gc> Thread<'gc> {
     /// Sets up the call to a lambda
     fn call_lambda(
         &mut self,
-        ctx: &Context<'gc>,
+        ctx: &Context<'_, 'gc>,
         lambda: Lambda<'gc>,
         mut args: usize,
         is_tail: bool,
@@ -643,7 +643,7 @@ impl<'gc> Thread<'gc> {
     /// Executes instructions until fuel determines it should not continue
     pub fn step(
         &mut self,
-        ctx: Context<'gc>,
+        ctx: Context<'_, 'gc>,
         interner: &mut lasso::Rodeo,
         // Used for (scheme eval) and its compilation process
         world: &World,
@@ -670,6 +670,8 @@ impl<'gc> Thread<'gc> {
             if self.is_finished() {
                 return;
             }
+
+            // eprintln!("FRAMEC: {}", self.frames.len());
 
             if let Some(err) = self.error {
                 // Find an error handler and set it up to run (if not handling one)

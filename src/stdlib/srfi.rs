@@ -16,4 +16,7 @@ pub mod list {
             HashSet::new()
         }
     }
+
+    const SRFI_LIST: &str = include_str!("srfi_list.scm");
+    pub fn register_module() {}
 }

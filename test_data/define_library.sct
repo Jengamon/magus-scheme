@@ -1,0 +1,15 @@
+---
+(1 2 3)
+---
+; Library definitions, yay!
+(define-library (_scheme base)
+	(import (only (scheme base) define))
+	(begin
+		(define (list . in) in))
+	(export (rename list my-list))
+)
+
+(import (_scheme base))
+; below is an error!
+#;(define)
+(my-list 1 2 3)

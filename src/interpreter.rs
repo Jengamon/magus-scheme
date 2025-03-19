@@ -6,13 +6,15 @@ use gc_arena::{Collect, Gc, Mutation, RefLock, Rootable};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
 
 use crate::{
-    bytecode, compiler, handler_type,
+    bytecode, compiler,
+    environment::StackEnvironmentPtr,
+    handle_type,
     value::{ConsCell, Value, ValuePtr},
 };
 
 pub mod thread;
 
-new_key_type! { struct ThreadKey; struct ChunkKey; struct CompilerKey; struct ValueKey; }
+new_key_type! { struct ThreadKey; struct ChunkKey; struct CompilerKey; struct ValueKey; struct EnvironmentKey; }
 #[derive(Debug)]
 struct Stash<'gc> {
     // we'll use SlotMap over HopSlotMap for now, as most of the time
@@ -22,6 +24,7 @@ struct Stash<'gc> {
     chunks: SlotMap<ChunkKey, bytecode::ChunkPtr<'gc>>,
     compilers: SlotMap<CompilerKey, compiler::Compiler<'gc>>,
     values: SlotMap<ValueKey, ValuePtr<'gc>>,
+    envs: SlotMap<EnvironmentKey, StackEnvironmentPtr<'gc>>,
 }
 
 impl Stash<'_> {
@@ -31,6 +34,7 @@ impl Stash<'_> {
             chunks: SlotMap::with_key(),
             compilers: SlotMap::with_key(),
             values: SlotMap::with_key(),
+            envs: SlotMap::with_key(),
         }
     }
 }
@@ -50,13 +54,15 @@ unsafe impl<'gc> Collect<'gc> for Stash<'gc> {
         trace_slotmap!(chunks);
         trace_slotmap!(compilers);
         trace_slotmap!(values);
+        trace_slotmap!(envs);
     }
 }
 
-handler_type!(pub ThreadHandle => ThreadKey);
-handler_type!(pub ChunkHandle => ChunkKey);
-handler_type!(pub CompilerHandle => CompilerKey);
-handler_type!(pub ValueHandle => ValueKey);
+handle_type!(pub ThreadHandle => ThreadKey);
+handle_type!(pub ChunkHandle => ChunkKey);
+handle_type!(pub CompilerHandle => CompilerKey);
+handle_type!(pub ValueHandle => ValueKey);
+handle_type!(pub EnvironmentHandle => EnvironmentKey);
 
 /// Gc arena type
 #[derive(Debug, Collect)]
@@ -80,6 +86,14 @@ impl<'gc> Arena<'gc> {
         let knob = Arc::new(());
         let key = self.stash.chunks.insert(chunk);
         ChunkHandle { _knob: knob, key }
+    }
+
+    pub fn value_pointers(&self) -> ValuePointers<'gc> {
+        ValuePointers {
+            null_value: self.null_value,
+            true_value: self.true_value,
+            false_value: self.false_value,
+        }
     }
 
     pub fn get_chunk(&self, handle: &ChunkHandle) -> Option<bytecode::ChunkPtr<'gc>> {
@@ -110,20 +124,20 @@ impl<'gc> Arena<'gc> {
 
 /// Context for execution
 #[derive(Clone, Copy)]
-pub struct Context<'gc> {
-    pub mc: &'gc Mutation<'gc>,
+pub struct Context<'a, 'gc> {
+    pub mc: &'a Mutation<'gc>,
     pub thread: thread::ThreadPtr<'gc>,
     pub null_value: ValuePtr<'gc>,
     pub true_value: ValuePtr<'gc>,
     pub false_value: ValuePtr<'gc>,
 }
 
-impl Context<'_> {
+impl Context<'_, '_> {
     #[cfg(test)]
-    pub(crate) fn new_test_context<'gc>(
-        mc: &'gc Mutation<'gc>,
+    pub(crate) fn new_test_context<'a, 'gc>(
+        mc: &'a Mutation<'gc>,
         thread: thread::ThreadPtr<'gc>,
-    ) -> Context<'gc> {
+    ) -> Context<'a, 'gc> {
         Context {
             mc,
             thread,
@@ -134,7 +148,7 @@ impl Context<'_> {
     }
 }
 
-impl<'gc> Deref for Context<'gc> {
+impl<'gc> Deref for Context<'_, 'gc> {
     type Target = Mutation<'gc>;
     fn deref(&self) -> &Self::Target {
         self.mc
@@ -176,6 +190,29 @@ impl Default for Interpreter {
             thread_knobs: SecondaryMap::new(),
             compiler_knobs: SecondaryMap::new(),
             interner: lasso::Rodeo::new(),
+        }
+    }
+}
+
+/// Pointers used to represent `'()`, `#t` and `#f`
+///
+/// Only the `'()` pointer's value has semantic meaning.
+/// the `#t` and `#f` pointers are for convenience (and to avoid repeated allocation)
+#[derive(Debug, Clone, Copy)]
+pub struct ValuePointers<'gc> {
+    pub(crate) null_value: ValuePtr<'gc>,
+    pub(crate) true_value: ValuePtr<'gc>,
+    pub(crate) false_value: ValuePtr<'gc>,
+}
+
+#[allow(clippy::needless_lifetimes)]
+impl<'gc> ValuePointers<'gc> {
+    /// Create "fake" values for testing. Should *only* be used for testing.
+    pub fn fake(mc: &'gc Mutation<'gc>) -> ValuePointers<'gc> {
+        Self {
+            null_value: Gc::new(mc, RefLock::new(Value::Cons(ConsCell::empty()))),
+            true_value: Gc::new(mc, RefLock::new(Value::Bool(true))),
+            false_value: Gc::new(mc, RefLock::new(Value::Bool(false))),
         }
     }
 }
@@ -295,17 +332,19 @@ impl Interpreter {
         func: impl for<'a> FnOnce(
             &Mutation<'a>,
             &mut compiler::Compiler<'a>,
+            ValuePointers<'a>,
             &mut lasso::Rodeo,
         ) -> Result<bytecode::ChunkPtr<'a>, E>,
     ) -> Result<ChunkHandle, E> {
         self.check_for_dropped();
         self.arena.mutate_root(|mc, arena| {
+            let pointers = arena.value_pointers();
             let compiler = arena
                 .stash
                 .compilers
                 .get_mut(handle.key)
                 .expect("compiler was dropped when a handle still exists");
-            let chunk = (func)(mc, compiler, &mut self.interner)?;
+            let chunk = (func)(mc, compiler, pointers, &mut self.interner)?;
             Ok(arena.create_chunk_handle(chunk))
         })
     }
@@ -343,7 +382,7 @@ impl Interpreter {
 
     pub fn enter(
         &mut self,
-        func: impl for<'a> FnOnce(&Mutation<'a>, &mut Arena<'a>, &mut lasso::Rodeo),
+        func: impl for<'a> FnOnce(&'a Mutation<'a>, &mut Arena<'a>, &mut lasso::Rodeo),
     ) {
         self.check_for_dropped();
         self.arena.mutate_root(|mc, arena| {
@@ -353,7 +392,7 @@ impl Interpreter {
 
     pub fn try_enter<T>(
         &mut self,
-        func: impl for<'a> FnOnce(&Mutation<'a>, &mut Arena<'a>, &mut lasso::Rodeo) -> T,
+        func: impl for<'a> FnOnce(&'a Mutation<'a>, &mut Arena<'a>, &mut lasso::Rodeo) -> T,
     ) -> T {
         self.check_for_dropped();
         self.arena
@@ -363,7 +402,7 @@ impl Interpreter {
     pub fn run(
         &mut self,
         handle: &ThreadHandle,
-        func: impl for<'a> FnOnce(Context<'a>, &mut Arena<'a>, &mut lasso::Rodeo),
+        func: impl for<'a> FnOnce(Context<'_, 'a>, &mut Arena<'a>, &mut lasso::Rodeo),
     ) {
         self.check_for_dropped();
         self.arena.mutate_root(|mc, arena| {
@@ -386,7 +425,7 @@ impl Interpreter {
     pub fn try_run<T>(
         &mut self,
         handle: &ThreadHandle,
-        func: impl for<'a> FnOnce(Context<'a>, &mut Arena<'a>, &mut lasso::Rodeo) -> T,
+        func: impl for<'a> FnOnce(Context<'_, 'a>, &mut Arena<'a>, &mut lasso::Rodeo) -> T,
     ) -> T {
         self.check_for_dropped();
         self.arena.mutate_root(|mc, arena| {

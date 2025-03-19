@@ -18,7 +18,12 @@ pub use gc_arena;
 pub use lasso;
 pub use rowan;
 
+pub use compiler::{
+    ExternalCompilerContext, LibraryName, LibraryNameItem, Syntax, SyntaxContext, SyntaxReturn,
+    World,
+};
 pub use general_parser::{CompoundTermKind, TokenKind, gast::*, general_parse};
+pub use interpreter::{ChunkHandle, CompilerHandle, Interpreter, ThreadHandle};
 pub use num::{ExactReal, SchemeNumber};
 pub use rowan::TextRange;
 pub use runtime::{
@@ -27,7 +32,7 @@ pub use runtime::{
     value::{self, Value, ValuePtr, ValueType},
 };
 
-macro_rules! handler_type {
+macro_rules! handle_type {
     ($v:vis $hn:ident => $k:ty) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         $v struct $hn {
@@ -36,4 +41,4 @@ macro_rules! handler_type {
         }
     };
 }
-pub(crate) use handler_type;
+pub(crate) use handle_type;

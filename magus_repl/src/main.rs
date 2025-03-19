@@ -5,12 +5,12 @@ use clap::Parser;
 use codesnake::{Block, CodeWidth, Label, LineIndex};
 use magus::{
     bytecode::{Bytecode, Constant},
-    compiler::{LibraryName, ParseProgram, World},
+    compiler::{LibraryDefinitionContext, LibraryName, ParseProgram, World},
     environment::StackEnvironment,
     gc_arena::{Gc, RefLock},
     general_parser::GeneralParserError,
     interpreter::{CompilerHandle, Interpreter, NullIncluder, ThreadHandle, ValueHandle},
-    library_name, stdlib, ContainsDatum, Fuel, GAstNode, Module, Value,
+    library_name, stdlib, ContainsDatum, ExternalCompilerContext, Fuel, GAstNode, Module, Value,
 };
 use reedline::{
     Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus, PromptViMode, Reedline,
@@ -157,9 +157,18 @@ fn execute(
     // Run the code in through our compiler to get a chunk,
     // then execute that chunk on a new thread
     let chunk: Result<_, anyhow::Error> =
-        interpreter.compiler_context(compiler, |mc, compiler, interner| {
+        interpreter.compiler_context(compiler, |mc, compiler, value_pointers, interner| {
             let programs = ("repl.scm", module).parse_program(mc, interner, false)?;
-            Ok(compiler.compile(mc, interner, world, &NullIncluder, programs)?)
+            let mut ecc = ExternalCompilerContext {
+                includer: &NullIncluder,
+                world,
+                interner,
+            };
+            let library_def = LibraryDefinitionContext {
+                max_fuel: None,
+                value_pointers,
+            };
+            Ok(compiler.compile(mc, &mut ecc, &library_def, programs)?)
         });
 
     match chunk {
@@ -360,6 +369,8 @@ fn repl() -> anyhow::Result<()> {
     });
     let stashed_env = interpreter.try_run(&thread, |ctx, arena, _| {
         // Create a shared environment between prompts (excluding macros for now)
+        // TODO Switch this to using EnvironmentHandle (once supported), as Value::Environment will change meaning
+        // to support import sets (and thus its *actual* goal of supporting `eval`)
         arena.stash_value(
             Value::Environment(Gc::new(
                 ctx.mc,

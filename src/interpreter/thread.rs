@@ -471,7 +471,7 @@ impl<'gc> Thread<'gc> {
         } else {
             self.stack.push(Value::Void.into_ptr(ctx));
         }
-        // FIXME Remember to do the same for native lambdas (so do it as a function)
+
         // TODO If dynamic-wind is present. call the after
         if should_pop {
             self.frames.pop();
@@ -528,15 +528,24 @@ impl<'gc> Thread<'gc> {
             }
         };
         let args: Vec<_> = self.stack.drain(self.stack.len() - args..).collect();
+        // Handle the previous frame return here
+        if is_tail {
+            // Exiting the current frame
+            self.handle_frame_end(ctx, false);
+        }
+        while let Some(v) = self.stack.last() {
+            match *v.borrow() {
+                Value::Void => {
+                    self.stack.pop();
+                }
+                _ => {
+                    break;
+                }
+            }
+        }
         let new_frame = ThreadFrame {
             // Ignore voids at the top of the stack when determining the bottom of a frame
-            bottom: self.stack.len().saturating_sub(
-                self.stack
-                    .iter()
-                    .rev()
-                    .take_while(|v| matches!(*v.borrow(), Value::Void))
-                    .count(),
-            ),
+            bottom: self.stack.len(),
             execution: Execution::from_lambda(
                 lambda,
                 self.frames.last().and_then(|f| match f.execution {
@@ -555,8 +564,6 @@ impl<'gc> Thread<'gc> {
         };
 
         if is_tail {
-            // Exiting the current frame
-            self.handle_frame_end(ctx, false);
             if let Some(frame) = self.frames.last_mut() {
                 *frame = new_frame;
                 return Ok(());
@@ -764,6 +771,13 @@ impl<'gc> Thread<'gc> {
                                 $frame.map(|f| &mut f.execution)
                             {
                                 *pc += 1;
+                            }
+                        };
+                        (undo $frame:expr) => {
+                            if let Some(Execution::Bytecode { pc, .. }) =
+                                $frame.map(|f| &mut f.execution)
+                            {
+                                *pc -= 1;
                             }
                         };
                     }
@@ -1004,7 +1018,7 @@ impl<'gc> Thread<'gc> {
                             };
 
                             match *val.borrow() {
-                                Value::Lambda(mut l) => {
+                                Value::Lambda(mut l @ Lambda::Compiled(_)) => {
                                     // dbg!((&self.upvalue_mapping, *upvalue_index, &l));
                                     // Generate copy of lambda scope if it already exists (for new upvalues)
                                     if let Some(mapping) =
@@ -1038,6 +1052,29 @@ impl<'gc> Thread<'gc> {
                                         } >= code.len(),
                                     ) {
                                         make_error!(SchemeErrorType::LambdaException(err));
+                                        advance_to_next_inst!(undo self.frames.last_mut());
+                                        continue;
+                                    };
+                                }
+                                Value::Lambda(l @ Lambda::Native(_)) => {
+                                    let pc = *pc;
+                                    let code = std::rc::Rc::clone(&chunk.code);
+                                    // advance to next inst *before* pushing lambda
+                                    advance_to_next_inst!();
+                                    if let Err(err) = self.call_lambda(
+                                        &ctx,
+                                        l,
+                                        args,
+                                        pc + match code[pc] {
+                                            // make sure true branches can also be properly registered as tail calls
+                                            // because a jump unconditionally executes, the actual total movement is
+                                            // jump + 1 plus the + 1 base from this instruction
+                                            Bytecode::Jump { jump } => jump + 1,
+                                            _ => 1,
+                                        } >= code.len(),
+                                    ) {
+                                        make_error!(SchemeErrorType::LambdaException(err));
+                                        advance_to_next_inst!(undo self.frames.last_mut());
                                         continue;
                                     };
                                 }

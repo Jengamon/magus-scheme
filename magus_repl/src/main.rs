@@ -9,7 +9,7 @@ use magus::{
     environment::StackEnvironment,
     gc_arena::{Gc, RefLock},
     general_parser::GeneralParserError,
-    interpreter::{CompilerHandle, Interpreter, NullIncluder, ThreadHandle, ValueHandle},
+    interpreter::{CompilerHandle, Includer, Interpreter, ThreadHandle, ValueHandle},
     library_name, stdlib, ContainsDatum, ExternalCompilerContext, Fuel, GAstNode, Module, Value,
 };
 use reedline::{
@@ -28,6 +28,13 @@ struct Cli {
     /// Read code case-insensitively (by default)
     #[arg(long, short = 'i')]
     case_insensitive: bool,
+}
+
+struct PwdIncluder;
+impl Includer for PwdIncluder {
+    fn include(&self, filename: &str) -> anyhow::Result<Box<str>> {
+        Ok(std::fs::read_to_string(filename)?.into_boxed_str())
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -144,6 +151,7 @@ fn execute(
     source: impl AsRef<str>,
     case_insensitive: bool,
     module: &Module,
+    includer: &dyn Includer,
     interpreter: &mut Interpreter,
     compiler: &CompilerHandle,
     thread: &ThreadHandle,
@@ -165,7 +173,7 @@ fn execute(
         interpreter.compiler_context(compiler, |mc, compiler, value_pointers, interner| {
             let programs = ("repl.scm", module).parse_program(mc, interner, case_insensitive)?;
             let mut ecc = ExternalCompilerContext {
-                includer: &NullIncluder,
+                includer,
                 world,
                 interner,
             };
@@ -261,7 +269,7 @@ fn execute(
                         // The shenanigan: id want to keep this private to the magus crate
                         frame_env.borrow_mut(&ctx).reparent(Some(chunk.import_env));
                     }
-                    thread.step(ctx, interner, world, &NullIncluder, &mut fuel);
+                    thread.step(ctx, interner, world, includer, &mut fuel);
                     // dbg!(&thread);
                     let sources = [(interner.get_or_intern_static("repl.scm"), source.as_ref())];
                     if let Some(res) = thread.result() {
@@ -319,6 +327,7 @@ fn execute_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> an
                 source,
                 case_insensitive,
                 &module,
+                &PwdIncluder,
                 &mut interpreter,
                 &compiler,
                 &thread,
@@ -445,6 +454,7 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
                             src,
                             case_insensitive,
                             &module,
+                            &PwdIncluder,
                             &mut interpreter,
                             &compiler,
                             &thread,

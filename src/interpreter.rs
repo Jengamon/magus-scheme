@@ -164,7 +164,9 @@ pub trait Includer {
 pub struct NullIncluder;
 impl Includer for NullIncluder {
     fn include(&self, filename: &str) -> anyhow::Result<Box<str>> {
-        Err(anyhow::anyhow!("cannot include {filename}: null includer"))
+        Err(anyhow::anyhow!(
+            "cannot include `{filename}`: null includer"
+        ))
     }
 }
 

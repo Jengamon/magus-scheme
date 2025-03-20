@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     num::NonZero,
     rc::Rc,
     sync::Arc,
@@ -8,6 +8,7 @@ use std::{
 
 use fxhash::{FxHashMap, FxHashSet};
 use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
+use program_parsers::StringProgramError;
 
 use crate::{
     Fuel, Value, ValuePtr,
@@ -355,6 +356,20 @@ impl LibraryName {
     #[inline]
     pub fn is_valid(&self) -> bool {
         !self.0.is_empty()
+    }
+
+    pub fn to_string(&self, interner: &lasso::Rodeo) -> Box<str> {
+        Box::from(
+            self.0
+                .iter()
+                .map(|ni| match ni {
+                    LibraryNameItem::Identifier(i) => interner.resolve(i).to_string(),
+                    LibraryNameItem::Integer(i) => i.to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+                .as_str(),
+        )
     }
 
     pub fn convert(ptr: ProgramPtr<'_>, interner: &mut lasso::Rodeo) -> Option<Self> {
@@ -946,6 +961,7 @@ pub enum LibraryDeclaration<'gc> {
     },
     Begin(Rc<[ProgramPtr<'gc>]>),
     Export(Rc<[ExportSet]>),
+    CondExpand(()),
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -964,11 +980,12 @@ impl<'gc> LibraryDeclaration<'gc> {
         interner: &mut lasso::Rodeo,
     ) -> Result<Self, LibraryDeclarationError> {
         let export = interner.get_or_intern_static("export");
-        // let include_library_definitions =
-        //     interner.get_or_intern_static("include-library-definitions");
-        // let include = interner.get_or_intern_static("include");
-        // let include_ci = interner.get_or_intern_static("include-ci");
+        let include_library_declarations =
+            interner.get_or_intern_static("include-library-declarations");
+        let include = interner.get_or_intern_static("include");
+        let include_ci = interner.get_or_intern_static("include-ci");
         let begin = interner.get_or_intern_static("begin");
+        let cond_expand = interner.get_or_intern_static("cond-expand");
 
         match &ptr.data {
             ProgramData::List { head, body } => match head {
@@ -996,6 +1013,64 @@ impl<'gc> LibraryDeclaration<'gc> {
                     // begin
                     Ok(LibraryDeclaration::Begin(Rc::from(body.as_slice())))
                 }
+                ListHead::Program(p)
+                    if matches!(&p.data, ProgramData::Symbol(s) if *s == include_library_declarations)
+                        && body
+                            .iter()
+                            .all(|b| matches!(b.data, ProgramData::String(_))) =>
+                {
+                    let filenames = body
+                        .iter()
+                        .filter_map(|b| match &b.data {
+                            ProgramData::String(s) => Some(Rc::from(interner.resolve(s))),
+                            _ => unreachable!(),
+                        })
+                        .collect::<Rc<[_]>>();
+
+                    Ok(LibraryDeclaration::IncludeLibraryDeclarations(filenames))
+                }
+                ListHead::Program(p)
+                    if matches!(&p.data, ProgramData::Symbol(s) if *s == include)
+                        && body
+                            .iter()
+                            .all(|b| matches!(b.data, ProgramData::String(_))) =>
+                {
+                    let filenames = body
+                        .iter()
+                        .filter_map(|b| match &b.data {
+                            ProgramData::String(s) => Some(Rc::from(interner.resolve(s))),
+                            _ => unreachable!(),
+                        })
+                        .collect::<Rc<[_]>>();
+
+                    Ok(LibraryDeclaration::Include {
+                        filenames,
+                        case_insensitive: false,
+                    })
+                }
+                ListHead::Program(p)
+                    if matches!(&p.data, ProgramData::Symbol(s) if *s == include_ci)
+                        && body
+                            .iter()
+                            .all(|b| matches!(b.data, ProgramData::String(_))) =>
+                {
+                    let filenames = body
+                        .iter()
+                        .filter_map(|b| match &b.data {
+                            ProgramData::String(s) => Some(Rc::from(interner.resolve(s))),
+                            _ => unreachable!(),
+                        })
+                        .collect::<Rc<[_]>>();
+
+                    Ok(LibraryDeclaration::Include {
+                        filenames,
+                        case_insensitive: true,
+                    })
+                }
+                ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == cond_expand) =>
+                {
+                    todo!()
+                }
                 _ => Err(LibraryDeclarationError::NotALibraryDeclaration(ptr.source)),
             },
             _ => Err(LibraryDeclarationError::NotALibraryDeclaration(ptr.source)),
@@ -1011,8 +1086,8 @@ pub enum DefineLibraryError {
     ReservedName(LibraryName),
     #[error("attempted to define an existing library")]
     AlreadyExists(LibraryName),
-    #[error("interpretation ran out of fuel")]
-    OutOfFuel(LibraryName),
+    #[error("interpretation ran out of fuel while interpreting ({0})")]
+    OutOfFuel(Box<str>),
     #[error("no name in library: {0}")]
     UndefinedExport(Box<str>),
     #[error("library interpretation error: {0}")]
@@ -1021,6 +1096,12 @@ pub enum DefineLibraryError {
     Compile(#[from] Box<CompileError>),
     #[error("library import error: {0}")]
     Import(#[from] ImportError),
+    #[error("library include error: {0}")]
+    Include(anyhow::Error),
+    #[error("library include parse error: {0}")]
+    IncludeParse(#[from] StringProgramError),
+    #[error("library declaration error: {0}")]
+    LibraryDeclaration(#[from] LibraryDeclarationError),
 }
 
 /// Context struct for things external to the compiler
@@ -1422,14 +1503,7 @@ impl<'gc> Compiler<'gc> {
                     }
                     Ok(())
                 } else {
-                    Err(ImportError::LibraryNotFound(Box::from($library_name.0.iter().map(|ni| match ni {
-                        LibraryNameItem::Identifier(i) => {
-                            interner.resolve(&i).to_string()
-                        }
-                        LibraryNameItem::Integer(i) => {
-                            i.to_string()
-                        }
-                    }).collect::<Vec<_>>().join(" ").as_str())))
+                    Err(ImportError::LibraryNotFound($library_name.to_string(interner)))
                 }
             };
             (only $set:expr, $symbols:expr) => {
@@ -1481,14 +1555,7 @@ impl<'gc> Compiler<'gc> {
                         }
                         Ok(())
                     } else {
-                        Err(ImportError::LibraryNotFound(Box::from(library_name.0.iter().map(|ni| match ni {
-                            LibraryNameItem::Identifier(i) => {
-                                interner.resolve(&i).to_string()
-                            }
-                            LibraryNameItem::Integer(i) => {
-                                i.to_string()
-                            }
-                        }).collect::<Vec<_>>().join(" ").as_str())))
+                        Err(ImportError::LibraryNotFound(library_name.to_string(interner)))
                     }
                 }
             };
@@ -1652,67 +1719,130 @@ impl<'gc> Compiler<'gc> {
         let mut export_sets = HashSet::new();
         // TODO Supporting IncludeLibraryDeclarations means this should be a while let loop, and it
         // should pop from a Vec (we will reverse the declarations once in the vec?)
-        for decl in library_decls {
+        let mut decls = VecDeque::from_iter(library_decls);
+
+        #[expect(clippy::too_many_arguments)]
+        fn execute_code<'gc>(
+            mc: &Mutation<'gc>,
+            code: &[ProgramPtr<'gc>],
+            name: &LibraryName,
+            ecc: &mut ExternalCompilerContext<'_>,
+            library_def: &LibraryDefinitionContext<'gc>,
+            lib_compiler: &mut Compiler<'gc>,
+            global_env: StackEnvironmentPtr<'gc>,
+            fuel: &mut Fuel,
+        ) -> Result<(), DefineLibraryError> {
+            // this is the "fun" one. we use the repl substitution trick to make `global_env` our global environment
+            // when using thread. But first, we gotta compile in our compiler.
+            let chunk = lib_compiler
+                .compile_no_import(mc, ecc, code.iter().copied())
+                .map_err(Box::new)?;
+
+            let thread = Gc::new(mc, RefLock::new(Thread::new(mc, chunk)));
+            let vp = library_def.value_pointers;
+            let ctx = crate::interpreter::Context {
+                mc,
+                thread,
+                null_value: vp.null_value,
+                true_value: vp.true_value,
+                false_value: vp.false_value,
+            };
+            // repl trick to share envs (to be made "official" with a nice interface)
+            *thread.borrow_mut(mc).env().unwrap().borrow_mut(mc) = *global_env.borrow();
+            // reparent the global_env to the chunk parent
+            global_env.borrow_mut(mc).reparent(Some(chunk.import_env));
+            while fuel.remaining() > 0 && !thread.borrow().is_finished() {
+                thread
+                    .borrow_mut(mc)
+                    .step(ctx, ecc.interner, ecc.world, ecc.includer, fuel);
+                if library_def.max_fuel.is_none() {
+                    fuel.refill(1_000, 1_000);
+                }
+            }
+
+            if !thread.borrow().is_finished() {
+                // we ran outta fuel
+                Err(DefineLibraryError::OutOfFuel(name.to_string(ecc.interner)))
+            } else if let Some(Err(e)) = thread.borrow().result() {
+                // Rendered to string b/c DefineLibraryError is currently not using the 'gc lifetime
+                // TODO Should it?
+                Err(DefineLibraryError::InterpError(Box::from(
+                    e.display(ecc.interner, []).to_string().as_str(),
+                )))
+            } else {
+                Ok(())
+            }
+        }
+
+        while let Some(decl) = decls.pop_front() {
             match decl {
                 LibraryDeclaration::Import(imports) => {
                     for import in imports.iter() {
                         lib_compiler.import(mc, ecc.interner, ecc.world, import, true)?;
                     }
                 }
-                LibraryDeclaration::IncludeLibraryDeclarations(_) => todo!(),
+                LibraryDeclaration::IncludeLibraryDeclarations(filenames) => {
+                    for filename in filenames.iter() {
+                        // AFAICT this works like `include` so case-sensitivity is reset to "sensitive".
+                        let code = (
+                            &filename,
+                            ecc.includer
+                                .include(filename)
+                                .map_err(DefineLibraryError::Include)?,
+                        )
+                            .parse_program(mc, ecc.interner, false)?;
+                        for decl in code
+                            .into_iter()
+                            .rev()
+                            .map(|p| LibraryDeclaration::convert(p, ecc.interner))
+                            .collect::<Result<Vec<_>, _>>()?
+                        {
+                            decls.push_front(decl);
+                        }
+                    }
+                }
                 LibraryDeclaration::Include {
                     filenames,
                     case_insensitive,
-                } => todo!(),
-                LibraryDeclaration::Begin(code) => {
-                    // this is the "fun" one. we use the repl substitution trick to make `global_env` our global environment
-                    // when using thread. But first, we gotta compile in our compiler.
-
-                    // So that we can't import/define-library *within* begin, use compile code for each program, then build the chunk
-                    let chunk = lib_compiler
-                        .compile_no_import(mc, ecc, code.iter().copied())
-                        .map_err(Box::new)?;
-
-                    let thread = Gc::new(mc, RefLock::new(Thread::new(mc, chunk)));
-                    let vp = library_def.value_pointers;
-                    let ctx = crate::interpreter::Context {
-                        mc,
-                        thread,
-                        null_value: vp.null_value,
-                        true_value: vp.true_value,
-                        false_value: vp.false_value,
-                    };
-                    // repl trick to share envs (to be made "official" with a nice interface)
-                    *thread.borrow_mut(mc).env().unwrap().borrow_mut(mc) = *global_env.borrow();
-                    // reparent the global_env to the chunk parent
-                    global_env.borrow_mut(mc).reparent(Some(chunk.import_env));
-                    while fuel.remaining() > 0 && !thread.borrow().is_finished() {
-                        thread.borrow_mut(mc).step(
-                            ctx,
-                            ecc.interner,
-                            ecc.world,
-                            ecc.includer,
+                } => {
+                    for filename in filenames.iter() {
+                        let code = (
+                            &filename,
+                            ecc.includer
+                                .include(filename)
+                                .map_err(DefineLibraryError::Include)?,
+                        )
+                            .parse_program(
+                                mc,
+                                ecc.interner,
+                                case_insensitive,
+                            )?;
+                        execute_code(
+                            mc,
+                            &code,
+                            name,
+                            ecc,
+                            library_def,
+                            &mut lib_compiler,
+                            global_env,
                             &mut fuel,
-                        );
-                        if library_def.max_fuel.is_none() {
-                            fuel.refill(1_000, 1_000);
-                        }
-                    }
-
-                    if !thread.borrow().is_finished() {
-                        // we ran outta fuel
-                        return Err(DefineLibraryError::OutOfFuel(name.clone()));
-                    } else if let Some(Err(e)) = thread.borrow().result() {
-                        // Rendered to string b/c DefineLibraryError is currently not using the 'gc lifetime
-                        // TODO Should it?
-                        return Err(DefineLibraryError::InterpError(Box::from(
-                            e.display(ecc.interner, []).to_string().as_str(),
-                        )));
+                        )?
                     }
                 }
+                LibraryDeclaration::Begin(code) => execute_code(
+                    mc,
+                    &code,
+                    name,
+                    ecc,
+                    library_def,
+                    &mut lib_compiler,
+                    global_env,
+                    &mut fuel,
+                )?,
                 LibraryDeclaration::Export(names) => {
                     export_sets.extend(names.iter().copied());
                 }
+                LibraryDeclaration::CondExpand(_) => todo!(),
             }
         }
 

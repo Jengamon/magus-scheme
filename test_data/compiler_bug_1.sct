@@ -1,0 +1,9 @@
+---
+4
+3
+---
+; Was causing a panic due to mismanagement of stack(ish)
+(import (only (scheme base) define values))
+(define (x) 3)
+3
+(values 4 (x))

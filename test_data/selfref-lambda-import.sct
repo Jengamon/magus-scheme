@@ -1,0 +1,12 @@
+---
+(3 2 1)
+---
+; make sure self-referential lambdas still work even if imported
+(define-library (os)
+    (import (scheme base))
+    (export sr)
+    (begin
+        (define (sr x)
+            (if (<= x 0) '() (cons x (sr (- x 1)))))))
+(import (prefix (os) dos-))
+(dos-sr 3)

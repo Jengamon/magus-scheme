@@ -1630,6 +1630,63 @@ impl<'gc> Compiler<'gc> {
             Ok(())
         }
 
+        fn self_ref_lambda_fix<'gc>(
+            mc: &Mutation<'gc>,
+            symbol: lasso::Spur,
+            value: ValuePtr<'gc>,
+        ) -> ValuePtr<'gc> {
+            if let Value::Lambda(Lambda::Compiled(c)) = *value.borrow() {
+                let chunk = c.chunk;
+                if chunk
+                    .code
+                    .iter()
+                    .any(|c| matches!(c, Bytecode::Reference { symbol: sym } if sym == &symbol))
+                {
+                    // self-referential fix
+                    let self_ref = Value::Undefined.into_ptr(mc);
+                    let fallback = if let Some(f) = chunk.fallback {
+                        let mut new_fallback = f.as_ref().clone();
+                        new_fallback.insert(Static(symbol), self_ref);
+                        new_fallback
+                    } else {
+                        let mut new_fallback = ImportFallbackMap::default();
+                        new_fallback.insert(Static(symbol), self_ref);
+                        new_fallback
+                    };
+                    let new_chunk = Chunk::with_fallback(
+                        mc,
+                        chunk.code.iter().copied(),
+                        chunk.constants.iter().cloned(),
+                        chunk.lambdas.iter().cloned(),
+                        chunk.promises.iter().cloned(),
+                        chunk.upvalues,
+                        chunk.import_env,
+                        chunk.labels.as_ref().clone(),
+                        Some(Gc::new(mc, fallback)),
+                    );
+                    let new_lambda = Value::Lambda({
+                        let l =
+                            Lambda::Compiled(Gc::new(mc, CompiledLambda::new(c.arity, new_chunk)));
+                        if let Some(uid) = c.upvalue_id {
+                            l.label(mc, uid)
+                        } else {
+                            l
+                        }
+                    })
+                    .into_ptr(mc);
+                    // self-reference magic
+                    *self_ref.borrow_mut(mc) = *new_lambda.borrow();
+                    // Switch the value on the down-low
+                    new_lambda
+                } else {
+                    // no self-reference done, so don't do any work
+                    value
+                }
+            } else {
+                value
+            }
+        }
+
         // Try to find the library to start the import process
         if let Some(modl) = self.local_world.modules.get(&library_name).cloned() {
             let mut import_symbols: FxHashSet<_> =
@@ -1645,13 +1702,16 @@ impl<'gc> Compiler<'gc> {
             // for each of the remaining symbols, search for them in the library, erroring if the symbol isn't found, then
             // get the mapped version of the symbol, and store it at that name
             for symbol in import_symbols {
+                let mapped_symbol = import_mapping.get(&symbol).copied().unwrap_or(symbol);
                 if let Some(v) = modl.exported_items.get(&Static(symbol)).cloned() {
-                    let mapped_symbol = import_mapping.get(&symbol).copied().unwrap_or(symbol);
                     match v {
-                        ExportItem::Value(val) => {
+                        ExportItem::Value(mut value) => {
+                            if mapped_symbol != symbol {
+                                value = self_ref_lambda_fix(mc, symbol, value);
+                            }
                             self._current_env()
                                 .borrow_mut(mc)
-                                .define(mc, mapped_symbol, val, true)
+                                .define(mc, mapped_symbol, value, true)
                                 .map_err(|_| ImportError::FailedToDefine(mapped_symbol))?;
                         }
                         ExportItem::Macro(syntax) => {
@@ -1664,7 +1724,7 @@ impl<'gc> Compiler<'gc> {
                     }
                 } else {
                     Err(ImportError::NameNotFound {
-                        name: Box::from(interner.resolve(&symbol)),
+                        name: Box::from(interner.resolve(&mapped_symbol)),
                     })?
                 }
             }
@@ -1684,15 +1744,18 @@ impl<'gc> Compiler<'gc> {
                 if let Some(syntax) = modl.syntax(interner, symbol) {
                     // Define a macro in scope
                     self.define_macro(mapped_symbol, syntax);
-                } else if let Some(val) = modl.value(mc, interner.resolve(&symbol)) {
+                } else if let Some(mut value) = modl.value(mc, interner.resolve(&symbol)) {
                     // freeze a module imported value (TODO check how this actually impacts things)
+                    if mapped_symbol != symbol {
+                        value = self_ref_lambda_fix(mc, symbol, value);
+                    }
                     self._current_env()
                         .borrow_mut(mc)
-                        .define(mc, mapped_symbol, val, true)
+                        .define(mc, mapped_symbol, value, true)
                         .map_err(|_| ImportError::FailedToDefine(mapped_symbol))?;
                 } else {
                     Err(ImportError::NameNotFound {
-                        name: Box::from(interner.resolve(&symbol)),
+                        name: Box::from(interner.resolve(&mapped_symbol)),
                     })?
                 }
             }

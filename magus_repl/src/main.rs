@@ -25,6 +25,9 @@ mod datum_printer;
 struct Cli {
     /// Input file to read (use `-` for stdin, and not present to use REPL mode)
     file: Option<String>,
+    /// Read code case-insensitively (by default)
+    #[arg(long, short = 'i')]
+    case_insensitive: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -36,10 +39,10 @@ fn main() -> anyhow::Result<()> {
             // Find a good way to display compiled data (using the visitor)
             todo!("read from standard input")
         } else {
-            execute_file(file)
+            execute_file(file, args.case_insensitive)
         }
     } else {
-        repl()
+        repl(args.case_insensitive)
     }
 }
 
@@ -136,8 +139,10 @@ fn compile(source: impl AsRef<str>) -> Result<Module, Vec<GeneralParserError>> {
 }
 
 /// Executes a given module
+#[expect(clippy::too_many_arguments)]
 fn execute(
     source: impl AsRef<str>,
+    case_insensitive: bool,
     module: &Module,
     interpreter: &mut Interpreter,
     compiler: &CompilerHandle,
@@ -158,7 +163,7 @@ fn execute(
     // then execute that chunk on a new thread
     let chunk: Result<_, anyhow::Error> =
         interpreter.compiler_context(compiler, |mc, compiler, value_pointers, interner| {
-            let programs = ("repl.scm", module).parse_program(mc, interner, false)?;
+            let programs = ("repl.scm", module).parse_program(mc, interner, case_insensitive)?;
             let mut ecc = ExternalCompilerContext {
                 includer: &NullIncluder,
                 world,
@@ -301,7 +306,7 @@ fn repl_stuff() -> (Interpreter, World) {
     (interpreter, world)
 }
 
-fn execute_file(path: impl AsRef<std::path::Path>) -> anyhow::Result<()> {
+fn execute_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> anyhow::Result<()> {
     let path = path.as_ref();
     let source = std::fs::read_to_string(path).context("failed to read input file")?;
 
@@ -312,6 +317,7 @@ fn execute_file(path: impl AsRef<std::path::Path>) -> anyhow::Result<()> {
             let thread = interpreter.new_empty_thread();
             execute(
                 source,
+                case_insensitive,
                 &module,
                 &mut interpreter,
                 &compiler,
@@ -341,7 +347,7 @@ fn execute_file(path: impl AsRef<std::path::Path>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn repl() -> anyhow::Result<()> {
+fn repl(case_insensitive: bool) -> anyhow::Result<()> {
     let mut readline = Reedline::create()
         .with_history(Box::new(
             SqliteBackedHistory::with_file("history.local.db".into(), None, None)
@@ -437,6 +443,7 @@ fn repl() -> anyhow::Result<()> {
 
                         execute(
                             src,
+                            case_insensitive,
                             &module,
                             &mut interpreter,
                             &compiler,

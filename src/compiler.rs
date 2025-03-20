@@ -18,6 +18,20 @@ use crate::{
     runtime::lambda::{CompiledLambda, CompiledLambdaPtr, Lambda},
 };
 
+/// List of Scheme feature identifiers that we support
+pub const FEATURES: &[&str] = &[
+    "magus",
+    "r7rs",
+    "exact-closed",
+    "ieee-float",
+    "full-unicode",
+    // "ratios", // not yet
+];
+/// Calculate the feature identifier for \<name-version>
+pub fn name_version_feature() -> Box<str> {
+    format!("magus-{}", env!("CARGO_PKG_VERSION")).into_boxed_str()
+}
+
 mod program_parsers;
 pub use program_parsers::GeneralParseErrors;
 

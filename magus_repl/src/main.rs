@@ -308,7 +308,7 @@ fn repl_stuff() -> (Interpreter, World) {
     world
         .insert(
             LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme base)),
-            stdlib::base::Base,
+            stdlib::base::Base::default(),
         )
         .expect("failed to define scheme base module");
     (interpreter, world)

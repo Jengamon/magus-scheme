@@ -21,8 +21,8 @@ pub use conditionals::If;
 pub use define::{Define, SetBang};
 pub use procedures::{
     Add, Apply, Ascending, Caar, Cadr, CallCc, Car, Cdar, Cddr, Cdr, Cons, Descending, Divide,
-    Equal, Exact, Inexact, IsEq, IsEqv, IsNull, IsPair, MonotonicAscending, MonotonicDescending,
-    Multiply, Subtract, Values,
+    Equal, Exact, Features, Inexact, IsEq, IsEqv, IsNull, IsPair, MonotonicAscending,
+    MonotonicDescending, Multiply, Subtract, Values,
 };
 pub use quote::Quote;
 
@@ -167,7 +167,13 @@ impl Syntax for Lambda {
 }
 
 /// (scheme base) module
-pub struct Base;
+#[derive(Default)]
+pub struct Base {
+    /// Any additional features (features) should provide and runtime cond-expand should expand
+    // TODO Add a slot for where compile-time cond-expand should place additional features (probably in
+    // LibraryDeclarationContext)
+    pub additional_features: Vec<Box<str>>,
+}
 
 impl Module for Base {
     fn all_symbols(&self, interner: &mut lasso::Rodeo) -> HashSet<lasso::Spur> {
@@ -204,6 +210,7 @@ impl Module for Base {
             "apply",
             "exact",
             "inexact",
+            "features",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -252,6 +259,7 @@ impl Module for Base {
             "apply" => lambda!(Apply),
             "exact" => lambda!(Exact),
             "inexact" => lambda!(Inexact),
+            "features" => lambda!(Features::from_iter(self.additional_features.clone())),
             _ => None,
         }
     }
@@ -279,11 +287,11 @@ pub fn register_module(
 ) -> anyhow::Result<()> {
     let name = LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme base));
     // Insert our module into the given world.
-    world.insert(name.clone(), Base)?;
+    world.insert(name.clone(), Base::default())?;
     // This is the world used to compile the Scheme implementation of things.
     let world = {
         let mut world = World::default();
-        world.insert(name.clone(), Base)?;
+        world.insert(name.clone(), Base::default())?;
         world
     };
     interpreter.try_enter(|mc, arena, interner| {

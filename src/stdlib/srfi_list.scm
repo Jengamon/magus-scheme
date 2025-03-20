@@ -1,5 +1,6 @@
 ; implementation of some things for SRFI 1
 ; TODO will we need SRFI 0 (conditional code)?
+; ANSWER no, b/c in R7RS it's built-in
 (import (scheme base))
 (begin
   (define (filter check xs)

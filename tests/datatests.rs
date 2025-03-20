@@ -30,7 +30,7 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
     let mut test_world = World::default();
     test_world.insert(
         LibraryName::from_iter(library_name!(interp.interner_mut() => scheme base)),
-        stdlib::base::Base,
+        stdlib::base::Base::default(),
     )?;
     let includer = NullIncluder;
     let comp = interp.new_compiler();
@@ -194,7 +194,7 @@ fn compile_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()
     let mut test_world = World::default();
     test_world.insert(
         LibraryName::from_iter(library_name!(interner => scheme base)),
-        stdlib::base::Base,
+        stdlib::base::Base::default(),
     )?;
     let mut chunk_text = None;
     let mut error_text = None;

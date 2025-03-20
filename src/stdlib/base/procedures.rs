@@ -1,6 +1,6 @@
 // TODO Split, if this file gets too large, into separate files
 pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, MonotonicDescending};
-pub use control::{Apply, CallCc};
+pub use control::{Apply, CallCc, Features};
 pub use conversions::{Exact, Inexact};
 pub use equality::{IsEq, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
@@ -68,11 +68,12 @@ mod equality {
 
 mod control {
     use crate::{
-        Value,
+        Value, compiler,
         runtime::{
             convert::IntoValue as _,
             lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
         },
+        value::ConsCell,
     };
     use either::Either;
     use gc_arena::{Collect, Gc};
@@ -201,6 +202,56 @@ mod control {
                 },
                 Either::Right(cont) => LambdaReturn::Continue { cont, args },
             })
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Features {
+        additional_features: Vec<Box<str>>,
+    }
+
+    impl<I: AsRef<str>> FromIterator<I> for Features {
+        fn from_iter<T: IntoIterator<Item = I>>(iter: T) -> Self {
+            Self {
+                additional_features: Vec::from_iter(
+                    iter.into_iter().map(|s| Box::from(s.as_ref())),
+                ),
+            }
+        }
+    }
+
+    impl NativeLambda for Features {
+        fn arity(&self) -> Arity {
+            Arity::Exact(0)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            _args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let mut features: Vec<_> = compiler::FEATURES
+                .iter()
+                .map(|f| ctx.interner.get_or_intern_static(f))
+                .collect();
+            features.push(ctx.interner.get_or_intern(compiler::name_version_feature()));
+            features.extend(
+                self.additional_features
+                    .iter()
+                    .map(|s| ctx.interner.get_or_intern(s)),
+            );
+
+            let list = ConsCell::from_iter(
+                &ctx,
+                ctx.thread_ctx.null_value,
+                features
+                    .into_iter()
+                    .map(|s| Value::Symbol(s.into()).into_ptr(&ctx))
+                    .collect::<Vec<_>>(),
+            );
+
+            Ok(LambdaReturn::Return(vec![list]))
         }
     }
 }

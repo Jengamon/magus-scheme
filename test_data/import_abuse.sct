@@ -1,0 +1,18 @@
+---
+#t
+---
+; import abuse
+;
+; idk what else to say
+(import
+    (rename
+        (prefix (scheme base) define)
+        (definedefine define))
+    (rename
+        (only
+            (prefix
+                (except (scheme base) lambda) wop-)
+            wop-values wop-null?)
+        (wop-null? values)))
+(define x (definelambda () (definequote ())))
+(values (x))

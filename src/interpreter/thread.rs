@@ -153,12 +153,25 @@ impl Eq for ThreadFrame<'_> {}
 
 impl std::fmt::Debug for ThreadFrame<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ThreadFrame")
+        let mut debug = f.debug_struct("ThreadFrame");
+        debug
             .field("args", &self.args)
             .field("exception", &self.exception)
             .field("bottom", &self.bottom)
-            .field("execution", &self.kind())
-            .finish_non_exhaustive()
+            .field("execution", &self.kind());
+        if let Execution::Bytecode {
+            arity,
+            pc,
+            upvalue_index,
+            ..
+        } = &self.execution
+        {
+            debug
+                .field("arity", arity)
+                .field("pc", pc)
+                .field("upvalue_index", upvalue_index);
+        }
+        debug.finish_non_exhaustive()
     }
 }
 
@@ -646,6 +659,17 @@ impl<'gc> Thread<'gc> {
             // We just dump execution
             self.frames.clear();
         } else {
+            // self.frames = c.frames.to_vec();
+            // TODO The above would work but for upvalues (and dynamic-wind handling TODO). Figure out why.
+            // "Duh". The continuation at capture might not have an upvalue_index assigned at capture, while the current continuation
+            // *might*. What is the behavior expected of a continuation call?
+            // My idea is that the continuation copies the upvalue indices (if not present) of the current frame (if
+            // at the start) or the previous frame (if there was an index), something to the effect of:
+            // c.frames.iter()
+            // .scan(last_upvalue_index, |upvalue_index, f| if f.upvalue_index.is_none() { ThreadFrame{upvalue_index, ..f} } else { *upvalue_index = f.upvalue_index; f }).collect()
+            // then we create dynamic-wind frames as necessary on top of these frames, where the handler copies the upvalue_index of the frame it comes from.
+            // Then the frames we just created, together with the dynamic-wind frames generated from all frames (including the current ones) *replace* the current frames
+            // (this is why we "cheat" then the continuation is empty, at that point, we only have to handle dynamic-wind)
             todo!("continuation handling {c:?}")
         }
     }

@@ -119,24 +119,6 @@ pub struct Program<'gc> {
     pub source: Option<SourceData>,
 }
 
-// impl<'gc> Program<'gc> {
-//     pub fn display<R: lasso::Resolver>(
-//         program: ProgramPtr<'gc>,
-//         resolver: R,
-//     ) -> DisplayableProgram<'gc, R> {
-//         DisplayableProgram {
-//             program,
-//             resolver: Rc::new(resolver),
-//         }
-//     }
-// }
-
-// #[derive(Debug)]
-// pub struct DisplayableProgram<'gc, R: lasso::Resolver> {
-//     program: ProgramPtr<'gc>,
-//     resolver: Rc<R>,
-// }
-
 // TODO Provide nice ways of "mutation" that create new programs
 // (or just provide a visitor API that instead can return a value)
 
@@ -145,62 +127,6 @@ impl<'gc> Program<'gc> {
         Self { data, source }
     }
 }
-
-// pub trait ProgramVisitor {
-//     fn visit_program_data(&mut self, program: &ProgramData<'_>) {
-//         match program {
-//             ProgramData::Integer(int) => self.visit_integer(*int),
-//             ProgramData::Inexact(inexact) => self.visit_inexact(*inexact),
-//             ProgramData::String(string_id) => self.visit_string(*string_id),
-//             ProgramData::Symbol(symbol_id) => self.visit_symbol(*symbol_id),
-//             ProgramData::Bool(b) => self.visit_bool(*b),
-//             ProgramData::Char(c) => self.visit_char(*c),
-//             ProgramData::Labeled { label, item } => self.visit_labeled(*label, *item),
-//             ProgramData::LabelRef(label_ref) => self.visit_label_ref(*label_ref),
-//             ProgramData::EmptyList => self.visit_empty_list(),
-//             ProgramData::List { head, body } => self.visit_list(*head, body.as_slice()),
-//             ProgramData::DottedList { pre_dot, dot } => {
-//                 self.visit_dotted_list(pre_dot.as_slice(), *dot)
-//             }
-//         }
-//     }
-//     fn visit_program(&mut self, ptr: ProgramPtr<'_>) {
-//         self.visit_program_data(&ptr.data)
-//     }
-//     fn visit_integer(&mut self, integer: i64) {
-//         let _ = integer;
-//     }
-//     fn visit_inexact(&mut self, inexact: f64) {
-//         let _ = inexact;
-//     }
-//     fn visit_string(&mut self, string_id: lasso::Spur) {
-//         let _ = string_id;
-//     }
-//     fn visit_symbol(&mut self, symbol_id: lasso::Spur) {
-//         let _ = symbol_id;
-//     }
-//     fn visit_bool(&mut self, b: bool) {
-//         let _ = b;
-//     }
-//     fn visit_char(&mut self, c: char) {
-//         let _ = c;
-//     }
-//     fn visit_labeled(&mut self, label: usize, item: ProgramPtr<'_>) {
-//         let _ = (label, item);
-//     }
-//     fn visit_label_ref(&mut self, label_ref: usize) {
-//         let _ = label_ref;
-//     }
-//     fn visit_empty_list(&mut self) {}
-//     fn visit_list(&mut self, head: ListHead<'_>, body: &[ProgramPtr<'_>]) {
-//         let _ = (head, body);
-//     }
-//     fn visit_dotted_list(&mut self, pre_dot: &[ProgramPtr<'_>], dot: ProgramPtr<'_>) {
-//         let _ = (pre_dot, dot);
-//     }
-// }
-
-// TODO If we use/had specialization, we maybe could provide default impls if T: Default
 
 pub trait ParseProgram {
     type Error;
@@ -211,21 +137,6 @@ pub trait ParseProgram {
         case_insensitive: bool,
     ) -> Result<Vec<ProgramPtr<'gc>>, Self::Error>;
 }
-
-// TODO impl IntoProgram for GAst types (Module, Datum, etc.)
-
-/*
-NOTE Nah
-TODO Prevent the definition of macros of any primitive form, meaning:
-define
-lambda
-if
-set!
-(when/if supported) include, include-ci
-
-then provide Rust-side impls for the rest of the standard library (and/or mix it with
-Scheme-impls)
-*/
 
 pub struct SyntaxContext<'a, 'gc> {
     pub mc: &'a Mutation<'gc>,
@@ -300,7 +211,7 @@ pub enum SyntaxReturn<'gc> {
     Code(Box<[Bytecode]>),
     /// This is a transformer that can be used by a syntax item
     /// to transform code
-    Transformer(Gc<'gc, dyn Transformer<'gc>>),
+    Transformer(TransformerPtr<'gc>),
 }
 
 impl<'gc> SyntaxReturn<'gc> {
@@ -779,12 +690,19 @@ pub enum ImportSet {
         set: Arc<ImportSet>,
         symbols: Arc<[lasso::Spur]>,
     },
-    // TODO other import specs: prefix, rename
+    Prefix {
+        set: Arc<ImportSet>,
+        prefix: Arc<str>,
+    },
+    Rename {
+        set: Arc<ImportSet>,
+        rename_pairs: Arc<[(lasso::Spur, lasso::Spur)]>,
+    },
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum ImportSetError {
-    #[error("not an import set: {0:?}")]
+    #[error("not an import set")]
     NotImportSet(Option<SourceData>),
     #[error("not a valid library name")]
     InvalidLibraryName(Option<SourceData>),
@@ -887,16 +805,79 @@ impl ImportSet {
                 ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == except) => {
                     Err(ImportSetError::NotImportSet(ptr.source))
                 }
-                ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == prefix) =>
+                ListHead::Program(p)
+                    if matches!(&p.data, ProgramData::Symbol(s) if *s == prefix)
+                        && body.len() == 2
+                        && matches!(body[1].data, ProgramData::Symbol(_)) =>
                 {
                     // read first body param as an import set, and the second as a prefix to prepend
                     // can only specify those 2
-                    todo!()
+                    let source = ImportSet::convert(body[0], interner)?;
+                    let ProgramData::Symbol(prefix_sym) = body[1].data else {
+                        unreachable!()
+                    };
+                    let prefix = Arc::<str>::from(interner.resolve(&prefix_sym));
+
+                    Ok(ImportSet::Prefix {
+                        set: Arc::new(source),
+                        prefix,
+                    })
+                }
+                ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == prefix) => {
+                    Err(ImportSetError::NotImportSet(ptr.source))
+                }
+                ListHead::Program(p)
+                    if matches!(&p.data, ProgramData::Symbol(s) if *s == rename)
+                        && !body.iter().skip(1).any(|p| {
+                            !matches!(&p.data, ProgramData::List {
+                                body, ..
+                            } if body.len() == 1 )
+                        }) =>
+                {
+                    // so we *don't* actually handle the happy path conditions in the if above, because it's too annoying, so we'll
+                    // just error out here
+                    //
+                    // read first body param as an import set, and the rest *must* be pairs of sym1 and sym2
+                    let source = ImportSet::convert(body[0], interner)?;
+                    let rename_pairs = body
+                        .iter()
+                        .skip(1)
+                        .map(|p| {
+                            let ProgramData::List { head, body } = &p.data else {
+                                // we buy this at least
+
+                                unreachable!()
+                            };
+                            // we know body[0] is the only element of body, but we don't know what it is (as well as the head)
+                            // so generate those spurs
+                            let head_spur = match head {
+                                ListHead::Import => interner.get_or_intern_static("import"),
+                                ListHead::DefineLibrary => {
+                                    interner.get_or_intern_static("define-library")
+                                }
+                                ListHead::Program(p) => match p.data {
+                                    ProgramData::Symbol(s) => s,
+                                    _ => return Err(ImportSetError::NotImportSet(ptr.source)),
+                                },
+                            };
+                            let body_spur = match body[0].data {
+                                ProgramData::Symbol(s) => s,
+                                _ => return Err(ImportSetError::NotImportSet(ptr.source)),
+                            };
+
+                            Ok((head_spur, body_spur))
+                        })
+                        .collect::<Result<Arc<_>, _>>()?;
+
+                    Ok(ImportSet::Rename {
+                        set: Arc::new(source),
+                        rename_pairs,
+                    })
                 }
                 ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == rename) =>
                 {
                     // read first body param as an import set, and the rest *must* be pairs of sym1 and sym2
-                    todo!()
+                    Err(ImportSetError::NotImportSet(ptr.source))
                 }
                 ListHead::Program(p)
                     if matches!(&p.data, ProgramData::Symbol(_) | ProgramData::Integer(_))
@@ -1473,203 +1454,253 @@ impl<'gc> Compiler<'gc> {
                 ImportSet::Name(ln) => Some(ln.clone()),
                 ImportSet::Only { set, .. } => get_library_name(set.as_ref()),
                 ImportSet::Except { set, .. } => get_library_name(set.as_ref()),
+                ImportSet::Prefix { set, .. } => get_library_name(set.as_ref()),
+                ImportSet::Rename { set, .. } => get_library_name(set.as_ref()),
             }
         }
 
-        macro_rules! import_lib {
-            (full $library_name:expr) => {
-                if let Some(modl) = self.local_world.modules.get($library_name).cloned() {
-                    for symbol in modl.exported_items.keys() {
-                        if let Some(v) = modl.exported_items.get(symbol).cloned() {
-                            match v {
-                                ExportItem::Value(val) => {
-                                    self._current_env().borrow_mut(mc).define(mc, **symbol, val, true).map_err(|_| ImportError::FailedToDefine(**symbol))?;
-                                }
-                                ExportItem::Macro(syntax) => {
-                                    self.define_macro(**symbol, syntax);
-                                }
-                                ExportItem::Transformer(tptr) => {
-                                    let mcr = self.install_transformer(tptr);
-                                    self.define_macro(**symbol, mcr);
-                                }
-                            }
+        // TODO We want an inverse solver?
+        // Get a library from a library name
+        // Then get all the terms that are defined in that library, and bubble up.
+
+        let Some(library_name) = get_library_name(import_set) else {
+            unreachable!("[ICE] import set did not specify a library name");
+        };
+
+        if from_code && !library_name.is_valid() {
+            return Err(ImportError::InvalidImport);
+        }
+
+        // Unrecurive import set
+        enum ImportOperations {
+            Only {
+                include: FxHashSet<lasso::Spur>,
+            },
+            Except {
+                exclude: FxHashSet<lasso::Spur>,
+            },
+            Prefix {
+                prefix: Arc<str>,
+            },
+            Rename {
+                rename: FxHashMap<lasso::Spur, lasso::Spur>,
+            },
+        }
+
+        fn unrecurivize(set: &ImportSet) -> impl IntoIterator<Item = ImportOperations> {
+            match set {
+                ImportSet::Name(_) => vec![],
+                ImportSet::Only { set, symbols } => std::iter::once(ImportOperations::Only {
+                    include: symbols.iter().copied().collect(),
+                })
+                .chain(unrecurivize(set))
+                .collect(),
+                ImportSet::Except { set, symbols } => std::iter::once(ImportOperations::Except {
+                    exclude: symbols.iter().copied().collect(),
+                })
+                .chain(unrecurivize(set))
+                .collect(),
+                ImportSet::Prefix { set, prefix } => std::iter::once(ImportOperations::Prefix {
+                    prefix: Arc::clone(prefix),
+                })
+                .chain(unrecurivize(set))
+                .collect(),
+                ImportSet::Rename { set, rename_pairs } => {
+                    std::iter::once(ImportOperations::Rename {
+                        rename: rename_pairs.iter().copied().collect(),
+                    })
+                    .chain(unrecurivize(set))
+                    .collect()
+                }
+            }
+        }
+
+        // Get an inside-out list of the operations to get from the set of all symbols in the library to
+        // a mapping of specific symbols to import -> what name to import them under
+        let operations = {
+            let mut ops: Vec<_> = unrecurivize(import_set).into_iter().collect();
+            ops.reverse();
+            ops
+        };
+
+        /// Apply operations in the given order, failing on an invalid operation, with the result being in the set and map
+        /// given
+        fn resolve_operations(
+            ops: impl IntoIterator<Item = ImportOperations>,
+            symbols: &mut FxHashSet<lasso::Spur>,
+            mapping: &mut FxHashMap<lasso::Spur, lasso::Spur>,
+            interner: &mut lasso::Rodeo,
+        ) -> Result<(), ImportError> {
+            for op in ops {
+                match op {
+                    ImportOperations::Only { include } => {
+                        // Reverse map the include set into import terms
+                        let include: FxHashSet<_> = include
+                            .iter()
+                            .map(|exp| {
+                                mapping
+                                    .iter()
+                                    .find_map(|(k, v)| if v == exp { Some(*k) } else { None })
+                                    .unwrap_or(*exp)
+                            })
+                            .collect();
+                        if !include.is_subset(symbols) {
+                            let include_not_symbols = include.difference(symbols);
+                            return Err(ImportError::NamesNotFound {
+                                names: include_not_symbols
+                                    .map(|i| Box::from(interner.resolve(i)))
+                                    .collect(),
+                            });
                         }
-                        else {
-                            Err(ImportError::NameNotFound{ name: Box::from(interner.resolve(&symbol))})?
+                        *symbols = include;
+                    }
+                    ImportOperations::Except { exclude } => {
+                        // Reverse map the include set into import terms
+                        let exclude: FxHashSet<_> = exclude
+                            .iter()
+                            .map(|exp| {
+                                mapping
+                                    .iter()
+                                    .find_map(|(k, v)| if v == exp { Some(*k) } else { None })
+                                    .unwrap_or(*exp)
+                            })
+                            .collect();
+                        if !exclude.is_subset(symbols) {
+                            let exclude_not_symbols = exclude.difference(symbols);
+                            return Err(ImportError::NamesNotFound {
+                                names: exclude_not_symbols
+                                    .map(|i| Box::from(interner.resolve(i)))
+                                    .collect(),
+                            });
+                        }
+                        *symbols = symbols.difference(&exclude).copied().collect();
+                    }
+                    ImportOperations::Rename { rename } => {
+                        // Given rename < RF -> RT
+                        // If RF reversed mapped is not in symbols, that is an error.
+                        // Otherwise, change the mapping entry of RF to RT
+                        let (keyed, not_found): (FxHashSet<_>, _) = rename
+                            .keys()
+                            .map(|exp| {
+                                mapping
+                                    .iter()
+                                    .find_map(|(k, v)| if v == exp { Some(*k) } else { None })
+                                    .ok_or(*exp)
+                            })
+                            .partition(Result::is_ok);
+                        if !not_found.is_empty() {
+                            return Err(ImportError::NamesNotFound {
+                                names: not_found
+                                    .into_iter()
+                                    .map(|r| Box::from(interner.resolve(&r.unwrap_err())))
+                                    .collect(),
+                            });
+                        }
+                        let keyed: FxHashSet<_> = keyed.into_iter().map(|r| r.unwrap()).collect();
+                        if !keyed.is_subset(symbols) {
+                            let keyed_not_symbols = keyed.difference(symbols);
+                            return Err(ImportError::NamesNotFound {
+                                names: keyed_not_symbols
+                                    .map(|i| Box::from(interner.resolve(i)))
+                                    .collect(),
+                            });
+                        }
+                        let mapped = rename
+                            .iter()
+                            .map(|(exp, v)| {
+                                let map = mapping
+                                    .iter()
+                                    .find_map(|(k, v)| if v == exp { Some(*k) } else { None })
+                                    .unwrap_or(*exp);
+                                (map, *v)
+                            })
+                            .collect::<Vec<_>>();
+                        mapping.extend(mapped);
+                    }
+                    ImportOperations::Prefix { prefix } => {
+                        //
+                        for (_, v) in mapping.iter_mut() {
+                            let source = interner.resolve(v);
+                            let prefixed = interner.get_or_intern(format!("{prefix}{source}"));
+                            *v = prefixed;
                         }
                     }
-                    Ok(())
-                } else if let Some(modl) = world.library($library_name) {
-                    for symbol in modl.all_symbols(interner) {
-                        // try  to import as a syntax, then as a value, and fail the module if
-                        // a name doesn't exist
-                        if let Some(syntax) = modl.syntax(interner, symbol) {
-                            // Define a macro in scope
-                            self.define_macro(symbol, syntax);
-                        } else if let Some(val) = modl.value(mc, interner.resolve(&symbol)) {
-                            // freeze a module imported value (TODO check how this actually impacts things)
+                }
+            }
+            Ok(())
+        }
+
+        // Try to find the library to start the import process
+        if let Some(modl) = self.local_world.modules.get(&library_name).cloned() {
+            let mut import_symbols: FxHashSet<_> =
+                modl.exported_items.keys().map(|s| **s).collect();
+            let mut import_mapping: FxHashMap<_, _> =
+                import_symbols.iter().map(|s| (*s, *s)).collect();
+            resolve_operations(
+                operations,
+                &mut import_symbols,
+                &mut import_mapping,
+                interner,
+            )?;
+            // for each of the remaining symbols, search for them in the library, erroring if the symbol isn't found, then
+            // get the mapped version of the symbol, and store it at that name
+            for symbol in import_symbols {
+                if let Some(v) = modl.exported_items.get(&Static(symbol)).cloned() {
+                    let mapped_symbol = import_mapping.get(&symbol).copied().unwrap_or(symbol);
+                    match v {
+                        ExportItem::Value(val) => {
                             self._current_env()
                                 .borrow_mut(mc)
-                                .define(mc, symbol, val, true).map_err(|_| ImportError::FailedToDefine(symbol))?;
-                        } else {
-                            Err(ImportError::NameNotFound{ name: Box::from(interner.resolve(&symbol))})?
+                                .define(mc, mapped_symbol, val, true)
+                                .map_err(|_| ImportError::FailedToDefine(mapped_symbol))?;
+                        }
+                        ExportItem::Macro(syntax) => {
+                            self.define_macro(mapped_symbol, syntax);
+                        }
+                        ExportItem::Transformer(tptr) => {
+                            let mcr = self.install_transformer(tptr);
+                            self.define_macro(mapped_symbol, mcr);
                         }
                     }
-                    Ok(())
                 } else {
-                    Err(ImportError::LibraryNotFound($library_name.to_string(interner)))
+                    Err(ImportError::NameNotFound {
+                        name: Box::from(interner.resolve(&symbol)),
+                    })?
                 }
-            };
-            (only $set:expr, $symbols:expr) => {
-                {
-                    let Some(library_name) = get_library_name($set) else {
-                        unreachable!("[ICE] import set did not specify a library name");
-                    };
-                    if let Some(modl) = self.local_world.modules.get(&library_name).cloned() {
-                        for symbol in $symbols.iter().copied() {
-                            if let Some(v) = modl.exported_items.get(&Static(symbol)).cloned() {
-                                match v {
-                                    ExportItem::Value(val) => {
-                                        self._current_env()
-                                            .borrow_mut(mc)
-                                            .define(mc, symbol, val, true)
-                                            .map_err(|_| ImportError::FailedToDefine(symbol))?;
-                                    }
-                                    ExportItem::Macro(syntax) => {
-                                        self.define_macro(symbol, syntax);
-                                    }
-                                    ExportItem::Transformer(tptr) => {
-                                        let mcr = self.install_transformer(tptr);
-                                        self.define_macro(symbol, mcr);
-                                    }
-                                }
-                            }
-                            else {
-                                Err(ImportError::NameNotFound{ name: Box::from(interner.resolve(&symbol))})?
-                            }
-                        }
-                        Ok(())
-                    } else if let Some(modl) = world.library(&library_name) {
-                        for symbol in $symbols.iter().copied() {
-                            // dbg!(&symbol);
-                            // try to import as a syntax, then as a value, and fail the module if
-                            // a name doesn't exist
-                            if let Some(syntax) = modl.syntax(interner, symbol) {
-                                // Define a macro in scope
-                                self.define_macro(symbol, syntax);
-                            } else if let Some(val) = modl.value(mc, interner.resolve(&symbol)) {
-                                // freeze a module imported value (TODO check how this actually impacts things)
-                                self._current_env()
-                                    .borrow_mut(mc)
-                                    .define(mc, symbol, val, true)
-                                    .map_err(|_| ImportError::FailedToDefine(symbol))?;
-                            } else {
-                                Err(ImportError::NameNotFound{ name: Box::from(interner.resolve(&symbol))})?
-                            }
-                        }
-                        Ok(())
-                    } else {
-                        Err(ImportError::LibraryNotFound(library_name.to_string(interner)))
-                    }
-                }
-            };
-            (except $set:expr, $symbols:expr) => {
-                {
-                    let Some(library_name) = get_library_name($set) else {
-                        unreachable!("[ICE] import set did not specify a library name");
-                    };
-                    let except_set: FxHashSet<_> = $symbols.iter().copied().collect();
-                    if let Some(modl) = self.local_world.modules.get(&library_name).cloned() {
-                        let all: FxHashSet<_> = modl.exported_items.keys().map(|s| **s).collect();
-                        if !except_set.is_subset(&all) {
-                            let names = except_set.difference(&all).map(|s| Box::from(interner.resolve(&s))).collect();
-                            Err(ImportError::NamesNotFound { names })?
-                        }
-                        for symbol in all.difference(&except_set).copied() {
-                            if let Some(v) = modl.exported_items.get(&Static(symbol)).cloned() {
-                                match v {
-                                    ExportItem::Value(val) => {
-                                        self._current_env()
-                                            .borrow_mut(mc)
-                                            .define(mc, symbol, val, true)
-                                            .map_err(|_| ImportError::FailedToDefine(symbol))?;
-                                    }
-                                    ExportItem::Macro(syntax) => {
-                                        self.define_macro(symbol, syntax);
-                                    }
-                                    ExportItem::Transformer(tptr) => {
-                                        let mcr = self.install_transformer(tptr);
-                                        self.define_macro(symbol, mcr);
-                                    }
-                                }
-                            }
-                            else {
-                                Err(ImportError::NameNotFound{ name: Box::from(interner.resolve(&symbol))})?
-                            }
-                        }
-                        Ok(())
-                    } else if let Some(modl) = world.library(&library_name) {
-                        let all: FxHashSet<_> = modl.all_symbols(interner).into_iter().collect();
-                        if !except_set.is_subset(&all) {
-                            let names = except_set.difference(&all).map(|s| Box::from(interner.resolve(&s))).collect();
-                            Err(ImportError::NamesNotFound { names })?
-                        }
-                        for symbol in all.difference(&except_set).copied() {
-                            // try to import as a syntax, then as a value, and fail the module if
-                            // a name doesn't exist
-                            if let Some(syntax) = modl.syntax(interner, symbol) {
-                                // Define a macro in scope
-                                self.define_macro(symbol, syntax);
-                            } else if let Some(val) = modl.value(mc, interner.resolve(&symbol)) {
-                                // freeze a module imported value (TODO check how this actually impacts things)
-                                self._current_env()
-                                    .borrow_mut(mc)
-                                    .define(mc, symbol, val, true)
-                                    .map_err(|_| ImportError::FailedToDefine(symbol))?;
-                            } else {
-                                Err(ImportError::NameNotFound{ name: Box::from(interner.resolve(&symbol))})?
-                            }
-                        }
-                        Ok(())
-                    } else {
-                        Err(ImportError::LibraryNotFound(Box::from(library_name.0.iter().map(|ni| match ni {
-                            LibraryNameItem::Identifier(i) => {
-                                interner.resolve(&i).to_string()
-                            }
-                            LibraryNameItem::Integer(i) => {
-                                i.to_string()
-                            }
-                        }).collect::<Vec<_>>().join(" ").as_str())))
-                    }
-                }
-            };
-        }
-
-        if from_code {
-            match import_set {
-                ImportSet::Name(library_name) if library_name.is_valid() => {
-                    import_lib!(full library_name)
-                }
-                ImportSet::Only { set, symbols } => {
-                    import_lib!(only set, symbols)
-                }
-                ImportSet::Except { set, symbols } => {
-                    import_lib!(except set, symbols)
-                }
-                _ => Err(ImportError::InvalidImport),
             }
+            Ok(())
+        } else if let Some(modl) = world.library(&library_name) {
+            let mut import_symbols: FxHashSet<_> = modl.all_symbols(interner).into_iter().collect();
+            let mut import_mapping: FxHashMap<_, _> =
+                import_symbols.iter().map(|s| (*s, *s)).collect();
+            resolve_operations(
+                operations,
+                &mut import_symbols,
+                &mut import_mapping,
+                interner,
+            )?;
+            for symbol in import_symbols {
+                let mapped_symbol = import_mapping.get(&symbol).copied().unwrap_or(symbol);
+                if let Some(syntax) = modl.syntax(interner, symbol) {
+                    // Define a macro in scope
+                    self.define_macro(mapped_symbol, syntax);
+                } else if let Some(val) = modl.value(mc, interner.resolve(&symbol)) {
+                    // freeze a module imported value (TODO check how this actually impacts things)
+                    self._current_env()
+                        .borrow_mut(mc)
+                        .define(mc, mapped_symbol, val, true)
+                        .map_err(|_| ImportError::FailedToDefine(mapped_symbol))?;
+                } else {
+                    Err(ImportError::NameNotFound {
+                        name: Box::from(interner.resolve(&symbol)),
+                    })?
+                }
+            }
+            Ok(())
         } else {
-            match import_set {
-                ImportSet::Name(library_name) => {
-                    import_lib!(full library_name)
-                }
-                ImportSet::Only { set, symbols } => {
-                    import_lib!(only set, symbols)
-                }
-                ImportSet::Except { set, symbols } => {
-                    import_lib!(except set, symbols)
-                }
-            }
+            Err(ImportError::LibraryNotFound(
+                library_name.to_string(interner),
+            ))
         }
     }
 

@@ -755,7 +755,7 @@ pub enum ImportSet {
 
 #[derive(thiserror::Error, Debug)]
 pub enum ImportSetError {
-    #[error("not an import set")]
+    #[error("not an import set: {0:?}")]
     NotImportSet(Option<SourceData>),
     #[error("not a valid library name")]
     InvalidLibraryName(Option<SourceData>),
@@ -838,7 +838,7 @@ impl ImportSet {
                 }
                 ListHead::Program(p)
                     if matches!(&p.data, ProgramData::Symbol(s) if *s == except)
-                        && body.len() > 2 =>
+                        && !body.is_empty() =>
                 {
                     // read first body param as an import set, and the rest *must* be symbols
                     let source = ImportSet::convert(body[0], interner)?;
@@ -900,6 +900,8 @@ pub enum ImportError {
     // TODO store module name in error
     #[error("name not found in module: {name}")]
     NameNotFound { name: Box<str> },
+    #[error("names not found in module: {}", names.clone().join(", "))]
+    NamesNotFound { names: Vec<Box<str>> },
     #[error("failed to define symbol")]
     FailedToDefine(lasso::Spur),
 }
@@ -1490,6 +1492,76 @@ impl<'gc> Compiler<'gc> {
                     }
                 }
             };
+            (except $set:expr, $symbols:expr) => {
+                {
+                    let Some(library_name) = get_library_name($set) else {
+                        unreachable!("[ICE] import set did not specify a library name");
+                    };
+                    let except_set: FxHashSet<_> = $symbols.iter().copied().collect();
+                    if let Some(modl) = self.local_world.modules.get(&library_name).cloned() {
+                        let all: FxHashSet<_> = modl.exported_items.keys().map(|s| **s).collect();
+                        if !except_set.is_subset(&all) {
+                            let names = except_set.difference(&all).map(|s| Box::from(interner.resolve(&s))).collect();
+                            Err(ImportError::NamesNotFound { names })?
+                        }
+                        for symbol in all.difference(&except_set).copied() {
+                            if let Some(v) = modl.exported_items.get(&Static(symbol)).cloned() {
+                                match v {
+                                    ExportItem::Value(val) => {
+                                        self._current_env()
+                                            .borrow_mut(mc)
+                                            .define(mc, symbol, val, true)
+                                            .map_err(|_| ImportError::FailedToDefine(symbol))?;
+                                    }
+                                    ExportItem::Macro(syntax) => {
+                                        self.define_macro(symbol, syntax);
+                                    }
+                                    ExportItem::Transformer(tptr) => {
+                                        let mcr = self.install_transformer(tptr);
+                                        self.define_macro(symbol, mcr);
+                                    }
+                                }
+                            }
+                            else {
+                                Err(ImportError::NameNotFound{ name: Box::from(interner.resolve(&symbol))})?
+                            }
+                        }
+                        Ok(())
+                    } else if let Some(modl) = world.library(&library_name) {
+                        let all: FxHashSet<_> = modl.all_symbols(interner).into_iter().collect();
+                        if !except_set.is_subset(&all) {
+                            let names = except_set.difference(&all).map(|s| Box::from(interner.resolve(&s))).collect();
+                            Err(ImportError::NamesNotFound { names })?
+                        }
+                        for symbol in all.difference(&except_set).copied() {
+                            // try to import as a syntax, then as a value, and fail the module if
+                            // a name doesn't exist
+                            if let Some(syntax) = modl.syntax(interner, symbol) {
+                                // Define a macro in scope
+                                self.define_macro(symbol, syntax);
+                            } else if let Some(val) = modl.value(mc, interner.resolve(&symbol)) {
+                                // freeze a module imported value (TODO check how this actually impacts things)
+                                self._current_env()
+                                    .borrow_mut(mc)
+                                    .define(mc, symbol, val, true)
+                                    .map_err(|_| ImportError::FailedToDefine(symbol))?;
+                            } else {
+                                Err(ImportError::NameNotFound{ name: Box::from(interner.resolve(&symbol))})?
+                            }
+                        }
+                        Ok(())
+                    } else {
+                        Err(ImportError::LibraryNotFound(Box::from(library_name.0.iter().map(|ni| match ni {
+                            LibraryNameItem::Identifier(i) => {
+                                interner.resolve(&i).to_string()
+                            }
+                            LibraryNameItem::Integer(i) => {
+                                i.to_string()
+                            }
+                        }).collect::<Vec<_>>().join(" ").as_str())))
+                    }
+                }
+            };
         }
 
         if from_code {
@@ -1500,7 +1572,9 @@ impl<'gc> Compiler<'gc> {
                 ImportSet::Only { set, symbols } => {
                     import_lib!(only set, symbols)
                 }
-                ImportSet::Except { set, symbols } => todo!(),
+                ImportSet::Except { set, symbols } => {
+                    import_lib!(except set, symbols)
+                }
                 _ => Err(ImportError::InvalidImport),
             }
         } else {
@@ -1511,7 +1585,9 @@ impl<'gc> Compiler<'gc> {
                 ImportSet::Only { set, symbols } => {
                     import_lib!(only set, symbols)
                 }
-                ImportSet::Except { set, symbols } => todo!(),
+                ImportSet::Except { set, symbols } => {
+                    import_lib!(except set, symbols)
+                }
             }
         }
     }
@@ -1662,29 +1738,12 @@ impl<'gc> Compiler<'gc> {
                 // add as a "dependency" any reference it or its lambdas depend on? (as long as it is not defined in scope!)
                 binding.read(|v| {
                     if let Value::Lambda(Lambda::Compiled(c)) = *v.borrow() {
-                        // TODO Go through the bytecode of the chunk, then any lambda chunks it defines and
-                        // find any references that refer to things in global scope. Make a copy of
-                        // compiled lambda and add these values to that lambda as a fallback for when name
-                        // resolution fails to the proper chunk (so dependent lambda chunks should properly get their own, separate
-                        // fallbacks)
-                        fn get_defined(code: &[Bytecode]) -> fxhash::FxHashSet<lasso::Spur> {
-                            code.iter()
-                                .filter_map(|c| {
-                                    if let Bytecode::Define { symbol } = c {
-                                        Some(*symbol)
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect()
-                        }
                         fn get_global_refs(
                             name: lasso::Spur,
                             code: &[Bytecode],
                         ) -> fxhash::FxHashSet<lasso::Spur> {
                             // defined not as an argument
-                            let defined: fxhash::FxHashSet<_> = code
-                                .iter()
+                            code.iter()
                                 .scan(fxhash::FxHashSet::from_iter([name]), |s, c| {
                                     if let Bytecode::Define { symbol } = c {
                                         s.insert(*symbol);
@@ -1700,19 +1759,7 @@ impl<'gc> Compiler<'gc> {
                                     }
                                 })
                                 .flatten()
-                                .collect();
-                            // let referenced = code
-                            //     .iter()
-                            //     .filter_map(|c| {
-                            //         if let Bytecode::Reference { symbol } = c {
-                            //             Some(*symbol)
-                            //         } else {
-                            //             None
-                            //         }
-                            //     })
-                            //     .collect::<fxhash::FxHashSet<_>>();
-                            // eprintln!("{:?} {:#?}", &code, &defined);
-                            defined
+                                .collect()
                         }
 
                         fn get_deps(

@@ -675,6 +675,8 @@ pub enum CompileError {
     LibraryDeclaration(#[from] LibraryDeclarationError),
     #[error(transparent)]
     Library(#[from] DefineLibraryError),
+    #[error("import resolves to overlapping names")]
+    DoubleImport(Box<[lasso::Spur]>),
 }
 
 #[derive(Debug, Clone)]
@@ -1097,6 +1099,8 @@ pub enum DefineLibraryError {
     IncludeParse(#[from] StringProgramError),
     #[error("library declaration error: {0}")]
     LibraryDeclaration(#[from] LibraryDeclarationError),
+    #[error("import resolves to overlapping names")]
+    DoubleImport(Box<[lasso::Spur]>),
 }
 
 /// Context struct for things external to the compiler
@@ -1195,6 +1199,7 @@ impl<'gc> Compiler<'gc> {
         programs: impl IntoIterator<Item = ProgramPtr<'gc>>,
     ) -> Result<ChunkPtr<'gc>, CompileError> {
         let mut programs = programs.into_iter().peekable();
+        let mut imported = FxHashSet::default();
 
         // Module system loop
         loop {
@@ -1220,7 +1225,13 @@ impl<'gc> Compiler<'gc> {
                         .collect();
 
                     for set in sets? {
-                        self.import(mc, ecc.interner, ecc.world, &set, true)?;
+                        let imports = self.import(mc, ecc.interner, ecc.world, &set, true)?;
+                        if !imported.is_disjoint(&imports) {
+                            return Err(CompileError::DoubleImport(Box::from_iter(
+                                imported.intersection(&imports).copied(),
+                            )));
+                        }
+                        imported.extend(imports);
                     }
                 }
                 Some(p)
@@ -1445,7 +1456,7 @@ impl<'gc> Compiler<'gc> {
         world: &World,
         import_set: &ImportSet,
         from_code: bool,
-    ) -> Result<(), ImportError> {
+    ) -> Result<FxHashSet<lasso::Spur>, ImportError> {
         // - import: reads import sets, then searches local world (once implemented), then world, for the requisite module
         //   and importing the names as defined by spec
 
@@ -1701,13 +1712,13 @@ impl<'gc> Compiler<'gc> {
             )?;
             // for each of the remaining symbols, search for them in the library, erroring if the symbol isn't found, then
             // get the mapped version of the symbol, and store it at that name
-            for symbol in import_symbols {
-                let mapped_symbol = import_mapping.get(&symbol).copied().unwrap_or(symbol);
-                if let Some(v) = modl.exported_items.get(&Static(symbol)).cloned() {
+            for symbol in &import_symbols {
+                let mapped_symbol = import_mapping.get(symbol).copied().unwrap_or(*symbol);
+                if let Some(v) = modl.exported_items.get(&Static(*symbol)).cloned() {
                     match v {
                         ExportItem::Value(mut value) => {
-                            if mapped_symbol != symbol {
-                                value = self_ref_lambda_fix(mc, symbol, value);
+                            if mapped_symbol != *symbol {
+                                value = self_ref_lambda_fix(mc, *symbol, value);
                             }
                             self._current_env()
                                 .borrow_mut(mc)
@@ -1728,7 +1739,10 @@ impl<'gc> Compiler<'gc> {
                     })?
                 }
             }
-            Ok(())
+            Ok(import_symbols
+                .into_iter()
+                .map(|i| import_mapping.get(&i).copied().unwrap())
+                .collect())
         } else if let Some(modl) = world.library(&library_name) {
             let mut import_symbols: FxHashSet<_> = modl.all_symbols(interner).into_iter().collect();
             let mut import_mapping: FxHashMap<_, _> =
@@ -1739,15 +1753,15 @@ impl<'gc> Compiler<'gc> {
                 &mut import_mapping,
                 interner,
             )?;
-            for symbol in import_symbols {
-                let mapped_symbol = import_mapping.get(&symbol).copied().unwrap_or(symbol);
-                if let Some(syntax) = modl.syntax(interner, symbol) {
+            for symbol in &import_symbols {
+                let mapped_symbol = import_mapping.get(symbol).copied().unwrap_or(*symbol);
+                if let Some(syntax) = modl.syntax(interner, *symbol) {
                     // Define a macro in scope
                     self.define_macro(mapped_symbol, syntax);
-                } else if let Some(mut value) = modl.value(mc, interner.resolve(&symbol)) {
+                } else if let Some(mut value) = modl.value(mc, interner.resolve(symbol)) {
                     // freeze a module imported value (TODO check how this actually impacts things)
-                    if mapped_symbol != symbol {
-                        value = self_ref_lambda_fix(mc, symbol, value);
+                    if mapped_symbol != *symbol {
+                        value = self_ref_lambda_fix(mc, *symbol, value);
                     }
                     self._current_env()
                         .borrow_mut(mc)
@@ -1759,7 +1773,10 @@ impl<'gc> Compiler<'gc> {
                     })?
                 }
             }
-            Ok(())
+            Ok(import_symbols
+                .into_iter()
+                .map(|i| import_mapping.get(&i).copied().unwrap())
+                .collect())
         } else {
             Err(ImportError::LibraryNotFound(
                 library_name.to_string(interner),
@@ -1824,6 +1841,7 @@ impl<'gc> Compiler<'gc> {
             )),
         );
 
+        let mut imported = FxHashSet::default();
         let mut export_sets = HashSet::new();
         // TODO Supporting IncludeLibraryDeclarations means this should be a while let loop, and it
         // should pop from a Vec (we will reverse the declarations once in the vec?)
@@ -1886,7 +1904,14 @@ impl<'gc> Compiler<'gc> {
             match decl {
                 LibraryDeclaration::Import(imports) => {
                     for import in imports.iter() {
-                        lib_compiler.import(mc, ecc.interner, ecc.world, import, true)?;
+                        let imports =
+                            lib_compiler.import(mc, ecc.interner, ecc.world, import, true)?;
+                        if !imported.is_disjoint(&imports) {
+                            return Err(DefineLibraryError::DoubleImport(Box::from_iter(
+                                imported.intersection(&imports).copied(),
+                            )));
+                        }
+                        imported.extend(imports);
                     }
                 }
                 LibraryDeclaration::IncludeLibraryDeclarations(filenames) => {

@@ -28,12 +28,13 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
 
     let mut interp = Interpreter::default();
     let mut test_world = World::default();
-    test_world.insert(
-        LibraryName::from_iter(library_name!(interp.interner_mut() => scheme base)),
-        stdlib::base::Base::default(),
-    )?;
+    // test_world.insert(
+    //     LibraryName::from_iter(library_name!(interp.interner_mut() => scheme base)),
+    //     stdlib::base::Base::default(),
+    // )?;
     let includer = NullIncluder;
     let comp = interp.new_compiler();
+    stdlib::base::register_module(&mut interp, &comp, &mut test_world, Some(10_000))?;
     let file_name = format!("{path}.scm");
     let chunk =
         interp.compiler_context::<anyhow::Error>(&comp, |mc, comp, value_pointers, interner| {
@@ -192,6 +193,7 @@ fn compile_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()
 
     let mut interner = lasso::Rodeo::new();
     let mut test_world = World::default();
+    // TODO Convert to use Interpreter to get easy `register_module`
     test_world.insert(
         LibraryName::from_iter(library_name!(interner => scheme base)),
         stdlib::base::Base::default(),

@@ -1,7 +1,7 @@
 use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
 
 use crate::{
-    Fuel, Value,
+    Fuel, Value, ValueType,
     bytecode::{Bytecode, ChunkPtr, ImportFallback, SourceData},
     compiler::World,
     environment::{StackEnvironment, StackEnvironmentPtr},
@@ -807,7 +807,7 @@ impl<'gc> Thread<'gc> {
                     }
                     // The core of execution
                     let inst = chunk.code[*pc];
-                    // eprintln!("EXEC >> {inst:?}");
+                    // eprintln!("EXEC >> {inst:?} {:?}", self.stack.len());
                     fuel.consume(inst.cost());
                     match inst {
                         Bytecode::PushNull => {
@@ -1111,10 +1111,49 @@ impl<'gc> Thread<'gc> {
                             }
                         }
                         Bytecode::Splice => {
-                            // Pop the top list (which is the list to splice) and then the bottom list (the list to splice into)
-                            // Find the null at the end of the bottom list...(which has to be a list...) and replace the pointer
-                            // pointing to null with a pointer pointing to the top list, then push the bottom list back to stack
-                            todo!()
+                            // Pop the list (which is the list to splice) and then the value to append to the list
+                            // Find the null at the end of the list... and replace the pointer
+                            // pointing to null with a pointer pointing to the value as a list, then push the list back to stack
+                            let Some(list_value) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+                            let Some(value) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+                            let Value::Cons(list) = *list_value.borrow() else {
+                                make_error!(SchemeErrorType::WrongValue {
+                                    inst: "splice",
+                                    expected: ValueType::Cons,
+                                    kind: (*list_value.borrow()).value_type()
+                                });
+                                continue;
+                            };
+
+                            let Some(mut values): Option<Vec<_>> = list
+                                .list_values(list_value, ctx.null_value)
+                                .map(|v| v.into_iter().collect())
+                            else {
+                                make_error!(SchemeErrorType::ExpectedList("splice"));
+                                continue;
+                            };
+                            let value_list = match *value.borrow() {
+                                Value::Cons(c) if !Gc::ptr_eq(value, ctx.null_value) => {
+                                    if let Some(v) = c.list_values(value, ctx.null_value) {
+                                        v.into_iter().collect()
+                                    } else {
+                                        make_error!(SchemeErrorType::ExpectedList("splice"));
+                                        continue;
+                                    }
+                                }
+                                _ => vec![value],
+                            };
+                            values.extend(value_list);
+
+                            self.stack
+                                .push(ConsCell::from_iter(&ctx, ctx.null_value, values));
+                            advance_to_next_inst!();
                         }
                         Bytecode::Define { symbol } => {
                             // Pop the top of stack and store in env as a given symbol

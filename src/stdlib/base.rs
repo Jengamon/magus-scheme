@@ -26,7 +26,7 @@ pub use procedures::{
     Equal, Exact, Features, Gcd, Inexact, IsEq, IsEqv, IsExact, IsInexact, IsNull, IsPair,
     MonotonicAscending, MonotonicDescending, Multiply, Subtract, Values,
 };
-pub use quote::Quote;
+pub use quote::{Quasiquote, Quote};
 
 use super::Formals;
 
@@ -188,6 +188,7 @@ impl Module for Base {
             "define",
             "lambda",
             "quote",
+            "quasiquote",
             "set!",
             "if",
             "+",
@@ -286,6 +287,7 @@ impl Module for Base {
             "set!" => Some(Arc::new(SetBang)),
             "if" => Some(Arc::new(If)),
             "quote" => Some(Arc::new(Quote)),
+            "quasiquote" => Some(Arc::new(Quasiquote)),
             "define-syntax" => Some(Arc::new(DefineSyntax)),
             "syntax-rules" => Some(Arc::new(SyntaxRules)),
             "and" => Some(Arc::new(And)),

@@ -4,6 +4,7 @@ use std::rc::Rc;
 use gc_arena::{Collect, Gc};
 
 use crate::{
+    ValueType,
     bytecode::Bytecode,
     interpreter::thread::{Execution, LambdaException},
     value::ResolvedValue,
@@ -74,6 +75,14 @@ pub enum SchemeErrorType<'gc> {
     UndefinedHole(usize),
     #[error("instruction expected more values: {0:?}")]
     NoValue(#[collect(require_static)] Bytecode),
+    #[error("{inst} expected a {expected:?}, but found a {kind:?}")]
+    WrongValue {
+        inst: &'static str,
+        expected: ValueType,
+        kind: ValueType,
+    },
+    #[error("{0} expected a list, got a non-list cons")]
+    ExpectedList(&'static str),
 }
 
 impl SchemeErrorType<'_> {

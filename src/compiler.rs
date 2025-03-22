@@ -1471,18 +1471,17 @@ impl<'gc> Compiler<'gc> {
                     .find(|s| s.variables_defined.borrow().contains_key(spur))
                 {
                     // Some parent scope defined this name, use it's already assigned upvalue, or defined a new upvalue
-                    let upvalue_index = if let Some(v) =
-                        dbg!(&scope.variables_defined).borrow().get(spur).unwrap()
-                    {
-                        *v
-                    } else {
-                        let upvalue_index = ctx.add_upvalue();
-                        scope
-                            .variables_defined
-                            .borrow_mut()
-                            .insert(*spur, Some(upvalue_index));
-                        upvalue_index
-                    };
+                    let upvalue_index =
+                        if let Some(v) = &scope.variables_defined.borrow().get(spur).unwrap() {
+                            *v
+                        } else {
+                            let upvalue_index = ctx.add_upvalue();
+                            scope
+                                .variables_defined
+                                .borrow_mut()
+                                .insert(*spur, Some(upvalue_index));
+                            upvalue_index
+                        };
 
                     return Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
                         index: upvalue_index,
@@ -1646,7 +1645,10 @@ impl<'gc> Compiler<'gc> {
             symbols: &mut FxHashSet<lasso::Spur>,
             mapping: &mut FxHashMap<lasso::Spur, lasso::Spur>,
             interner: &mut lasso::Rodeo,
+            found: &FxHashSet<lasso::Spur>,
+            fail_on_missing: bool,
         ) -> Result<(), ImportError> {
+            let subset_symbols: FxHashSet<_> = symbols.union(found).copied().collect();
             for op in ops {
                 match op {
                     ImportOperations::Only { include } => {
@@ -1660,13 +1662,17 @@ impl<'gc> Compiler<'gc> {
                                     .unwrap_or(*exp)
                             })
                             .collect();
-                        if !include.is_subset(symbols) {
-                            let include_not_symbols = include.difference(symbols);
-                            return Err(ImportError::NamesNotFound {
-                                names: include_not_symbols
-                                    .map(|i| Box::from(interner.resolve(i)))
-                                    .collect(),
-                            });
+                        if !include.is_subset(&subset_symbols) {
+                            let include_not_symbols = include.difference(&subset_symbols);
+                            if fail_on_missing {
+                                return Err(ImportError::NamesNotFound {
+                                    names: include_not_symbols
+                                        .map(|i| Box::from(interner.resolve(i)))
+                                        .collect(),
+                                });
+                            } else {
+                                return Ok(());
+                            }
                         }
                         *symbols = include;
                     }
@@ -1681,13 +1687,17 @@ impl<'gc> Compiler<'gc> {
                                     .unwrap_or(*exp)
                             })
                             .collect();
-                        if !exclude.is_subset(symbols) {
-                            let exclude_not_symbols = exclude.difference(symbols);
-                            return Err(ImportError::NamesNotFound {
-                                names: exclude_not_symbols
-                                    .map(|i| Box::from(interner.resolve(i)))
-                                    .collect(),
-                            });
+                        if !exclude.is_subset(&subset_symbols) {
+                            let exclude_not_symbols = exclude.difference(&subset_symbols);
+                            if fail_on_missing {
+                                return Err(ImportError::NamesNotFound {
+                                    names: exclude_not_symbols
+                                        .map(|i| Box::from(interner.resolve(i)))
+                                        .collect(),
+                                });
+                            } else {
+                                return Ok(());
+                            }
                         }
                         *symbols = symbols.difference(&exclude).copied().collect();
                     }
@@ -1705,21 +1715,29 @@ impl<'gc> Compiler<'gc> {
                             })
                             .partition(Result::is_ok);
                         if !not_found.is_empty() {
-                            return Err(ImportError::NamesNotFound {
-                                names: not_found
-                                    .into_iter()
-                                    .map(|r| Box::from(interner.resolve(&r.unwrap_err())))
-                                    .collect(),
-                            });
+                            if fail_on_missing {
+                                return Err(ImportError::NamesNotFound {
+                                    names: not_found
+                                        .into_iter()
+                                        .map(|r| Box::from(interner.resolve(&r.unwrap_err())))
+                                        .collect(),
+                                });
+                            } else {
+                                return Ok(());
+                            }
                         }
                         let keyed: FxHashSet<_> = keyed.into_iter().map(|r| r.unwrap()).collect();
-                        if !keyed.is_subset(symbols) {
-                            let keyed_not_symbols = keyed.difference(symbols);
-                            return Err(ImportError::NamesNotFound {
-                                names: keyed_not_symbols
-                                    .map(|i| Box::from(interner.resolve(i)))
-                                    .collect(),
-                            });
+                        if !keyed.is_subset(&subset_symbols) {
+                            let keyed_not_symbols = keyed.difference(&subset_symbols);
+                            if fail_on_missing {
+                                return Err(ImportError::NamesNotFound {
+                                    names: keyed_not_symbols
+                                        .map(|i| Box::from(interner.resolve(i)))
+                                        .collect(),
+                                });
+                            } else {
+                                return Ok(());
+                            }
                         }
                         let mapped = rename
                             .iter()
@@ -1818,6 +1836,8 @@ impl<'gc> Compiler<'gc> {
                 &mut import_symbols,
                 &mut import_mapping,
                 interner,
+                &names,
+                !world.has_library(&library_name),
             )?;
             // for each of the remaining symbols, search for them in the library, erroring if the symbol isn't found, then
             // get the mapped version of the symbol, and store it at that name
@@ -1842,17 +1862,15 @@ impl<'gc> Compiler<'gc> {
                             self.define_macro(mapped_symbol, mcr);
                         }
                     }
-                } else {
+                    names.insert(mapped_symbol);
+                } else if !world.has_library(&library_name) {
+                    // We fail name resolution if there is no native module corresponding to this
+                    // one, and the name was not found
                     Err(ImportError::NameNotFound {
                         name: Box::from(interner.resolve(&mapped_symbol)),
                     })?
                 }
             }
-            names.extend(
-                import_symbols
-                    .into_iter()
-                    .map(|i| import_mapping.get(&i).copied().unwrap()),
-            )
         }
 
         // Get native names
@@ -1866,18 +1884,20 @@ impl<'gc> Compiler<'gc> {
                 &mut import_symbols,
                 &mut import_mapping,
                 interner,
+                &names,
+                true,
             )?;
 
             // Import from the native library names that *haven't* been imported
-            for symbol in import_symbols.difference(&names) {
-                let mapped_symbol = import_mapping.get(symbol).copied().unwrap_or(*symbol);
-                if let Some(syntax) = modl.syntax(interner, *symbol) {
+            for symbol in import_symbols.difference(&names.clone()).copied() {
+                let mapped_symbol = import_mapping.get(&symbol).copied().unwrap_or(symbol);
+                if let Some(syntax) = modl.syntax(interner, symbol) {
                     // Define a macro in scope
                     self.define_macro(mapped_symbol, syntax);
-                } else if let Some(mut value) = modl.value(mc, interner.resolve(symbol)) {
+                } else if let Some(mut value) = modl.value(mc, interner.resolve(&symbol)) {
                     // freeze a module imported value (TODO check how this actually impacts things)
-                    if mapped_symbol != *symbol {
-                        value = self_ref_lambda_fix(mc, *symbol, value);
+                    if mapped_symbol != symbol {
+                        value = self_ref_lambda_fix(mc, symbol, value);
                     }
                     self._current_env()
                         .borrow_mut(mc)
@@ -1888,13 +1908,8 @@ impl<'gc> Compiler<'gc> {
                         name: Box::from(interner.resolve(&mapped_symbol)),
                     })?
                 }
+                names.insert(mapped_symbol);
             }
-
-            names.extend(
-                import_symbols
-                    .into_iter()
-                    .map(|i| import_mapping.get(&i).copied().unwrap()),
-            );
         }
 
         if !found_library {

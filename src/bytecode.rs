@@ -87,8 +87,8 @@ pub enum Bytecode {
     Call {
         args: usize,
     },
-    /// Splice the list at the top of the stack with the list below it, appending it to the list below, and leaving the
-    /// list below on the stack
+    /// Pop a list and a value, and append the value to the list, pushing the list back to
+    /// stack
     Splice,
 
     // Holes are the way to make self-referential datatypes

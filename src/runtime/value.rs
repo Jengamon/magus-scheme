@@ -648,6 +648,31 @@ impl<'gc> ConsCell<'gc> {
         true
     }
 
+    /// `None` if not a valid list
+    pub fn list_values(
+        &self,
+        self_ptr: ValuePtr<'gc>,
+        null_ptr: ValuePtr<'gc>,
+    ) -> Option<impl IntoIterator<Item = ValuePtr<'gc>> + use<'gc>> {
+        debug_assert!(self.is_list(self_ptr, null_ptr));
+        if Gc::ptr_eq(self_ptr, null_ptr) {
+            Some(vec![])
+        } else {
+            let car = self.car.unwrap_or(null_ptr);
+            let cdr = if let Some(v) = self.cdr {
+                match *v.borrow() {
+                    _ if Gc::ptr_eq(v, null_ptr) => Some(vec![]),
+                    Value::Cons(c) => c.list_values(v, null_ptr),
+                    _ => None,
+                }
+            } else {
+                Some(vec![])
+            };
+
+            Some(std::iter::once(car).chain(cdr?).collect::<Vec<_>>())
+        }
+    }
+
     /// Returns if a cons cell is a valid list
     ///
     /// # Parameters

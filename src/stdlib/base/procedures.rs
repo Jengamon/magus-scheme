@@ -231,11 +231,7 @@ mod control {
             ctx: NativeLambdaContext<'_, 'gc>,
             _args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
-            let mut features: Vec<_> = compiler::FEATURES
-                .iter()
-                .map(|f| ctx.interner.get_or_intern_static(f))
-                .collect();
-            features.push(ctx.interner.get_or_intern(compiler::name_version_feature()));
+            let mut features = compiler::Compiler::base_features(ctx.interner);
             features.extend(
                 self.additional_features
                     .iter()

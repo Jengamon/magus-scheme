@@ -3,6 +3,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     num::NonZero,
     rc::Rc,
+    str::FromStr as _,
     sync::Arc,
 };
 
@@ -30,6 +31,17 @@ pub const FEATURES: &[&str] = &[
 /// Calculate the feature identifier for \<name-version>
 pub fn name_version_feature() -> Box<str> {
     format!("magus-{}", env!("CARGO_PKG_VERSION")).into_boxed_str()
+}
+/// Calculate target dependant feature identifiers (target, os, arch)
+pub fn target_features() -> impl IntoIterator<Item = Box<str>> {
+    let target = target_triple::TARGET;
+    if let Ok(triple) = target_lexicon::Triple::from_str(target) {
+        let arch = triple.architecture.into_str();
+        let os = triple.operating_system.into_str();
+        [&arch, &os, target].into_iter().map(Box::from).collect()
+    } else {
+        vec![Box::from(target)]
+    }
 }
 
 mod program_parsers;
@@ -1206,6 +1218,21 @@ impl<'gc> Compiler<'gc> {
     /// Convenience function for cleaning up unused transformers
     pub fn cleanup(&mut self) {
         self.stash.cleanup();
+    }
+
+    /// Convenience function for generating the list of base features
+    pub fn base_features(interner: &mut lasso::Rodeo) -> Vec<lasso::Spur> {
+        let mut features: Vec<_> = FEATURES
+            .iter()
+            .map(|f| interner.get_or_intern_static(f))
+            .collect();
+        features.push(interner.get_or_intern(name_version_feature()));
+        features.extend(
+            target_features()
+                .into_iter()
+                .map(|i| interner.get_or_intern(i)),
+        );
+        features
     }
 
     /// Compile an list of programs into a [`Chunk`] (not allowing any imports)

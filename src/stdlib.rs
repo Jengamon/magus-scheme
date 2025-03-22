@@ -12,6 +12,13 @@ pub mod srfi;
 pub mod cxr {
     pub const MODULE_SRC: &str = include_str!("stdlib/scheme_cxr.scm");
 }
+// We support (scheme file) but if compiled for the wasm32-unknown-unknown
+// - We add it to the features returned by (features) and to the features understood by the compiler
+//   (ok, instead we use target-triple to add TARGET as a feature, so you can always see what platform you are compiling
+//   for) (and how we suport the os/arch is by using target-lexicon on this triple)
+// - TODO (scheme file) is not compiled. This will cause a break in compatibility, as (scheme r5rs) also
+//   exports methods from this module. We go for a close compatibility as possible, but here we have to break
+//   compatibility (however, we provide an easy way for code to check if this would be a problem)
 
 /// Data struct for formals
 #[derive(Debug, Collect)]

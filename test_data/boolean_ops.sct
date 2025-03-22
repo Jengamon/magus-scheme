@@ -1,0 +1,15 @@
+---
+#f
+4
+5
+#t
+#f
+---
+(import (only (scheme base) = and or values))
+(values
+	(and (= 0 1) bogus)
+	(and (= 0 0) 4)
+	(or 5 bogus)
+	(and)
+	(or)
+)

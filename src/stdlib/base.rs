@@ -17,6 +17,7 @@ use crate::{
     runtime::{convert::IntoValue, lambda},
 };
 
+pub use boolean::{And, Or};
 pub use conditionals::If;
 pub use define::{Define, SetBang};
 pub use macros::{DefineSyntax, SyntaxRules};
@@ -29,6 +30,7 @@ pub use quote::Quote;
 
 use super::Formals;
 
+mod boolean;
 mod conditionals;
 mod define;
 mod macros;
@@ -218,6 +220,8 @@ impl Module for Base {
             "inexact?",
             "define-syntax",
             "syntax-rules",
+            "and",
+            "or",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -284,6 +288,8 @@ impl Module for Base {
             "quote" => Some(Arc::new(Quote)),
             "define-syntax" => Some(Arc::new(DefineSyntax)),
             "syntax-rules" => Some(Arc::new(SyntaxRules)),
+            "and" => Some(Arc::new(And)),
+            "or" => Some(Arc::new(Or)),
             _ => None,
         }
     }

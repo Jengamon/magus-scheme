@@ -2,7 +2,7 @@
 ; Here we define things that are simple and wouldn't cause too much of a performance hit.
 ; We only have the relevant native modules available
 (import (scheme base))
-(export list not map)
+(export list not map memq memv)
 (begin
   (define (list . in) in)
   (define (not x) (if x #f #t))
@@ -10,6 +10,24 @@
     (if (null? (cdr xs))
         (cons (f (car xs)) '())
         (cons (f (car xs)) (map f (cdr xs)))))
+  (define (memq x lst)
+      (define (memq-iter a lst)
+          (if (null? lst)
+              #f
+              (if (eq? a (car lst))
+                  lst
+                  (memq-iter a (cdr lst)))))
+      (memq-iter x lst))
+  (define (memv x lst)
+      (define (memv-iter a lst)
+          (if (null? lst)
+              #f
+              (if (eqv? a (car lst))
+                  lst
+                  (memv-iter a (cdr lst)))))
+      (memv-iter x lst))
+  ; TODO member, which uses equal (does a length check, and should error if rest is too long,
+  ; so waiting on impls equal?, raise)
   (define-syntax when
     (syntax-rules ()
       ((when test result1 result2 ...) (if test (begin result1 result2 ...)))))

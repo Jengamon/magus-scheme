@@ -13,6 +13,7 @@ use crate::{
 #[derive(Debug, Clone, Copy, Collect)]
 #[collect(no_drop)]
 pub struct StackFrame<'gc> {
+    // TODO Add a label / some way of identifying the name of the procedure under evaluation
     // what range of text were we processing (or None if external)
     pub range: Option<(usize, usize)>,
     // what was executing on this frame?

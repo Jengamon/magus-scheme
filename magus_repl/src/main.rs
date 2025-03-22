@@ -10,7 +10,9 @@ use magus::{
     gc_arena::{Gc, RefLock},
     general_parser::GeneralParserError,
     interpreter::{CompilerHandle, Includer, Interpreter, ThreadHandle, ValueHandle},
-    library_name, stdlib, ContainsDatum, ExternalCompilerContext, Fuel, GAstNode, Module, Value,
+    library_name,
+    runtime::lambda::Lambda,
+    stdlib, ContainsDatum, ExternalCompilerContext, Fuel, GAstNode, Module, Value,
 };
 use reedline::{
     Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus, PromptViMode, Reedline,
@@ -204,6 +206,13 @@ fn execute(
                     chunk
                         .lambdas
                         .iter()
+                        .filter_map(|l| {
+                            if let Lambda::Compiled(l) = l {
+                                Some(l)
+                            } else {
+                                None
+                            }
+                        })
                         .flat_map(|l| l.chunk().code.iter().copied().collect::<Vec<_>>()),
                 ) {
                     match code {
@@ -231,7 +240,18 @@ fn execute(
                 }
                 println!("==END SYMBOLS==");
                 println!("==LAMBDAS==");
-                for (idx, l) in chunk.lambdas.iter().enumerate() {
+                for (idx, l) in chunk
+                    .lambdas
+                    .iter()
+                    .filter_map(|l| {
+                        if let Lambda::Compiled(l) = l {
+                            Some(l)
+                        } else {
+                            None
+                        }
+                    })
+                    .enumerate()
+                {
                     println!("==LAMBDA {idx}==");
                     for (idx, code) in l.chunk().code.iter().enumerate() {
                         println!("{idx:>3}: {code}")

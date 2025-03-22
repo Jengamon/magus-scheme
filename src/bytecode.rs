@@ -6,7 +6,7 @@ use std::{collections::HashMap, rc::Rc, sync::Arc};
 use fxhash::FxHashMap;
 use gc_arena::{Collect, Gc, Mutation, Static};
 
-use crate::{ValuePtr, environment::StackEnvironmentPtr, runtime::lambda::CompiledLambdaPtr};
+use crate::{ValuePtr, environment::StackEnvironmentPtr, runtime::lambda::Lambda};
 
 /*
 compiled form is at its root primitive forms:
@@ -263,7 +263,7 @@ pub struct Chunk<'gc> {
     #[collect(require_static)]
     pub constants: Rc<[Constant]>,
     /// lambdas this chunk defines
-    pub lambdas: Rc<[CompiledLambdaPtr<'gc>]>,
+    pub lambdas: Rc<[Lambda<'gc>]>,
     /// promises this chunk defines
     #[collect(require_static)]
     pub promises: Rc<[Box<[Bytecode]>]>,
@@ -291,7 +291,7 @@ impl<'gc> Chunk<'gc> {
         mc: &Mutation<'gc>,
         code: impl IntoIterator<Item = Bytecode>,
         constants: impl IntoIterator<Item = Constant>,
-        lambdas: impl IntoIterator<Item = CompiledLambdaPtr<'gc>>,
+        lambdas: impl IntoIterator<Item = Lambda<'gc>>,
         promises: impl IntoIterator<Item = Box<[Bytecode]>>,
         upvalues: usize,
         import_stack_env: StackEnvironmentPtr<'gc>,
@@ -316,7 +316,7 @@ impl<'gc> Chunk<'gc> {
         mc: &Mutation<'gc>,
         code: impl IntoIterator<Item = Bytecode>,
         constants: impl IntoIterator<Item = Constant>,
-        lambdas: impl IntoIterator<Item = CompiledLambdaPtr<'gc>>,
+        lambdas: impl IntoIterator<Item = Lambda<'gc>>,
         promises: impl IntoIterator<Item = Box<[Bytecode]>>,
         upvalues: usize,
         import_stack_env: StackEnvironmentPtr<'gc>,

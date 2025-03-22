@@ -12,818 +12,318 @@ Chunk {
         ),
     ],
     lambdas: [
-        CompiledLambda {
-            arity: Exact(
-                0,
-            ),
-            chunk: Chunk {
-                upvalues: 0,
-                constants: [
-                    Number(
-                        3,
-                    ),
-                    Number(
-                        2,
-                    ),
-                ],
-                lambdas: [],
-                promises: [],
-                import_env: RefLock(
-                    Environment {
-                        parent: Some(
-                            RefLock(
-                                Environment {
-                                    parent: None,
-                                    inner: RefLock(
-                                        EnvironmentInner {
-                                            values: {},
-                                        },
-                                    ),
-                                    is_frozen: false,
-                                },
-                            ),
-                        ),
-                        inner: RefLock(
-                            EnvironmentInner {
-                                values: {},
-                            },
-                        ),
-                        is_frozen: false,
-                    },
+        Compiled(
+            CompiledLambda {
+                arity: Exact(
+                    0,
                 ),
-                code: [
-                    PushConst {
-                        index: 0,
-                    },
-                    PushConst {
-                        index: 1,
-                    },
-                    Reference {
-                        symbol: Spur(8),
-                    },
-                    Call {
-                        args: 2,
-                    },
-                ],
-                labels: {
-                    0: SourceData {
-                        source_id: Spur(3),
-                        range: (
-                            48,
-                            55,
+                chunk: Chunk {
+                    upvalues: 0,
+                    constants: [
+                        Number(
+                            3,
                         ),
-                    },
-                },
-                fallback: None,
-            },
-            upvalue_id: None,
-        },
-        CompiledLambda {
-            arity: Exact(
-                1,
-            ),
-            chunk: Chunk {
-                upvalues: 0,
-                constants: [
-                    Number(
-                        3,
-                    ),
-                    Number(
-                        2,
-                    ),
-                ],
-                lambdas: [
-                    CompiledLambda {
-                        arity: Exact(
-                            0,
+                        Number(
+                            2,
                         ),
-                        chunk: Chunk {
-                            upvalues: 0,
-                            constants: [
-                                Number(
-                                    3,
-                                ),
-                                Number(
-                                    2,
-                                ),
-                            ],
-                            lambdas: [],
-                            promises: [],
-                            import_env: RefLock(
-                                Environment {
-                                    parent: Some(
-                                        RefLock(
-                                            Environment {
-                                                parent: None,
-                                                inner: RefLock(
-                                                    EnvironmentInner {
-                                                        values: {},
-                                                    },
-                                                ),
-                                                is_frozen: false,
+                    ],
+                    lambdas: [],
+                    promises: [],
+                    import_env: RefLock(
+                        Environment {
+                            parent: Some(
+                                RefLock(
+                                    Environment {
+                                        parent: None,
+                                        inner: RefLock(
+                                            EnvironmentInner {
+                                                values: {},
                                             },
                                         ),
-                                    ),
-                                    inner: RefLock(
-                                        EnvironmentInner {
-                                            values: {},
-                                        },
-                                    ),
-                                    is_frozen: false,
+                                        is_frozen: false,
+                                    },
+                                ),
+                            ),
+                            inner: RefLock(
+                                EnvironmentInner {
+                                    values: {},
                                 },
                             ),
-                            code: [
-                                PushConst {
-                                    index: 0,
-                                },
-                                PushConst {
-                                    index: 1,
-                                },
-                                Reference {
-                                    symbol: Spur(8),
-                                },
-                                Call {
-                                    args: 2,
-                                },
-                            ],
-                            labels: {
-                                0: SourceData {
-                                    source_id: Spur(3),
-                                    range: (
-                                        48,
-                                        55,
-                                    ),
-                                },
-                            },
-                            fallback: None,
+                            is_frozen: false,
                         },
-                        upvalue_id: None,
-                    },
-                ],
-                promises: [],
-                import_env: RefLock(
-                    Environment {
-                        parent: Some(
-                            RefLock(
-                                Environment {
-                                    parent: None,
-                                    inner: RefLock(
-                                        EnvironmentInner {
-                                            values: {},
-                                        },
-                                    ),
-                                    is_frozen: false,
-                                },
+                    ),
+                    code: [
+                        PushConst {
+                            index: 0,
+                        },
+                        PushConst {
+                            index: 1,
+                        },
+                        Reference {
+                            symbol: Spur(8),
+                        },
+                        Call {
+                            args: 2,
+                        },
+                    ],
+                    labels: {
+                        0: SourceData {
+                            source_id: Spur(3),
+                            range: (
+                                48,
+                                55,
                             ),
-                        ),
-                        inner: RefLock(
-                            EnvironmentInner {
-                                values: {},
-                            },
-                        ),
-                        is_frozen: false,
+                        },
                     },
+                    fallback: None,
+                },
+                upvalue_id: None,
+            },
+        ),
+        Compiled(
+            CompiledLambda {
+                arity: Exact(
+                    1,
                 ),
-                code: [
-                    FetchArg {
-                        index: 0,
-                    },
-                    Define {
-                        symbol: Spur(9),
-                    },
-                    Reference {
-                        symbol: Spur(9),
-                    },
-                    Reference {
-                        symbol: Spur(9),
-                    },
-                    Reference {
-                        symbol: Spur(8),
-                    },
-                    Call {
-                        args: 2,
-                    },
-                ],
-                labels: {
-                    2: SourceData {
-                        source_id: Spur(3),
-                        range: (
-                            69,
-                            76,
+                chunk: Chunk {
+                    upvalues: 0,
+                    constants: [
+                        Number(
+                            3,
                         ),
-                    },
-                },
-                fallback: None,
-            },
-            upvalue_id: None,
-        },
-        CompiledLambda {
-            arity: AtLeast(
-                1,
-            ),
-            chunk: Chunk {
-                upvalues: 0,
-                constants: [
-                    Number(
-                        3,
-                    ),
-                    Number(
-                        2,
-                    ),
-                ],
-                lambdas: [
-                    CompiledLambda {
-                        arity: Exact(
-                            0,
+                        Number(
+                            2,
                         ),
-                        chunk: Chunk {
-                            upvalues: 0,
-                            constants: [
-                                Number(
-                                    3,
+                    ],
+                    lambdas: [
+                        Compiled(
+                            CompiledLambda {
+                                arity: Exact(
+                                    0,
                                 ),
-                                Number(
-                                    2,
-                                ),
-                            ],
-                            lambdas: [],
-                            promises: [],
-                            import_env: RefLock(
-                                Environment {
-                                    parent: Some(
-                                        RefLock(
-                                            Environment {
-                                                parent: None,
-                                                inner: RefLock(
-                                                    EnvironmentInner {
-                                                        values: {},
+                                chunk: Chunk {
+                                    upvalues: 0,
+                                    constants: [
+                                        Number(
+                                            3,
+                                        ),
+                                        Number(
+                                            2,
+                                        ),
+                                    ],
+                                    lambdas: [],
+                                    promises: [],
+                                    import_env: RefLock(
+                                        Environment {
+                                            parent: Some(
+                                                RefLock(
+                                                    Environment {
+                                                        parent: None,
+                                                        inner: RefLock(
+                                                            EnvironmentInner {
+                                                                values: {},
+                                                            },
+                                                        ),
+                                                        is_frozen: false,
                                                     },
                                                 ),
-                                                is_frozen: false,
-                                            },
-                                        ),
-                                    ),
-                                    inner: RefLock(
-                                        EnvironmentInner {
-                                            values: {},
+                                            ),
+                                            inner: RefLock(
+                                                EnvironmentInner {
+                                                    values: {},
+                                                },
+                                            ),
+                                            is_frozen: false,
                                         },
                                     ),
-                                    is_frozen: false,
-                                },
-                            ),
-                            code: [
-                                PushConst {
-                                    index: 0,
-                                },
-                                PushConst {
-                                    index: 1,
-                                },
-                                Reference {
-                                    symbol: Spur(8),
-                                },
-                                Call {
-                                    args: 2,
-                                },
-                            ],
-                            labels: {
-                                0: SourceData {
-                                    source_id: Spur(3),
-                                    range: (
-                                        48,
-                                        55,
-                                    ),
-                                },
-                            },
-                            fallback: None,
-                        },
-                        upvalue_id: None,
-                    },
-                    CompiledLambda {
-                        arity: Exact(
-                            1,
-                        ),
-                        chunk: Chunk {
-                            upvalues: 0,
-                            constants: [
-                                Number(
-                                    3,
-                                ),
-                                Number(
-                                    2,
-                                ),
-                            ],
-                            lambdas: [
-                                CompiledLambda {
-                                    arity: Exact(
-                                        0,
-                                    ),
-                                    chunk: Chunk {
-                                        upvalues: 0,
-                                        constants: [
-                                            Number(
-                                                3,
-                                            ),
-                                            Number(
-                                                2,
-                                            ),
-                                        ],
-                                        lambdas: [],
-                                        promises: [],
-                                        import_env: RefLock(
-                                            Environment {
-                                                parent: Some(
-                                                    RefLock(
-                                                        Environment {
-                                                            parent: None,
-                                                            inner: RefLock(
-                                                                EnvironmentInner {
-                                                                    values: {},
-                                                                },
-                                                            ),
-                                                            is_frozen: false,
-                                                        },
-                                                    ),
-                                                ),
-                                                inner: RefLock(
-                                                    EnvironmentInner {
-                                                        values: {},
-                                                    },
-                                                ),
-                                                is_frozen: false,
-                                            },
-                                        ),
-                                        code: [
-                                            PushConst {
-                                                index: 0,
-                                            },
-                                            PushConst {
-                                                index: 1,
-                                            },
-                                            Reference {
-                                                symbol: Spur(8),
-                                            },
-                                            Call {
-                                                args: 2,
-                                            },
-                                        ],
-                                        labels: {
-                                            0: SourceData {
-                                                source_id: Spur(3),
-                                                range: (
-                                                    48,
-                                                    55,
-                                                ),
-                                            },
+                                    code: [
+                                        PushConst {
+                                            index: 0,
                                         },
-                                        fallback: None,
+                                        PushConst {
+                                            index: 1,
+                                        },
+                                        Reference {
+                                            symbol: Spur(8),
+                                        },
+                                        Call {
+                                            args: 2,
+                                        },
+                                    ],
+                                    labels: {
+                                        0: SourceData {
+                                            source_id: Spur(3),
+                                            range: (
+                                                48,
+                                                55,
+                                            ),
+                                        },
                                     },
-                                    upvalue_id: None,
+                                    fallback: None,
                                 },
-                            ],
-                            promises: [],
-                            import_env: RefLock(
-                                Environment {
-                                    parent: Some(
-                                        RefLock(
-                                            Environment {
-                                                parent: None,
-                                                inner: RefLock(
-                                                    EnvironmentInner {
-                                                        values: {},
-                                                    },
-                                                ),
-                                                is_frozen: false,
+                                upvalue_id: None,
+                            },
+                        ),
+                    ],
+                    promises: [],
+                    import_env: RefLock(
+                        Environment {
+                            parent: Some(
+                                RefLock(
+                                    Environment {
+                                        parent: None,
+                                        inner: RefLock(
+                                            EnvironmentInner {
+                                                values: {},
                                             },
                                         ),
-                                    ),
-                                    inner: RefLock(
-                                        EnvironmentInner {
-                                            values: {},
-                                        },
-                                    ),
-                                    is_frozen: false,
+                                        is_frozen: false,
+                                    },
+                                ),
+                            ),
+                            inner: RefLock(
+                                EnvironmentInner {
+                                    values: {},
                                 },
                             ),
-                            code: [
-                                FetchArg {
-                                    index: 0,
-                                },
-                                Define {
-                                    symbol: Spur(9),
-                                },
-                                Reference {
-                                    symbol: Spur(9),
-                                },
-                                Reference {
-                                    symbol: Spur(9),
-                                },
-                                Reference {
-                                    symbol: Spur(8),
-                                },
-                                Call {
-                                    args: 2,
-                                },
-                            ],
-                            labels: {
-                                2: SourceData {
-                                    source_id: Spur(3),
-                                    range: (
-                                        69,
-                                        76,
-                                    ),
-                                },
-                            },
-                            fallback: None,
+                            is_frozen: false,
                         },
-                        upvalue_id: None,
-                    },
-                ],
-                promises: [],
-                import_env: RefLock(
-                    Environment {
-                        parent: Some(
-                            RefLock(
-                                Environment {
-                                    parent: None,
-                                    inner: RefLock(
-                                        EnvironmentInner {
-                                            values: {},
-                                        },
-                                    ),
-                                    is_frozen: false,
-                                },
+                    ),
+                    code: [
+                        FetchArg {
+                            index: 0,
+                        },
+                        Define {
+                            symbol: Spur(9),
+                        },
+                        Reference {
+                            symbol: Spur(9),
+                        },
+                        Reference {
+                            symbol: Spur(9),
+                        },
+                        Reference {
+                            symbol: Spur(8),
+                        },
+                        Call {
+                            args: 2,
+                        },
+                    ],
+                    labels: {
+                        2: SourceData {
+                            source_id: Spur(3),
+                            range: (
+                                69,
+                                76,
                             ),
-                        ),
-                        inner: RefLock(
-                            EnvironmentInner {
-                                values: {},
-                            },
-                        ),
-                        is_frozen: false,
+                        },
                     },
+                    fallback: None,
+                },
+                upvalue_id: None,
+            },
+        ),
+        Compiled(
+            CompiledLambda {
+                arity: AtLeast(
+                    1,
                 ),
-                code: [
-                    FetchArg {
-                        index: 0,
-                    },
-                    Define {
-                        symbol: Spur(9),
-                    },
-                    FetchRest,
-                    Define {
-                        symbol: Spur(10),
-                    },
-                    Reference {
-                        symbol: Spur(9),
-                    },
-                    Reference {
-                        symbol: Spur(9),
-                    },
-                    Reference {
-                        symbol: Spur(9),
-                    },
-                    Reference {
-                        symbol: Spur(9),
-                    },
-                    Reference {
-                        symbol: Spur(10),
-                    },
-                    Reference {
-                        symbol: Spur(8),
-                    },
-                    Call {
-                        args: 5,
-                    },
-                ],
-                labels: {
-                    4: SourceData {
-                        source_id: Spur(3),
-                        range: (
-                            97,
-                            113,
+                chunk: Chunk {
+                    upvalues: 0,
+                    constants: [
+                        Number(
+                            3,
                         ),
-                    },
-                },
-                fallback: None,
-            },
-            upvalue_id: None,
-        },
-        CompiledLambda {
-            arity: Exact(
-                3,
-            ),
-            chunk: Chunk {
-                upvalues: 0,
-                constants: [
-                    Number(
-                        3,
-                    ),
-                    Number(
-                        2,
-                    ),
-                ],
-                lambdas: [
-                    CompiledLambda {
-                        arity: Exact(
-                            0,
+                        Number(
+                            2,
                         ),
-                        chunk: Chunk {
-                            upvalues: 0,
-                            constants: [
-                                Number(
-                                    3,
+                    ],
+                    lambdas: [
+                        Compiled(
+                            CompiledLambda {
+                                arity: Exact(
+                                    0,
                                 ),
-                                Number(
-                                    2,
-                                ),
-                            ],
-                            lambdas: [],
-                            promises: [],
-                            import_env: RefLock(
-                                Environment {
-                                    parent: Some(
-                                        RefLock(
-                                            Environment {
-                                                parent: None,
-                                                inner: RefLock(
-                                                    EnvironmentInner {
-                                                        values: {},
+                                chunk: Chunk {
+                                    upvalues: 0,
+                                    constants: [
+                                        Number(
+                                            3,
+                                        ),
+                                        Number(
+                                            2,
+                                        ),
+                                    ],
+                                    lambdas: [],
+                                    promises: [],
+                                    import_env: RefLock(
+                                        Environment {
+                                            parent: Some(
+                                                RefLock(
+                                                    Environment {
+                                                        parent: None,
+                                                        inner: RefLock(
+                                                            EnvironmentInner {
+                                                                values: {},
+                                                            },
+                                                        ),
+                                                        is_frozen: false,
                                                     },
                                                 ),
-                                                is_frozen: false,
-                                            },
-                                        ),
-                                    ),
-                                    inner: RefLock(
-                                        EnvironmentInner {
-                                            values: {},
+                                            ),
+                                            inner: RefLock(
+                                                EnvironmentInner {
+                                                    values: {},
+                                                },
+                                            ),
+                                            is_frozen: false,
                                         },
                                     ),
-                                    is_frozen: false,
-                                },
-                            ),
-                            code: [
-                                PushConst {
-                                    index: 0,
-                                },
-                                PushConst {
-                                    index: 1,
-                                },
-                                Reference {
-                                    symbol: Spur(8),
-                                },
-                                Call {
-                                    args: 2,
-                                },
-                            ],
-                            labels: {
-                                0: SourceData {
-                                    source_id: Spur(3),
-                                    range: (
-                                        48,
-                                        55,
-                                    ),
-                                },
-                            },
-                            fallback: None,
-                        },
-                        upvalue_id: None,
-                    },
-                    CompiledLambda {
-                        arity: Exact(
-                            1,
-                        ),
-                        chunk: Chunk {
-                            upvalues: 0,
-                            constants: [
-                                Number(
-                                    3,
-                                ),
-                                Number(
-                                    2,
-                                ),
-                            ],
-                            lambdas: [
-                                CompiledLambda {
-                                    arity: Exact(
-                                        0,
-                                    ),
-                                    chunk: Chunk {
-                                        upvalues: 0,
-                                        constants: [
-                                            Number(
-                                                3,
-                                            ),
-                                            Number(
-                                                2,
-                                            ),
-                                        ],
-                                        lambdas: [],
-                                        promises: [],
-                                        import_env: RefLock(
-                                            Environment {
-                                                parent: Some(
-                                                    RefLock(
-                                                        Environment {
-                                                            parent: None,
-                                                            inner: RefLock(
-                                                                EnvironmentInner {
-                                                                    values: {},
-                                                                },
-                                                            ),
-                                                            is_frozen: false,
-                                                        },
-                                                    ),
-                                                ),
-                                                inner: RefLock(
-                                                    EnvironmentInner {
-                                                        values: {},
-                                                    },
-                                                ),
-                                                is_frozen: false,
-                                            },
-                                        ),
-                                        code: [
-                                            PushConst {
-                                                index: 0,
-                                            },
-                                            PushConst {
-                                                index: 1,
-                                            },
-                                            Reference {
-                                                symbol: Spur(8),
-                                            },
-                                            Call {
-                                                args: 2,
-                                            },
-                                        ],
-                                        labels: {
-                                            0: SourceData {
-                                                source_id: Spur(3),
-                                                range: (
-                                                    48,
-                                                    55,
-                                                ),
-                                            },
+                                    code: [
+                                        PushConst {
+                                            index: 0,
                                         },
-                                        fallback: None,
+                                        PushConst {
+                                            index: 1,
+                                        },
+                                        Reference {
+                                            symbol: Spur(8),
+                                        },
+                                        Call {
+                                            args: 2,
+                                        },
+                                    ],
+                                    labels: {
+                                        0: SourceData {
+                                            source_id: Spur(3),
+                                            range: (
+                                                48,
+                                                55,
+                                            ),
+                                        },
                                     },
-                                    upvalue_id: None,
+                                    fallback: None,
                                 },
-                            ],
-                            promises: [],
-                            import_env: RefLock(
-                                Environment {
-                                    parent: Some(
-                                        RefLock(
-                                            Environment {
-                                                parent: None,
-                                                inner: RefLock(
-                                                    EnvironmentInner {
-                                                        values: {},
-                                                    },
-                                                ),
-                                                is_frozen: false,
-                                            },
-                                        ),
-                                    ),
-                                    inner: RefLock(
-                                        EnvironmentInner {
-                                            values: {},
-                                        },
-                                    ),
-                                    is_frozen: false,
-                                },
-                            ),
-                            code: [
-                                FetchArg {
-                                    index: 0,
-                                },
-                                Define {
-                                    symbol: Spur(9),
-                                },
-                                Reference {
-                                    symbol: Spur(9),
-                                },
-                                Reference {
-                                    symbol: Spur(9),
-                                },
-                                Reference {
-                                    symbol: Spur(8),
-                                },
-                                Call {
-                                    args: 2,
-                                },
-                            ],
-                            labels: {
-                                2: SourceData {
-                                    source_id: Spur(3),
-                                    range: (
-                                        69,
-                                        76,
-                                    ),
-                                },
+                                upvalue_id: None,
                             },
-                            fallback: None,
-                        },
-                        upvalue_id: None,
-                    },
-                    CompiledLambda {
-                        arity: AtLeast(
-                            1,
                         ),
-                        chunk: Chunk {
-                            upvalues: 0,
-                            constants: [
-                                Number(
-                                    3,
+                        Compiled(
+                            CompiledLambda {
+                                arity: Exact(
+                                    1,
                                 ),
-                                Number(
-                                    2,
-                                ),
-                            ],
-                            lambdas: [
-                                CompiledLambda {
-                                    arity: Exact(
-                                        0,
-                                    ),
-                                    chunk: Chunk {
-                                        upvalues: 0,
-                                        constants: [
-                                            Number(
-                                                3,
-                                            ),
-                                            Number(
-                                                2,
-                                            ),
-                                        ],
-                                        lambdas: [],
-                                        promises: [],
-                                        import_env: RefLock(
-                                            Environment {
-                                                parent: Some(
-                                                    RefLock(
-                                                        Environment {
-                                                            parent: None,
-                                                            inner: RefLock(
-                                                                EnvironmentInner {
-                                                                    values: {},
-                                                                },
-                                                            ),
-                                                            is_frozen: false,
-                                                        },
-                                                    ),
-                                                ),
-                                                inner: RefLock(
-                                                    EnvironmentInner {
-                                                        values: {},
-                                                    },
-                                                ),
-                                                is_frozen: false,
-                                            },
+                                chunk: Chunk {
+                                    upvalues: 0,
+                                    constants: [
+                                        Number(
+                                            3,
                                         ),
-                                        code: [
-                                            PushConst {
-                                                index: 0,
-                                            },
-                                            PushConst {
-                                                index: 1,
-                                            },
-                                            Reference {
-                                                symbol: Spur(8),
-                                            },
-                                            Call {
-                                                args: 2,
-                                            },
-                                        ],
-                                        labels: {
-                                            0: SourceData {
-                                                source_id: Spur(3),
-                                                range: (
-                                                    48,
-                                                    55,
-                                                ),
-                                            },
-                                        },
-                                        fallback: None,
-                                    },
-                                    upvalue_id: None,
-                                },
-                                CompiledLambda {
-                                    arity: Exact(
-                                        1,
-                                    ),
-                                    chunk: Chunk {
-                                        upvalues: 0,
-                                        constants: [
-                                            Number(
-                                                3,
-                                            ),
-                                            Number(
-                                                2,
-                                            ),
-                                        ],
-                                        lambdas: [
+                                        Number(
+                                            2,
+                                        ),
+                                    ],
+                                    lambdas: [
+                                        Compiled(
                                             CompiledLambda {
                                                 arity: Exact(
                                                     0,
@@ -890,14 +390,270 @@ Chunk {
                                                 },
                                                 upvalue_id: None,
                                             },
-                                        ],
-                                        promises: [],
-                                        import_env: RefLock(
-                                            Environment {
-                                                parent: Some(
-                                                    RefLock(
+                                        ),
+                                    ],
+                                    promises: [],
+                                    import_env: RefLock(
+                                        Environment {
+                                            parent: Some(
+                                                RefLock(
+                                                    Environment {
+                                                        parent: None,
+                                                        inner: RefLock(
+                                                            EnvironmentInner {
+                                                                values: {},
+                                                            },
+                                                        ),
+                                                        is_frozen: false,
+                                                    },
+                                                ),
+                                            ),
+                                            inner: RefLock(
+                                                EnvironmentInner {
+                                                    values: {},
+                                                },
+                                            ),
+                                            is_frozen: false,
+                                        },
+                                    ),
+                                    code: [
+                                        FetchArg {
+                                            index: 0,
+                                        },
+                                        Define {
+                                            symbol: Spur(9),
+                                        },
+                                        Reference {
+                                            symbol: Spur(9),
+                                        },
+                                        Reference {
+                                            symbol: Spur(9),
+                                        },
+                                        Reference {
+                                            symbol: Spur(8),
+                                        },
+                                        Call {
+                                            args: 2,
+                                        },
+                                    ],
+                                    labels: {
+                                        2: SourceData {
+                                            source_id: Spur(3),
+                                            range: (
+                                                69,
+                                                76,
+                                            ),
+                                        },
+                                    },
+                                    fallback: None,
+                                },
+                                upvalue_id: None,
+                            },
+                        ),
+                    ],
+                    promises: [],
+                    import_env: RefLock(
+                        Environment {
+                            parent: Some(
+                                RefLock(
+                                    Environment {
+                                        parent: None,
+                                        inner: RefLock(
+                                            EnvironmentInner {
+                                                values: {},
+                                            },
+                                        ),
+                                        is_frozen: false,
+                                    },
+                                ),
+                            ),
+                            inner: RefLock(
+                                EnvironmentInner {
+                                    values: {},
+                                },
+                            ),
+                            is_frozen: false,
+                        },
+                    ),
+                    code: [
+                        FetchArg {
+                            index: 0,
+                        },
+                        Define {
+                            symbol: Spur(9),
+                        },
+                        FetchRest,
+                        Define {
+                            symbol: Spur(10),
+                        },
+                        Reference {
+                            symbol: Spur(9),
+                        },
+                        Reference {
+                            symbol: Spur(9),
+                        },
+                        Reference {
+                            symbol: Spur(9),
+                        },
+                        Reference {
+                            symbol: Spur(9),
+                        },
+                        Reference {
+                            symbol: Spur(10),
+                        },
+                        Reference {
+                            symbol: Spur(8),
+                        },
+                        Call {
+                            args: 5,
+                        },
+                    ],
+                    labels: {
+                        4: SourceData {
+                            source_id: Spur(3),
+                            range: (
+                                97,
+                                113,
+                            ),
+                        },
+                    },
+                    fallback: None,
+                },
+                upvalue_id: None,
+            },
+        ),
+        Compiled(
+            CompiledLambda {
+                arity: Exact(
+                    3,
+                ),
+                chunk: Chunk {
+                    upvalues: 0,
+                    constants: [
+                        Number(
+                            3,
+                        ),
+                        Number(
+                            2,
+                        ),
+                    ],
+                    lambdas: [
+                        Compiled(
+                            CompiledLambda {
+                                arity: Exact(
+                                    0,
+                                ),
+                                chunk: Chunk {
+                                    upvalues: 0,
+                                    constants: [
+                                        Number(
+                                            3,
+                                        ),
+                                        Number(
+                                            2,
+                                        ),
+                                    ],
+                                    lambdas: [],
+                                    promises: [],
+                                    import_env: RefLock(
+                                        Environment {
+                                            parent: Some(
+                                                RefLock(
+                                                    Environment {
+                                                        parent: None,
+                                                        inner: RefLock(
+                                                            EnvironmentInner {
+                                                                values: {},
+                                                            },
+                                                        ),
+                                                        is_frozen: false,
+                                                    },
+                                                ),
+                                            ),
+                                            inner: RefLock(
+                                                EnvironmentInner {
+                                                    values: {},
+                                                },
+                                            ),
+                                            is_frozen: false,
+                                        },
+                                    ),
+                                    code: [
+                                        PushConst {
+                                            index: 0,
+                                        },
+                                        PushConst {
+                                            index: 1,
+                                        },
+                                        Reference {
+                                            symbol: Spur(8),
+                                        },
+                                        Call {
+                                            args: 2,
+                                        },
+                                    ],
+                                    labels: {
+                                        0: SourceData {
+                                            source_id: Spur(3),
+                                            range: (
+                                                48,
+                                                55,
+                                            ),
+                                        },
+                                    },
+                                    fallback: None,
+                                },
+                                upvalue_id: None,
+                            },
+                        ),
+                        Compiled(
+                            CompiledLambda {
+                                arity: Exact(
+                                    1,
+                                ),
+                                chunk: Chunk {
+                                    upvalues: 0,
+                                    constants: [
+                                        Number(
+                                            3,
+                                        ),
+                                        Number(
+                                            2,
+                                        ),
+                                    ],
+                                    lambdas: [
+                                        Compiled(
+                                            CompiledLambda {
+                                                arity: Exact(
+                                                    0,
+                                                ),
+                                                chunk: Chunk {
+                                                    upvalues: 0,
+                                                    constants: [
+                                                        Number(
+                                                            3,
+                                                        ),
+                                                        Number(
+                                                            2,
+                                                        ),
+                                                    ],
+                                                    lambdas: [],
+                                                    promises: [],
+                                                    import_env: RefLock(
                                                         Environment {
-                                                            parent: None,
+                                                            parent: Some(
+                                                                RefLock(
+                                                                    Environment {
+                                                                        parent: None,
+                                                                        inner: RefLock(
+                                                                            EnvironmentInner {
+                                                                                values: {},
+                                                                            },
+                                                                        ),
+                                                                        is_frozen: false,
+                                                                    },
+                                                                ),
+                                                            ),
                                                             inner: RefLock(
                                                                 EnvironmentInner {
                                                                     values: {},
@@ -906,211 +662,485 @@ Chunk {
                                                             is_frozen: false,
                                                         },
                                                     ),
-                                                ),
-                                                inner: RefLock(
-                                                    EnvironmentInner {
-                                                        values: {},
+                                                    code: [
+                                                        PushConst {
+                                                            index: 0,
+                                                        },
+                                                        PushConst {
+                                                            index: 1,
+                                                        },
+                                                        Reference {
+                                                            symbol: Spur(8),
+                                                        },
+                                                        Call {
+                                                            args: 2,
+                                                        },
+                                                    ],
+                                                    labels: {
+                                                        0: SourceData {
+                                                            source_id: Spur(3),
+                                                            range: (
+                                                                48,
+                                                                55,
+                                                            ),
+                                                        },
                                                     },
-                                                ),
-                                                is_frozen: false,
+                                                    fallback: None,
+                                                },
+                                                upvalue_id: None,
                                             },
                                         ),
-                                        code: [
-                                            FetchArg {
-                                                index: 0,
-                                            },
-                                            Define {
-                                                symbol: Spur(9),
-                                            },
-                                            Reference {
-                                                symbol: Spur(9),
-                                            },
-                                            Reference {
-                                                symbol: Spur(9),
-                                            },
-                                            Reference {
-                                                symbol: Spur(8),
-                                            },
-                                            Call {
-                                                args: 2,
-                                            },
-                                        ],
-                                        labels: {
-                                            2: SourceData {
-                                                source_id: Spur(3),
-                                                range: (
-                                                    69,
-                                                    76,
+                                    ],
+                                    promises: [],
+                                    import_env: RefLock(
+                                        Environment {
+                                            parent: Some(
+                                                RefLock(
+                                                    Environment {
+                                                        parent: None,
+                                                        inner: RefLock(
+                                                            EnvironmentInner {
+                                                                values: {},
+                                                            },
+                                                        ),
+                                                        is_frozen: false,
+                                                    },
                                                 ),
-                                            },
+                                            ),
+                                            inner: RefLock(
+                                                EnvironmentInner {
+                                                    values: {},
+                                                },
+                                            ),
+                                            is_frozen: false,
                                         },
-                                        fallback: None,
+                                    ),
+                                    code: [
+                                        FetchArg {
+                                            index: 0,
+                                        },
+                                        Define {
+                                            symbol: Spur(9),
+                                        },
+                                        Reference {
+                                            symbol: Spur(9),
+                                        },
+                                        Reference {
+                                            symbol: Spur(9),
+                                        },
+                                        Reference {
+                                            symbol: Spur(8),
+                                        },
+                                        Call {
+                                            args: 2,
+                                        },
+                                    ],
+                                    labels: {
+                                        2: SourceData {
+                                            source_id: Spur(3),
+                                            range: (
+                                                69,
+                                                76,
+                                            ),
+                                        },
                                     },
-                                    upvalue_id: None,
+                                    fallback: None,
                                 },
-                            ],
-                            promises: [],
-                            import_env: RefLock(
-                                Environment {
-                                    parent: Some(
-                                        RefLock(
-                                            Environment {
-                                                parent: None,
-                                                inner: RefLock(
-                                                    EnvironmentInner {
-                                                        values: {},
-                                                    },
+                                upvalue_id: None,
+                            },
+                        ),
+                        Compiled(
+                            CompiledLambda {
+                                arity: AtLeast(
+                                    1,
+                                ),
+                                chunk: Chunk {
+                                    upvalues: 0,
+                                    constants: [
+                                        Number(
+                                            3,
+                                        ),
+                                        Number(
+                                            2,
+                                        ),
+                                    ],
+                                    lambdas: [
+                                        Compiled(
+                                            CompiledLambda {
+                                                arity: Exact(
+                                                    0,
                                                 ),
-                                                is_frozen: false,
+                                                chunk: Chunk {
+                                                    upvalues: 0,
+                                                    constants: [
+                                                        Number(
+                                                            3,
+                                                        ),
+                                                        Number(
+                                                            2,
+                                                        ),
+                                                    ],
+                                                    lambdas: [],
+                                                    promises: [],
+                                                    import_env: RefLock(
+                                                        Environment {
+                                                            parent: Some(
+                                                                RefLock(
+                                                                    Environment {
+                                                                        parent: None,
+                                                                        inner: RefLock(
+                                                                            EnvironmentInner {
+                                                                                values: {},
+                                                                            },
+                                                                        ),
+                                                                        is_frozen: false,
+                                                                    },
+                                                                ),
+                                                            ),
+                                                            inner: RefLock(
+                                                                EnvironmentInner {
+                                                                    values: {},
+                                                                },
+                                                            ),
+                                                            is_frozen: false,
+                                                        },
+                                                    ),
+                                                    code: [
+                                                        PushConst {
+                                                            index: 0,
+                                                        },
+                                                        PushConst {
+                                                            index: 1,
+                                                        },
+                                                        Reference {
+                                                            symbol: Spur(8),
+                                                        },
+                                                        Call {
+                                                            args: 2,
+                                                        },
+                                                    ],
+                                                    labels: {
+                                                        0: SourceData {
+                                                            source_id: Spur(3),
+                                                            range: (
+                                                                48,
+                                                                55,
+                                                            ),
+                                                        },
+                                                    },
+                                                    fallback: None,
+                                                },
+                                                upvalue_id: None,
                                             },
                                         ),
-                                    ),
-                                    inner: RefLock(
-                                        EnvironmentInner {
-                                            values: {},
+                                        Compiled(
+                                            CompiledLambda {
+                                                arity: Exact(
+                                                    1,
+                                                ),
+                                                chunk: Chunk {
+                                                    upvalues: 0,
+                                                    constants: [
+                                                        Number(
+                                                            3,
+                                                        ),
+                                                        Number(
+                                                            2,
+                                                        ),
+                                                    ],
+                                                    lambdas: [
+                                                        Compiled(
+                                                            CompiledLambda {
+                                                                arity: Exact(
+                                                                    0,
+                                                                ),
+                                                                chunk: Chunk {
+                                                                    upvalues: 0,
+                                                                    constants: [
+                                                                        Number(
+                                                                            3,
+                                                                        ),
+                                                                        Number(
+                                                                            2,
+                                                                        ),
+                                                                    ],
+                                                                    lambdas: [],
+                                                                    promises: [],
+                                                                    import_env: RefLock(
+                                                                        Environment {
+                                                                            parent: Some(
+                                                                                RefLock(
+                                                                                    Environment {
+                                                                                        parent: None,
+                                                                                        inner: RefLock(
+                                                                                            EnvironmentInner {
+                                                                                                values: {},
+                                                                                            },
+                                                                                        ),
+                                                                                        is_frozen: false,
+                                                                                    },
+                                                                                ),
+                                                                            ),
+                                                                            inner: RefLock(
+                                                                                EnvironmentInner {
+                                                                                    values: {},
+                                                                                },
+                                                                            ),
+                                                                            is_frozen: false,
+                                                                        },
+                                                                    ),
+                                                                    code: [
+                                                                        PushConst {
+                                                                            index: 0,
+                                                                        },
+                                                                        PushConst {
+                                                                            index: 1,
+                                                                        },
+                                                                        Reference {
+                                                                            symbol: Spur(8),
+                                                                        },
+                                                                        Call {
+                                                                            args: 2,
+                                                                        },
+                                                                    ],
+                                                                    labels: {
+                                                                        0: SourceData {
+                                                                            source_id: Spur(3),
+                                                                            range: (
+                                                                                48,
+                                                                                55,
+                                                                            ),
+                                                                        },
+                                                                    },
+                                                                    fallback: None,
+                                                                },
+                                                                upvalue_id: None,
+                                                            },
+                                                        ),
+                                                    ],
+                                                    promises: [],
+                                                    import_env: RefLock(
+                                                        Environment {
+                                                            parent: Some(
+                                                                RefLock(
+                                                                    Environment {
+                                                                        parent: None,
+                                                                        inner: RefLock(
+                                                                            EnvironmentInner {
+                                                                                values: {},
+                                                                            },
+                                                                        ),
+                                                                        is_frozen: false,
+                                                                    },
+                                                                ),
+                                                            ),
+                                                            inner: RefLock(
+                                                                EnvironmentInner {
+                                                                    values: {},
+                                                                },
+                                                            ),
+                                                            is_frozen: false,
+                                                        },
+                                                    ),
+                                                    code: [
+                                                        FetchArg {
+                                                            index: 0,
+                                                        },
+                                                        Define {
+                                                            symbol: Spur(9),
+                                                        },
+                                                        Reference {
+                                                            symbol: Spur(9),
+                                                        },
+                                                        Reference {
+                                                            symbol: Spur(9),
+                                                        },
+                                                        Reference {
+                                                            symbol: Spur(8),
+                                                        },
+                                                        Call {
+                                                            args: 2,
+                                                        },
+                                                    ],
+                                                    labels: {
+                                                        2: SourceData {
+                                                            source_id: Spur(3),
+                                                            range: (
+                                                                69,
+                                                                76,
+                                                            ),
+                                                        },
+                                                    },
+                                                    fallback: None,
+                                                },
+                                                upvalue_id: None,
+                                            },
+                                        ),
+                                    ],
+                                    promises: [],
+                                    import_env: RefLock(
+                                        Environment {
+                                            parent: Some(
+                                                RefLock(
+                                                    Environment {
+                                                        parent: None,
+                                                        inner: RefLock(
+                                                            EnvironmentInner {
+                                                                values: {},
+                                                            },
+                                                        ),
+                                                        is_frozen: false,
+                                                    },
+                                                ),
+                                            ),
+                                            inner: RefLock(
+                                                EnvironmentInner {
+                                                    values: {},
+                                                },
+                                            ),
+                                            is_frozen: false,
                                         },
                                     ),
-                                    is_frozen: false,
+                                    code: [
+                                        FetchArg {
+                                            index: 0,
+                                        },
+                                        Define {
+                                            symbol: Spur(9),
+                                        },
+                                        FetchRest,
+                                        Define {
+                                            symbol: Spur(10),
+                                        },
+                                        Reference {
+                                            symbol: Spur(9),
+                                        },
+                                        Reference {
+                                            symbol: Spur(9),
+                                        },
+                                        Reference {
+                                            symbol: Spur(9),
+                                        },
+                                        Reference {
+                                            symbol: Spur(9),
+                                        },
+                                        Reference {
+                                            symbol: Spur(10),
+                                        },
+                                        Reference {
+                                            symbol: Spur(8),
+                                        },
+                                        Call {
+                                            args: 5,
+                                        },
+                                    ],
+                                    labels: {
+                                        4: SourceData {
+                                            source_id: Spur(3),
+                                            range: (
+                                                97,
+                                                113,
+                                            ),
+                                        },
+                                    },
+                                    fallback: None,
+                                },
+                                upvalue_id: None,
+                            },
+                        ),
+                    ],
+                    promises: [],
+                    import_env: RefLock(
+                        Environment {
+                            parent: Some(
+                                RefLock(
+                                    Environment {
+                                        parent: None,
+                                        inner: RefLock(
+                                            EnvironmentInner {
+                                                values: {},
+                                            },
+                                        ),
+                                        is_frozen: false,
+                                    },
+                                ),
+                            ),
+                            inner: RefLock(
+                                EnvironmentInner {
+                                    values: {},
                                 },
                             ),
-                            code: [
-                                FetchArg {
-                                    index: 0,
-                                },
-                                Define {
-                                    symbol: Spur(9),
-                                },
-                                FetchRest,
-                                Define {
-                                    symbol: Spur(10),
-                                },
-                                Reference {
-                                    symbol: Spur(9),
-                                },
-                                Reference {
-                                    symbol: Spur(9),
-                                },
-                                Reference {
-                                    symbol: Spur(9),
-                                },
-                                Reference {
-                                    symbol: Spur(9),
-                                },
-                                Reference {
-                                    symbol: Spur(10),
-                                },
-                                Reference {
-                                    symbol: Spur(8),
-                                },
-                                Call {
-                                    args: 5,
-                                },
-                            ],
-                            labels: {
-                                4: SourceData {
-                                    source_id: Spur(3),
-                                    range: (
-                                        97,
-                                        113,
-                                    ),
-                                },
-                            },
-                            fallback: None,
+                            is_frozen: false,
                         },
-                        upvalue_id: None,
-                    },
-                ],
-                promises: [],
-                import_env: RefLock(
-                    Environment {
-                        parent: Some(
-                            RefLock(
-                                Environment {
-                                    parent: None,
-                                    inner: RefLock(
-                                        EnvironmentInner {
-                                            values: {},
-                                        },
-                                    ),
-                                    is_frozen: false,
-                                },
+                    ),
+                    code: [
+                        FetchArg {
+                            index: 0,
+                        },
+                        Define {
+                            symbol: Spur(9),
+                        },
+                        FetchArg {
+                            index: 1,
+                        },
+                        Define {
+                            symbol: Spur(11),
+                        },
+                        FetchArg {
+                            index: 2,
+                        },
+                        Define {
+                            symbol: Spur(12),
+                        },
+                        Reference {
+                            symbol: Spur(14),
+                        },
+                        Reference {
+                            symbol: Spur(9),
+                        },
+                        Reference {
+                            symbol: Spur(11),
+                        },
+                        Reference {
+                            symbol: Spur(12),
+                        },
+                        Reference {
+                            symbol: Spur(8),
+                        },
+                        Call {
+                            args: 3,
+                        },
+                        Reference {
+                            symbol: Spur(13),
+                        },
+                        Call {
+                            args: 2,
+                        },
+                        Reference {
+                            symbol: Spur(14),
+                        },
+                    ],
+                    labels: {
+                        6: SourceData {
+                            source_id: Spur(3),
+                            range: (
+                                131,
+                                151,
                             ),
-                        ),
-                        inner: RefLock(
-                            EnvironmentInner {
-                                values: {},
-                            },
-                        ),
-                        is_frozen: false,
+                        },
+                        14: SourceData {
+                            source_id: Spur(3),
+                            range: (
+                                152,
+                                153,
+                            ),
+                        },
                     },
-                ),
-                code: [
-                    FetchArg {
-                        index: 0,
-                    },
-                    Define {
-                        symbol: Spur(9),
-                    },
-                    FetchArg {
-                        index: 1,
-                    },
-                    Define {
-                        symbol: Spur(11),
-                    },
-                    FetchArg {
-                        index: 2,
-                    },
-                    Define {
-                        symbol: Spur(12),
-                    },
-                    Reference {
-                        symbol: Spur(14),
-                    },
-                    Reference {
-                        symbol: Spur(9),
-                    },
-                    Reference {
-                        symbol: Spur(11),
-                    },
-                    Reference {
-                        symbol: Spur(12),
-                    },
-                    Reference {
-                        symbol: Spur(8),
-                    },
-                    Call {
-                        args: 3,
-                    },
-                    Reference {
-                        symbol: Spur(13),
-                    },
-                    Call {
-                        args: 2,
-                    },
-                    Reference {
-                        symbol: Spur(14),
-                    },
-                ],
-                labels: {
-                    6: SourceData {
-                        source_id: Spur(3),
-                        range: (
-                            131,
-                            151,
-                        ),
-                    },
-                    14: SourceData {
-                        source_id: Spur(3),
-                        range: (
-                            152,
-                            153,
-                        ),
-                    },
+                    fallback: None,
                 },
-                fallback: None,
+                upvalue_id: None,
             },
-            upvalue_id: None,
-        },
+        ),
     ],
     promises: [],
     import_env: RefLock(

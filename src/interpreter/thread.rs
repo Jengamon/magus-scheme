@@ -836,7 +836,7 @@ impl<'gc> Thread<'gc> {
                         Bytecode::PushLambda { index } => {
                             self.stack.push(Gc::new(
                                 &ctx,
-                                RefLock::new(Value::Lambda(Lambda::Compiled({
+                                RefLock::new(Value::Lambda({
                                     let l = chunk.lambdas[index];
                                     let l = if let Some(upvalue_index) = *upvalue_index {
                                         l.label(&ctx, upvalue_index)
@@ -849,7 +849,7 @@ impl<'gc> Thread<'gc> {
                                         )
                                     };
                                     l
-                                }))),
+                                })),
                             ));
                             advance_to_next_inst!();
                         }

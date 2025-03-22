@@ -143,7 +143,7 @@ pub struct SyntaxContext<'a, 'gc> {
     pub interner: &'a mut lasso::Rodeo,
     pub world: &'a World,
     constants: &'a mut Vec<Constant>,
-    lambdas: &'a mut Vec<CompiledLambdaPtr<'gc>>,
+    lambdas: &'a mut Vec<Lambda<'gc>>,
     promises: &'a mut Vec<Box<[Bytecode]>>,
     upvalues: &'a mut usize,
 }
@@ -160,11 +160,15 @@ impl<'gc> SyntaxContext<'_, 'gc> {
     }
 
     pub fn add_lambda(&mut self, ptr: CompiledLambdaPtr<'gc>) -> usize {
-        if let Some(p) = self.lambdas.iter().position(|lptr| Gc::ptr_eq(*lptr, ptr)) {
+        if let Some(p) = self
+            .lambdas
+            .iter()
+            .position(|lptr| matches!(lptr, Lambda::Compiled(lptr) if Gc::ptr_eq(*lptr, ptr)))
+        {
             p
         } else {
             let idx = self.lambdas.len();
-            self.lambdas.push(ptr);
+            self.lambdas.push(Lambda::Compiled(ptr));
             idx
         }
     }
@@ -181,7 +185,7 @@ impl<'gc> SyntaxContext<'_, 'gc> {
         self.constants.clone()
     }
 
-    pub fn lambdas(&self) -> impl IntoIterator<Item = CompiledLambdaPtr<'gc>> {
+    pub fn lambdas(&self) -> impl IntoIterator<Item = Lambda<'gc>> {
         self.lambdas.clone()
     }
 
@@ -2044,10 +2048,10 @@ impl<'gc> Compiler<'gc> {
                                 .collect::<FxHashSet<_>>();
                             // Check depending values and add any names that *those* depend on (if they are also compiled lambdas)
                             for lmbr in referenced_lambdas {
-                                dependants.extend(get_global_refs(
-                                    name,
-                                    &c.chunk.lambdas[lmbr].chunk.code,
-                                ));
+                                let Lambda::Compiled(l) = &c.chunk.lambdas[lmbr] else {
+                                    continue;
+                                };
+                                dependants.extend(get_global_refs(name, &l.chunk.code));
                             }
                             dependants
                         }

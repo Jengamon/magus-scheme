@@ -38,7 +38,6 @@ fn quote_program<'gc>(
         ProgramData::Labeled { label, item } => {
             labels.insert(*label);
             let mut code = quote_program(*item, ctx, labels)?;
-            labels.remove(label);
 
             code.push(Bytecode::Duplicate);
             code.push(Bytecode::FillHole { id: *label });
@@ -253,7 +252,6 @@ fn quasiquote_program<'gc>(
             if *level > 0 {
                 labels.insert(*label);
                 let mut code = quasiquote_program(*item, compiler, ctx, labels, level)?;
-                labels.remove(label);
 
                 code.push(Bytecode::Duplicate);
                 code.push(Bytecode::FillHole { id: *label });

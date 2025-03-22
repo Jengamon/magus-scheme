@@ -994,14 +994,15 @@ impl<'gc> Thread<'gc> {
                             advance_to_next_inst!();
                         }
                         Bytecode::MakeHole { id } => {
-                            // create an undefined value
-                            let val = Gc::new(&ctx, RefLock::new(Value::Undefined));
-                            // mark as a hole
-                            if self.holes.contains_key(&id) {
-                                make_error!(SchemeErrorType::AlreadyDefinedHole(id));
-                                continue;
-                            }
-                            self.holes.insert(id, val);
+                            // make a hole (or refer to one in existence)
+                            let val = if let Some(v) = self.holes.get(&id) {
+                                *v
+                            } else {
+                                // create an undefined value
+                                let val = Gc::new(&ctx, RefLock::new(Value::Undefined));
+                                self.holes.insert(id, val);
+                                val
+                            };
                             self.stack.push(val);
                             advance_to_next_inst!();
                         }

@@ -1,5 +1,8 @@
 use core::fmt;
-use magus::{ContainsDatum, Datum, DatumVisitor, GAstNode, GAstToken, MagusSyntaxNode};
+use magus::{
+    value::escape_write_char, ContainsDatum, Datum, DatumVisitor, GAstNode, GAstToken,
+    MagusSyntaxNode,
+};
 use std::borrow::Cow;
 use yansi::Paint;
 
@@ -304,7 +307,13 @@ impl DatumVisitor for DatumPrintImpl<'_, '_> {
     fn visit_char(&mut self, char: &magus::Character) {
         self.handle_error(|visitor| {
             if let Some(char) = char.char() {
-                write!(visitor.fmt, "#\\{}", char)
+                write!(
+                    visitor.fmt,
+                    "#{}",
+                    escape_write_char(char, true)
+                        .into_iter()
+                        .collect::<Box<str>>()
+                )
             } else {
                 write!(visitor.fmt, "{}", "#ERR".red())
             }
@@ -334,7 +343,14 @@ impl DatumVisitor for DatumPrintImpl<'_, '_> {
     fn visit_string(&mut self, string: &magus::StringToken) {
         self.handle_error(|visitor| {
             if let Some(string) = string.string() {
-                write!(visitor.fmt, "\"{}\"", string)
+                write!(
+                    visitor.fmt,
+                    "\"{}\"",
+                    string
+                        .chars()
+                        .flat_map(|c| escape_write_char(c, false))
+                        .collect::<Box<str>>()
+                )
             } else {
                 write!(visitor.fmt, "{}", "#ERR".red())
             }

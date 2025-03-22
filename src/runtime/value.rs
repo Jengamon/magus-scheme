@@ -262,14 +262,43 @@ impl<K: lasso::Resolver> fmt::Display for CircularPrinter<'_, '_, K> {
 }
 
 /// Checks if a given symbol is a valid unpiped Scheme identifier
+// Using the definition used for `write`
 fn is_valid_scheme_identifier(s: &str) -> bool {
     if !s.is_ascii() || s.chars().any(|c| !c.is_ascii_graphic()) {
         // Scheme identifiers must be in ASCII (and not whitespace)
         return false;
     }
-
-    // TODO add refinements, as we are currently too permissive atm
     true
+}
+
+pub fn escape_write_char(c: char, is_single: bool) -> Vec<char> {
+    match c {
+        '\t' => vec!['\\', 't'],
+        '\n' => vec!['\\', 'n'],
+        '\r' => vec!['\\', 'r'],
+        '\\' => vec!['\\', '\\'],
+        c if c.is_control() => {
+            let mut val = c as u32;
+            let chars = {
+                let mut digits = vec![];
+                while val > 0 {
+                    digits.push(
+                        char::from_digit(val % 16, 16).expect("[ICE] char to escape conversion"),
+                    );
+                    val /= 16;
+                }
+                digits.reverse();
+                if !is_single {
+                    // add the coda (if string)
+                    digits.push(';');
+                }
+                digits
+            };
+            ['\\', 'x'].into_iter().chain(chars).collect()
+        }
+        '\"' => vec!['\\', '"'],
+        c => vec![c],
+    }
 }
 
 #[derive(Collect)]
@@ -314,13 +343,24 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
             Value::Inexact(fp) if fp.is_infinite() => write!(f, "+inf.0"),
             Value::Inexact(fp) if fp.is_nan() => write!(f, "+nan.0"),
             Value::Inexact(fp) => write!(f, "{fp}"),
-            Value::String(s) => write!(f, "\"{}\"", s.borrow().replace('\"', "\\\"")),
+            Value::String(s) => write!(
+                f,
+                "\"{}\"",
+                s.borrow()
+                    .chars()
+                    .flat_map(|c| escape_write_char(c, false))
+                    .collect::<Box<str>>()
+            ),
             Value::Symbol(sym) if is_valid_scheme_identifier(self.resolver.resolve(&sym.0)) => {
                 write!(f, "{}", self.resolver.resolve(&sym.0))
             }
             Value::Symbol(sym) => write!(f, "|{}|", self.resolver.resolve(&sym.0)),
             Value::Bool(b) => write!(f, "#{}", if b { "t" } else { "f" }),
-            Value::Char(c) => write!(f, "#\\{c}"),
+            Value::Char(c) => write!(
+                f,
+                "#{}",
+                escape_write_char(c, true).into_iter().collect::<Box<str>>()
+            ),
             Value::Vector(ref vec) if vec.is_circular(self.value_ptr) => {
                 write!(
                     f,

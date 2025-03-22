@@ -290,6 +290,7 @@ impl Module for Base {
 }
 
 const MODULE_SRC: &str = include_str!("scheme_base.scm");
+
 /// Registers this module (and it's Scheme implementations) under the name `(scheme base)`
 pub fn register_module(
     interpreter: &mut Interpreter,
@@ -307,7 +308,7 @@ pub fn register_module(
         world
     };
     interpreter.try_enter(|mc, arena, interner| {
-        let programs = ("base_scheme.scm", MODULE_SRC).parse_program(mc, interner, false)?;
+        let programs = ("scheme_base.scm", MODULE_SRC).parse_program(mc, interner, false)?;
         let library_decls = programs
             .into_iter()
             .map(|p| LibraryDeclaration::convert(p, interner))

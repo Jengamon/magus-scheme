@@ -5,11 +5,11 @@ use clap::Parser;
 use codesnake::{Block, CodeWidth, Label, LineIndex};
 use magus::{
     bytecode::{Bytecode, Constant},
-    compiler::{LibraryDefinitionContext, LibraryName, ParseProgram, World},
+    compiler::{LibraryDeclaration, LibraryDefinitionContext, LibraryName, ParseProgram, World},
     environment::StackEnvironment,
     gc_arena::{Gc, RefLock},
     general_parser::GeneralParserError,
-    interpreter::{CompilerHandle, Includer, Interpreter, ThreadHandle, ValueHandle},
+    interpreter::{CompilerHandle, Includer, Interpreter, NullIncluder, ThreadHandle, ValueHandle},
     library_name,
     runtime::lambda::Lambda,
     stdlib, ContainsDatum, ExternalCompilerContext, Fuel, GAstNode, Module, Value,
@@ -335,7 +335,34 @@ fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle)> {
     // max_fuel = None is *inadvisable* in any form of production code, b/c it means that if an infinite loop is
     // defined and executed in a library, it will run forever.
     // Rather, pass in a large amount of fuel.
-    stdlib::base::register_module(&mut interpreter, &compiler, &mut world, Some(10_000_000))?;
+    stdlib::base::register_module(&mut interpreter, &compiler, &mut world, Some(10_000))?;
+
+    // Register cxr source
+    // TODO Make this a method on interpreter? input LibraryName, str source, str source filename, max_fuel, compiler handle
+    let name = LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme cxr));
+    interpreter.try_enter(|mc, arena, interner| {
+        let programs =
+            ("scheme_cxr.scm", stdlib::cxr::MODULE_SRC).parse_program(mc, interner, false)?;
+        let library_decls = programs
+            .into_iter()
+            .map(|p| LibraryDeclaration::convert(p, interner))
+            .collect::<Result<Vec<_>, _>>()?;
+        let value_pointers = arena.value_pointers();
+        let compiler = arena
+            .compiler_mut(&compiler)
+            .ok_or(anyhow::anyhow!("invalid compiler handle"))?;
+        let mut ecc = ExternalCompilerContext {
+            world: &world,
+            includer: &NullIncluder,
+            interner,
+        };
+        let library_def = LibraryDefinitionContext {
+            max_fuel: Some(10_000),
+            value_pointers,
+        };
+        compiler.define_library(mc, &name, &mut ecc, false, &library_def, library_decls)?;
+        Ok::<_, anyhow::Error>(())
+    })?;
 
     Ok((interpreter, world, compiler))
 }

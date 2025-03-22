@@ -2,7 +2,7 @@ use core::fmt;
 use std::sync::LazyLock;
 
 use gc_arena::{Collect, Gc, Mutation};
-use num::bigint::Sign;
+use num::bigint::{ParseBigIntError, Sign};
 use num::{BigInt, BigRational, Complex, Integer, ToPrimitive};
 
 pub type ComplexNumberPtr<'gc> = Gc<'gc, ComplexNumber>;
@@ -132,11 +132,45 @@ impl Number {
     }
 
     pub fn gcd(&self, rhs: &Number) -> Number {
-        todo!()
+        static ONE: LazyLock<BigInt> = LazyLock::new(|| BigInt::new(Sign::Plus, vec![1]));
+        // luckily ratios are stored in reduced form, so computing these are simple!
+        match (self, rhs) {
+            (Self::Integer(i), Self::Integer(i2)) => Self::Integer(i.gcd(i2)),
+            (Self::Integer(i), Self::Rational(r)) | (Self::Rational(r), Self::Integer(i)) => {
+                Self::simplify(BigRational::new(i.gcd(r.numer()), ONE.lcm(r.denom())))
+            }
+            (Self::Rational(r), Self::Rational(r2)) => Self::simplify(BigRational::new(
+                r.numer().gcd(r2.numer()),
+                r.denom().lcm(r2.denom()),
+            )),
+        }
     }
 
     pub fn lcm(&self, rhs: &Number) -> Number {
-        todo!()
+        static ONE: LazyLock<BigInt> = LazyLock::new(|| BigInt::new(Sign::Plus, vec![1]));
+        // luckily ratios are stored in reduced form, so computing these are simple!
+        match (self, rhs) {
+            (Self::Integer(i), Self::Integer(i2)) => Self::Integer(i.lcm(i2)),
+            (Self::Integer(i), Self::Rational(r)) | (Self::Rational(r), Self::Integer(i)) => {
+                Self::simplify(BigRational::new(i.lcm(r.numer()), ONE.gcd(r.denom())))
+            }
+            (Self::Rational(r), Self::Rational(r2)) => Self::simplify(BigRational::new(
+                r.numer().lcm(r2.numer()),
+                r.denom().gcd(r2.denom()),
+            )),
+        }
+    }
+}
+
+impl From<BigInt> for Number {
+    fn from(value: BigInt) -> Self {
+        Self::Integer(value)
+    }
+}
+
+impl From<BigRational> for Number {
+    fn from(value: BigRational) -> Self {
+        Self::Rational(value)
     }
 }
 
@@ -166,10 +200,7 @@ impl PartialOrd<Number> for f64 {
 impl std::ops::Neg for Number {
     type Output = Number;
     fn neg(self) -> Self::Output {
-        match self {
-            Number::Integer(i) => Number::Integer(i.neg()),
-            Number::Rational(r) => Number::Rational(r.neg()),
-        }
+        -&self
     }
 }
 impl std::ops::Neg for &Number {
@@ -184,15 +215,7 @@ impl std::ops::Neg for &Number {
 impl std::ops::Add for Number {
     type Output = Number;
     fn add(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Number::Integer(i), Number::Integer(i2)) => Number::Integer(i + i2),
-            (Number::Rational(r), Number::Integer(i))
-            | (Number::Integer(i), Number::Rational(r)) => {
-                // addition is reflexive, so we can do
-                Self::simplify(r + BigRational::from_integer(i))
-            }
-            (Number::Rational(r), Number::Rational(r2)) => Self::simplify(r + r2),
-        }
+        &self + &rhs
     }
 }
 impl std::ops::Add<f64> for Number {
@@ -236,16 +259,7 @@ impl std::ops::Add<&Number> for f64 {
 impl std::ops::Sub for Number {
     type Output = Number;
     fn sub(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Number::Integer(r), Number::Integer(r2)) => Number::Integer(r - r2),
-            (Number::Rational(r), Number::Integer(i)) => {
-                Self::simplify(r - BigRational::from_integer(i))
-            }
-            (Number::Integer(i), Number::Rational(r)) => {
-                Self::simplify(BigRational::from_integer(i) - r)
-            }
-            (Number::Rational(r), Number::Rational(r2)) => Self::simplify(r - r2),
-        }
+        &self - &rhs
     }
 }
 impl std::ops::Sub<f64> for Number {
@@ -275,7 +289,6 @@ impl std::ops::Sub for &Number {
         }
     }
 }
-
 impl std::ops::Sub<f64> for &Number {
     type Output = f64;
     fn sub(self, rhs: f64) -> Self::Output {
@@ -327,6 +340,12 @@ impl std::ops::Mul<&Number> for f64 {
         self * rhs.to_inexact()
     }
 }
+impl std::ops::Mul<Number> for Number {
+    type Output = Number;
+    fn mul(self, rhs: Number) -> Self::Output {
+        &self * &rhs
+    }
+}
 
 impl std::ops::Div<f64> for Number {
     type Output = f64;
@@ -367,6 +386,117 @@ impl std::ops::Div<&Number> for f64 {
     type Output = f64;
     fn div(self, rhs: &Number) -> Self::Output {
         self / rhs.to_inexact()
+    }
+}
+impl std::ops::Div<Number> for Number {
+    type Output = Number;
+    fn div(self, rhs: Number) -> Self::Output {
+        &self / &rhs
+    }
+}
+
+impl std::ops::Rem<f64> for Number {
+    type Output = f64;
+    fn rem(self, rhs: f64) -> Self::Output {
+        self.to_inexact() % rhs
+    }
+}
+impl std::ops::Rem<Number> for f64 {
+    type Output = f64;
+    fn rem(self, rhs: Number) -> Self::Output {
+        self % rhs.to_inexact()
+    }
+}
+impl std::ops::Rem for &Number {
+    type Output = Number;
+    fn rem(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Number::Integer(i), Number::Integer(i2)) => Number::Integer(i % i2),
+            (Number::Rational(r), Number::Integer(i)) => {
+                Number::simplify(r % BigRational::from_integer(i.clone()))
+            }
+            (Number::Integer(i), Number::Rational(r)) => {
+                Number::simplify(BigRational::from_integer(i.clone()) % r)
+            }
+            (Number::Rational(r), Number::Rational(r2)) => Number::simplify(r % r2),
+        }
+    }
+}
+impl std::ops::Rem<f64> for &Number {
+    type Output = f64;
+    fn rem(self, rhs: f64) -> Self::Output {
+        self.to_inexact() % rhs
+    }
+}
+impl std::ops::Rem<&Number> for f64 {
+    type Output = f64;
+    fn rem(self, rhs: &Number) -> Self::Output {
+        self % rhs.to_inexact()
+    }
+}
+impl std::ops::Rem<Number> for Number {
+    type Output = Number;
+    fn rem(self, rhs: Number) -> Self::Output {
+        &self % &rhs
+    }
+}
+
+impl num::Zero for Number {
+    fn zero() -> Self {
+        Self::ZERO
+    }
+
+    fn is_zero(&self) -> bool {
+        match self {
+            Number::Integer(i) => i.is_zero(),
+            Number::Rational(r) => r.is_zero(),
+        }
+    }
+}
+impl num::One for Number {
+    fn one() -> Self {
+        Self::one()
+    }
+
+    fn is_one(&self) -> bool
+    where
+        Self: PartialEq,
+    {
+        match self {
+            Number::Integer(i) => i.is_one(),
+            // Just in-case something unsimplified comes by, we are still technically correct
+            Number::Rational(r) => r.numer().is_one() && r.denom().is_one(),
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum NumberFromStrError {
+    #[error(transparent)]
+    Integer(#[from] ParseBigIntError),
+    #[error("cannot make rational over 0")]
+    RatioDenominatorZero,
+}
+
+impl num::Num for Number {
+    type FromStrRadixErr = NumberFromStrError;
+    fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
+        use num::Zero;
+
+        if str.contains('/') {
+            // Split at / and read both sides, and simplify the number
+            let parts = str.splitn(2, '/').collect::<Vec<_>>();
+            // From splitn, we know parts has length 2, and it *definitely* contains a / so just treat as fraction parts
+            let numer = BigInt::from_str_radix(parts[0], radix)?;
+            let denom = BigInt::from_str_radix(parts[1], radix)?;
+            if denom.is_zero() {
+                Err(NumberFromStrError::RatioDenominatorZero)
+            } else {
+                Ok(Number::simplify(BigRational::new(numer, denom)))
+            }
+        } else {
+            Ok(Number::Integer(BigInt::from_str_radix(str, radix)?))
+        }
     }
 }
 

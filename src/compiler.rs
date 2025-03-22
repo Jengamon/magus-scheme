@@ -15,7 +15,7 @@ use crate::{
     bytecode::{Bytecode, Chunk, ChunkPtr, Constant, ImportFallbackMap, SourceData},
     environment::{Environment, StackEnvironment, StackEnvironmentPtr},
     interpreter::{Includer, ValuePointers, thread::Thread},
-    runtime::lambda::{CompiledLambda, CompiledLambdaPtr, Lambda},
+    runtime::lambda::{CompiledLambda, CompiledLambdaPtr, Lambda, NativeLambdaPtr},
 };
 
 /// List of Scheme feature identifiers that we support
@@ -149,7 +149,8 @@ pub struct SyntaxContext<'a, 'gc> {
 }
 
 impl<'gc> SyntaxContext<'_, 'gc> {
-    pub fn push_constant(&mut self, c: Constant) -> usize {
+    /// Add a constant to the current compile context
+    pub fn add_constant(&mut self, c: Constant) -> usize {
         if let Some(p) = self.constants.iter().position(|constant| constant == &c) {
             p
         } else {
@@ -159,6 +160,7 @@ impl<'gc> SyntaxContext<'_, 'gc> {
         }
     }
 
+    /// Add a compiled lambda to the current compile context to refer to it from bytecode
     pub fn add_lambda(&mut self, ptr: CompiledLambdaPtr<'gc>) -> usize {
         if let Some(p) = self
             .lambdas
@@ -173,7 +175,22 @@ impl<'gc> SyntaxContext<'_, 'gc> {
         }
     }
 
-    // Internal method to create an upvalue reference
+    /// Add a native lambda to the current compile context to refer to it from bytecode
+    pub fn add_native_lambda(&mut self, ptr: NativeLambdaPtr<'gc>) -> usize {
+        if let Some(p) = self
+            .lambdas
+            .iter()
+            .position(|lptr| matches!(lptr, Lambda::Native(lptr) if Gc::ptr_eq(*lptr, ptr)))
+        {
+            p
+        } else {
+            let idx = self.lambdas.len();
+            self.lambdas.push(Lambda::Native(ptr));
+            idx
+        }
+    }
+
+    /// Internal method to create an upvalue reference in the current compile context
     pub(crate) fn add_upvalue(&mut self) -> usize {
         // Upvalues should be comparable to see if they are referencing the same out-of-scope value
         let idx = *self.upvalues;
@@ -181,18 +198,23 @@ impl<'gc> SyntaxContext<'_, 'gc> {
         idx
     }
 
+    /// Get all constants in the current compile context
     pub fn constants(&self) -> impl IntoIterator<Item = Constant> {
         self.constants.clone()
     }
 
+    /// Get all lambdas in the current compile context
     pub fn lambdas(&self) -> impl IntoIterator<Item = Lambda<'gc>> {
         self.lambdas.clone()
     }
 
+    /// Get all promises in the current compile context
+    #[deprecated = "check if using native lambdas can solve w/o adding bytecode support"]
     pub fn promises(&self) -> impl IntoIterator<Item = Box<[Bytecode]>> {
         self.promises.clone()
     }
 
+    /// Get the number of upvalues in the current compile context
     pub fn upvalues(&self) -> usize {
         *self.upvalues
     }
@@ -1288,7 +1310,7 @@ impl<'gc> Compiler<'gc> {
     ) -> Result<SyntaxReturn<'gc>, CompileError> {
         macro_rules! simple_constant {
             ($data:expr => $name:ident) => {{
-                let index = ctx.push_constant(Constant::$name($data));
+                let index = ctx.add_constant(Constant::$name($data));
                 Ok(SyntaxReturn::Code(Box::from([Bytecode::PushConst {
                     index,
                 }])))
@@ -1306,7 +1328,7 @@ impl<'gc> Compiler<'gc> {
             }
             ProgramData::String(spur) => {
                 let index =
-                    ctx.push_constant(Constant::String(Arc::from(ctx.interner.resolve(spur))));
+                    ctx.add_constant(Constant::String(Arc::from(ctx.interner.resolve(spur))));
                 Ok(SyntaxReturn::Code(Box::from([Bytecode::PushConst {
                     index,
                 }])))

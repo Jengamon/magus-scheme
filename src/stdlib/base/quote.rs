@@ -29,7 +29,7 @@ impl Syntax for Quote {
             macro_rules! constant_eval {
                 ($e:expr => $f:ident) => {
                     vec![Bytecode::PushConst {
-                        index: ctx.push_constant(Constant::$f($e)),
+                        index: ctx.add_constant(Constant::$f($e)),
                     }]
                 };
             }
@@ -87,14 +87,14 @@ impl Syntax for Quote {
                         ListHead::Import => {
                             let import = ctx.interner.get_or_intern_static("import");
                             data.push(Bytecode::PushConst {
-                                index: ctx.push_constant(Constant::Symbol(import)),
+                                index: ctx.add_constant(Constant::Symbol(import)),
                             });
                         }
                         ListHead::DefineLibrary => {
                             let define_library =
                                 ctx.interner.get_or_intern_static("define-library");
                             data.push(Bytecode::PushConst {
-                                index: ctx.push_constant(Constant::Symbol(define_library)),
+                                index: ctx.add_constant(Constant::Symbol(define_library)),
                             });
                         }
                     };

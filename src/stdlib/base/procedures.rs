@@ -4,8 +4,8 @@ pub use control::{Apply, CallCc, Features};
 pub use conversions::{Exact, Inexact};
 pub use equality::{IsEq, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
-pub use math::{Add, Divide, Multiply, Subtract};
-pub use predicates::{IsNull, IsPair};
+pub use math::{Add, Divide, Gcd, Multiply, Subtract};
+pub use predicates::{IsExact, IsInexact, IsNull, IsPair};
 pub use structure::{Cons, Values};
 
 mod equality {
@@ -377,6 +377,7 @@ mod math {
     };
     use either::Either;
     use gc_arena::{Collect, Gc};
+    use num::{BigInt, FromPrimitive, Zero};
 
     #[derive(Debug, Collect)]
     #[collect(require_static)]
@@ -556,11 +557,19 @@ mod math {
 
             for arg in args.iter().skip(1) {
                 result = if let Value::Number(n) = *arg.borrow() {
+                    if n.is_zero() {
+                        return Err(anyhow::anyhow!("cannot divide by 0"))?;
+                    }
+
                     match result {
                         Either::Left(l) => Either::Left(&l / &*n),
                         Either::Right(f) => Either::Right(f / n.to_inexact()),
                     }
                 } else if let Value::Inexact(f) = *arg.borrow() {
+                    if f == 0.0 {
+                        return Err(anyhow::anyhow!("cannot divide by 0"))?;
+                    }
+
                     match result {
                         Either::Left(l) => Either::Right(l.to_inexact() / f),
                         Either::Right(l) => Either::Right(l / f),
@@ -581,6 +590,134 @@ mod math {
             ]))
         }
     }
+
+    /// Returns 2 numbers: n_q = floor(n1/n2) and it's remainder (n_r = n1 - n2n_q)
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct FloorSlash;
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct FloorQuotient;
+    #[derive(Debug, Collect)]
+    /// Also known as `modulo`
+    #[collect(require_static)]
+    pub struct FloorRemainder;
+    /// Returns 2 numbers: n_q = trunc(n1/n2) and it's remainder (n_r = n1 - n2n_q)
+    // trunc(x) = { if x < 0: ceil(x); else: floor(x)
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct TruncateSlash;
+    /// Also known as `quotient`
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct TruncateQuotient;
+    /// Also known as `remainder`
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct TruncateRemainder;
+
+    /// Get the numerator of a rational number
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Numerator;
+    /// Get the denominator of a rational number
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Denominator;
+
+    /// Get the greatest common divisor of a set of numbers
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Gcd;
+
+    impl NativeLambda for Gcd {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(0)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            if args
+                .iter()
+                .any(|a| !matches!(*a.borrow(), Value::Number(_) | Value::Inexact(_)))
+            {
+                Err(anyhow::anyhow!(
+                    "gcd does not support non-numerical arguments"
+                ))?
+            }
+
+            if args.len() == 1 {
+                // If there is only 1 argument, that is the result
+                return Ok(LambdaReturn::Return(vec![args[0]]));
+            } else if args.is_empty() {
+                // handle 0 arguments
+                return Ok(LambdaReturn::Return(vec![
+                    Value::Number(Gc::new(&ctx, Number::ZERO)).into_ptr(&ctx),
+                ]));
+            }
+
+            // handle the first 2 arguments
+            let mut res = match (*args[0].borrow(), *args[1].borrow()) {
+                (Value::Number(n1), Value::Number(n2)) => Either::Left(n1.gcd(&n2)),
+                (Value::Number(n1), Value::Inexact(n2)) if n2.fract() == 0.0 => {
+                    let n2 =
+                        Number::from(BigInt::from_f64(n2).expect("failed to convert to integer"));
+                    Either::Right(n1.gcd(&n2))
+                }
+                (Value::Inexact(n1), Value::Number(n2)) if n1.fract() == 0.0 => {
+                    let n1 =
+                        Number::from(BigInt::from_f64(n1).expect("failed to convert to integer"));
+                    Either::Right(n1.gcd(&n2))
+                }
+                (Value::Inexact(n1), Value::Inexact(n2))
+                    if n1.fract() == 0.0 && n2.fract() == 0.0 =>
+                {
+                    let n1 =
+                        Number::from(BigInt::from_f64(n1).expect("failed to convert to integer"));
+                    let n2 =
+                        Number::from(BigInt::from_f64(n2).expect("failed to convert to integer"));
+                    Either::Right(n1.gcd(&n2))
+                }
+                _ => Err(anyhow::anyhow!(
+                    "gcd does not support non-integer inexact numbers"
+                ))?,
+            };
+
+            for arg in args.iter().skip(2) {
+                res = match *arg.borrow() {
+                    Value::Number(n) => match res {
+                        Either::Left(n1) => Either::Left(n1.gcd(&n)),
+                        Either::Right(n1) => Either::Right(n1.gcd(&n)),
+                    },
+                    Value::Inexact(n) if n.fract() == 0.0 => {
+                        let n = Number::from(
+                            BigInt::from_f64(n).expect("failed to convert to integer"),
+                        );
+                        match res {
+                            Either::Left(n1) => Either::Right(n1.gcd(&n)),
+                            Either::Right(n1) => Either::Right(n1.gcd(&n)),
+                        }
+                    }
+                    _ => Err(anyhow::anyhow!(
+                        "gcd does not support non-integer inexact numbers"
+                    ))?,
+                }
+            }
+
+            Ok(LambdaReturn::Return(vec![match res {
+                Either::Left(n) => Value::Number(Gc::new(&ctx, n)).into_ptr(&ctx),
+                Either::Right(f) => Value::Inexact(f.to_inexact()).into_ptr(&ctx),
+            }]))
+        }
+    }
+
+    /// Get the least common multiple of a set of numbers
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Lcm;
 }
 
 mod list {
@@ -838,6 +975,46 @@ mod predicates {
             //
             // I think no, for the stdlib, the only pair considered to be null is the thread null value
             let val = matches!(*args[0].borrow(), Value::Cons(_) if Gc::ptr_eq(args[0], ctx.thread_ctx.null_value));
+
+            Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IsExact;
+
+    impl NativeLambda for IsExact {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let val = matches!(*args[0].borrow(), Value::Number(_));
+
+            Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IsInexact;
+
+    impl NativeLambda for IsInexact {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let val = matches!(*args[0].borrow(), Value::Inexact(_));
 
             Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
         }

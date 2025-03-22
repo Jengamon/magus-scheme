@@ -61,8 +61,12 @@ fn quote_program<'gc>(
         ProgramData::EmptyList => vec![Bytecode::PushNull],
         ProgramData::List { head, body } => {
             let mut data = vec![Bytecode::PushNull];
-            for it in body.iter().rev() {
-                data.extend(quote_program(*it, ctx, labels)?);
+            let body_chunks = body
+                .iter()
+                .map(|it| quote_program(*it, ctx, labels))
+                .collect::<Vec<_>>();
+            for it in body_chunks.into_iter().rev() {
+                data.extend(it?);
                 data.push(Bytecode::MakePair);
             }
             match head {
@@ -87,9 +91,13 @@ fn quote_program<'gc>(
         }
         ProgramData::DottedList { pre_dot, dot } => {
             debug_assert!(!pre_dot.is_empty());
+            let body_chunks = pre_dot
+                .iter()
+                .map(|it| quote_program(*it, ctx, labels))
+                .collect::<Vec<_>>();
             let mut data = quote_program(*dot, ctx, labels)?;
-            for it in pre_dot.iter().rev() {
-                data.extend(quote_program(*it, ctx, labels)?);
+            for it in body_chunks.into_iter().rev() {
+                data.extend(it?);
                 data.push(Bytecode::MakePair);
             }
             data
@@ -186,8 +194,12 @@ fn quasiquote_program<'gc>(
         ProgramData::List { head, body } => {
             if *level > 0 {
                 let mut data = vec![Bytecode::PushNull];
-                for it in body.iter().rev() {
-                    let mut code = quasiquote_program(*it, compiler, ctx, labels, level)?;
+                let body_chunks = body
+                    .iter()
+                    .map(|it| quasiquote_program(*it, compiler, ctx, labels, level))
+                    .collect::<Vec<_>>();
+                for it in body_chunks.into_iter().rev() {
+                    let mut code = it?;
                     if code.last().is_some_and(|c| !matches!(c, Bytecode::Splice)) {
                         code.push(Bytecode::MakePair);
                     }
@@ -221,9 +233,13 @@ fn quasiquote_program<'gc>(
         ProgramData::DottedList { pre_dot, dot } => {
             if *level > 0 {
                 debug_assert!(!pre_dot.is_empty());
+                let body_chunks = pre_dot
+                    .iter()
+                    .map(|it| quasiquote_program(*it, compiler, ctx, labels, level))
+                    .collect::<Vec<_>>();
                 let mut data = quasiquote_program(*dot, compiler, ctx, labels, level)?;
-                for it in pre_dot.iter().rev() {
-                    data.extend(quasiquote_program(*it, compiler, ctx, labels, level)?);
+                for it in body_chunks.into_iter().rev() {
+                    data.extend(it?);
                     data.push(Bytecode::MakePair);
                 }
                 data

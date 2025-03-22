@@ -667,6 +667,8 @@ impl<'gc> Thread<'gc> {
             // at the start) or the previous frame (if there was an index), something to the effect of:
             // c.frames.iter()
             // .scan(last_upvalue_index, |upvalue_index, f| if f.upvalue_index.is_none() { ThreadFrame{upvalue_index, ..f} } else { *upvalue_index = f.upvalue_index; f }).collect()
+            // TODO instead of the scan, investigate just replacing the upvalue_index of all continuation frames with the index of the
+            // last frame
             // then we create dynamic-wind frames as necessary on top of these frames, where the handler copies the upvalue_index of the frame it comes from.
             // Then the frames we just created, together with the dynamic-wind frames generated from all frames (including the current ones) *replace* the current frames
             // (this is why we "cheat" then the continuation is empty, at that point, we only have to handle dynamic-wind)
@@ -1139,7 +1141,7 @@ impl<'gc> Thread<'gc> {
                                 continue;
                             };
                             let value_list = match *value.borrow() {
-                                Value::Cons(c) if Gc::ptr_eq(value, ctx.null_value) => vec![],
+                                Value::Cons(_) if Gc::ptr_eq(value, ctx.null_value) => vec![],
                                 Value::Cons(c) => {
                                     if let Some(v) = c.list_values(value, ctx.null_value) {
                                         v.into_iter().collect()

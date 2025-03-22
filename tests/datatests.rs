@@ -34,7 +34,13 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
     // )?;
     let includer = NullIncluder;
     let comp = interp.new_compiler();
-    stdlib::base::register_module(&mut interp, &comp, &mut test_world, Some(10_000))?;
+    stdlib::base::register_module(
+        &mut interp,
+        &comp,
+        &mut test_world,
+        Some(10_000),
+        std::iter::empty::<&str>(),
+    )?;
     let file_name = format!("{path}.scm");
     let chunk =
         interp.compiler_context::<anyhow::Error>(&comp, |mc, comp, value_pointers, interner| {
@@ -48,6 +54,7 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
             let library_def = LibraryDefinitionContext {
                 max_fuel: None,
                 value_pointers,
+                additional_features: None,
             };
             Ok(comp.compile(mc, &mut ecc, &library_def, programs)?)
         })?;
@@ -214,6 +221,7 @@ fn compile_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()
         let library_def = LibraryDefinitionContext {
             max_fuel: None,
             value_pointers,
+            additional_features: None,
         };
         match compiler.compile(mc, &mut ecc, &library_def, programs) {
             Ok(chunk) => {

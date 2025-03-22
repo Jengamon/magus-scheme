@@ -72,14 +72,14 @@ impl<'gc> Transformer<'gc> for SyntaxRulesImpl {
         todo!()
     }
 
-    fn is_definition(&self, _ptr: ProgramPtr<'_>, _compiler: &Compiler<'_>) -> bool {
+    fn is_definition(&self, _ptr: ProgramPtr<'gc>, _compiler: &Compiler<'gc>) -> bool {
         // Check the head of the matched code and if it is a definition, then we
         // are a container
         // No match is considered false
         false
     }
 
-    fn is_container(&self, _ptr: ProgramPtr<'_>, _compiler: &Compiler<'_>) -> bool {
+    fn is_container(&self, _ptr: ProgramPtr<'gc>, _compiler: &Compiler<'gc>) -> bool {
         // Check the head of the matched code and if it is a container, then we
         // are a container
         // No match is considered false

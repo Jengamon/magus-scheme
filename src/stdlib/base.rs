@@ -171,12 +171,12 @@ impl Syntax for Lambda {
 }
 
 /// (scheme base) module
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Base {
     /// Any additional features (features) should provide and runtime cond-expand should expand
     // TODO Add a slot for where compile-time cond-expand should place additional features (probably in
     // LibraryDeclarationContext)
-    pub additional_features: Vec<Box<str>>,
+    pub additional_features: Arc<[Arc<str>]>,
 }
 
 impl Module for Base {
@@ -271,7 +271,9 @@ impl Module for Base {
             "apply" => lambda!(Apply),
             "exact" => lambda!(Exact),
             "inexact" => lambda!(Inexact),
-            "features" => lambda!(Features::from_iter(self.additional_features.clone())),
+            "features" => lambda!(Features::from_iter(
+                self.additional_features.iter().cloned()
+            )),
             "gcd" => lambda!(Gcd),
             "exact?" => lambda!(IsExact),
             "inexact?" => lambda!(IsInexact),
@@ -305,14 +307,23 @@ pub fn register_module(
     handle: &CompilerHandle,
     world: &mut World,
     max_fuel: Option<i32>,
+    additional_features: impl IntoIterator<Item = impl AsRef<str>>,
 ) -> anyhow::Result<()> {
+    let additional_features = additional_features
+        .into_iter()
+        .map(|s| Arc::from(s.as_ref()))
+        .collect::<Arc<[_]>>();
     let name = LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme base));
+    let base_module = Base {
+        additional_features: additional_features.clone(),
+    };
     // Insert our module into the given world.
-    world.insert(name.clone(), Base::default())?;
+    // TODO Allow for additional features to be passed in
+    world.insert(name.clone(), base_module.clone())?;
     // This is the world used to compile the Scheme implementation of things.
     let world = {
         let mut world = World::default();
-        world.insert(name.clone(), Base::default())?;
+        world.insert(name.clone(), base_module)?;
         world
     };
     interpreter.try_enter(|mc, arena, interner| {
@@ -333,6 +344,7 @@ pub fn register_module(
         let library_def = LibraryDefinitionContext {
             max_fuel,
             value_pointers,
+            additional_features: Some(&additional_features),
         };
         compiler.define_library(mc, &name, &mut ecc, false, &library_def, library_decls)?;
         Ok::<_, anyhow::Error>(())

@@ -37,8 +37,13 @@ pub fn target_features() -> impl IntoIterator<Item = Box<str>> {
     let target = target_triple::TARGET;
     if let Ok(triple) = target_lexicon::Triple::from_str(target) {
         let arch = triple.architecture.into_str();
-        let os = triple.operating_system.into_str();
-        [&arch, &os, target].into_iter().map(Box::from).collect()
+        if triple.operating_system == target_lexicon::OperatingSystem::Unknown {
+            // only mark arch and target if os is unknown
+            [&arch, target].into_iter().map(Box::from).collect()
+        } else {
+            let os = triple.operating_system.into_str();
+            [&arch, &os, target].into_iter().map(Box::from).collect()
+        }
     } else {
         vec![Box::from(target)]
     }
@@ -254,7 +259,7 @@ pub trait Transformer<'gc>: std::fmt::Debug {
     ) -> anyhow::Result<SyntaxReturn<'gc>>;
 
     /// Registers this syntax item as a definition
-    fn is_definition(&self, _ptr: ProgramPtr<'_>, _compiler: &Compiler<'_>) -> bool {
+    fn is_definition(&self, _ptr: ProgramPtr<'gc>, _compiler: &Compiler<'gc>) -> bool {
         false
     }
 
@@ -262,7 +267,7 @@ pub trait Transformer<'gc>: std::fmt::Debug {
     ///
     /// Affects how definitions are registered. A container syntax is considered a
     /// definition if all of it's components are definitions (or containers of only definitions)
-    fn is_container(&self, _ptr: ProgramPtr<'_>, _compiler: &Compiler<'_>) -> bool {
+    fn is_container(&self, _ptr: ProgramPtr<'gc>, _compiler: &Compiler<'gc>) -> bool {
         false
     }
 }
@@ -312,7 +317,7 @@ pub trait Syntax: std::fmt::Debug {
     ) -> anyhow::Result<SyntaxReturn<'gc>>;
 
     /// Registers this syntax item as a definition
-    fn is_definition(&self, _ptr: ProgramPtr<'_>, _compiler: &Compiler<'_>) -> bool {
+    fn is_definition<'gc>(&self, _ptr: ProgramPtr<'gc>, _compiler: &Compiler<'gc>) -> bool {
         false
     }
 
@@ -320,7 +325,7 @@ pub trait Syntax: std::fmt::Debug {
     ///
     /// Affects how definitions are registered. A container syntax is considered a
     /// definition if all of it's components are definitions (or containers of only definitions)
-    fn is_container(&self, _ptr: ProgramPtr<'_>, _compiler: &Compiler<'_>) -> bool {
+    fn is_container<'gc>(&self, _ptr: ProgramPtr<'gc>, _compiler: &Compiler<'gc>) -> bool {
         false
     }
 
@@ -547,7 +552,7 @@ struct SchemeLibrary<'gc> {
 // }
 
 /// A container for Scheme-defined modules (using `define-library` at the top level)
-#[derive(Collect, Debug, Default)]
+#[derive(Collect, Debug, Default, Clone)]
 #[collect(no_drop)]
 pub struct LocalWorld<'gc> {
     modules: HashMap<LibraryName, SchemeLibrary<'gc>>,
@@ -620,7 +625,7 @@ impl Syntax for PrivateTransformer {
             .and_then(|trans| trans.evaluate(ctx, compiler, import_env, args))
     }
 
-    fn is_definition(&self, ptr: ProgramPtr<'_>, compiler: &Compiler<'_>) -> bool {
+    fn is_definition<'gc>(&self, ptr: ProgramPtr<'gc>, compiler: &Compiler<'gc>) -> bool {
         compiler
             .stash
             .transformers
@@ -629,7 +634,7 @@ impl Syntax for PrivateTransformer {
             .unwrap_or_default()
     }
 
-    fn is_container(&self, ptr: ProgramPtr<'_>, compiler: &Compiler<'_>) -> bool {
+    fn is_container<'gc>(&self, ptr: ProgramPtr<'gc>, compiler: &Compiler<'gc>) -> bool {
         compiler
             .stash
             .transformers
@@ -1193,11 +1198,13 @@ pub struct ExternalCompilerContext<'a> {
 }
 
 /// Context struct for library definition parameters
-pub struct LibraryDefinitionContext<'gc> {
+pub struct LibraryDefinitionContext<'a, 'gc> {
     /// Maximum amount of fuel used *per* library definition. `None` means to run to completion (unlimited).
     pub max_fuel: Option<i32>,
     /// Pointers to null (semantic), true and false (convenience)
     pub value_pointers: ValuePointers<'gc>,
+    /// Any additional features to be supported by `(cond-expand)`
+    pub additional_features: Option<&'a [Arc<str>]>,
 }
 
 impl<'gc> Compiler<'gc> {
@@ -1297,7 +1304,7 @@ impl<'gc> Compiler<'gc> {
         &mut self,
         mc: &Mutation<'gc>,
         ecc: &mut ExternalCompilerContext<'_>,
-        library_def: &LibraryDefinitionContext<'gc>,
+        library_def: &LibraryDefinitionContext<'_, 'gc>,
         programs: impl IntoIterator<Item = ProgramPtr<'gc>>,
     ) -> Result<ChunkPtr<'gc>, CompileError> {
         self.stash.cleanup();
@@ -1821,6 +1828,7 @@ impl<'gc> Compiler<'gc> {
             }
         }
 
+        let mut found = FxHashSet::default();
         let mut names = FxHashSet::default();
         let mut found_library = false;
 
@@ -1836,7 +1844,7 @@ impl<'gc> Compiler<'gc> {
                 &mut import_symbols,
                 &mut import_mapping,
                 interner,
-                &names,
+                &found,
                 !world.has_library(&library_name),
             )?;
             // for each of the remaining symbols, search for them in the library, erroring if the symbol isn't found, then
@@ -1863,6 +1871,7 @@ impl<'gc> Compiler<'gc> {
                         }
                     }
                     names.insert(mapped_symbol);
+                    found.insert(*symbol);
                 } else if !world.has_library(&library_name) {
                     // We fail name resolution if there is no native module corresponding to this
                     // one, and the name was not found
@@ -1884,12 +1893,12 @@ impl<'gc> Compiler<'gc> {
                 &mut import_symbols,
                 &mut import_mapping,
                 interner,
-                &names,
+                &found,
                 true,
             )?;
 
             // Import from the native library names that *haven't* been imported
-            for symbol in import_symbols.difference(&names.clone()).copied() {
+            for symbol in import_symbols.difference(&found).copied() {
                 let mapped_symbol = import_mapping.get(&symbol).copied().unwrap_or(symbol);
                 if let Some(syntax) = modl.syntax(interner, symbol) {
                     // Define a macro in scope
@@ -1936,7 +1945,7 @@ impl<'gc> Compiler<'gc> {
         name: &LibraryName,
         ecc: &mut ExternalCompilerContext<'_>,
         from_code: bool,
-        library_def: &LibraryDefinitionContext<'gc>,
+        library_def: &LibraryDefinitionContext<'_, 'gc>,
         library_decls: impl IntoIterator<Item = LibraryDeclaration<'gc>>,
     ) -> Result<(), DefineLibraryError> {
         // The '() module is private from Scheme code
@@ -1964,6 +1973,8 @@ impl<'gc> Compiler<'gc> {
         // The compiler we will use to compile the library (so that the only interface between these compilers is
         // the library export interface.)
         let mut lib_compiler = Compiler::new(mc);
+        // Copy over our local world (for those local defs)
+        lib_compiler.local_world = self.local_world.clone();
 
         // When compiling we use the *exact* same ecc, so that the values are compatible with *this* interpreter (as
         // we would be using the same interner)
@@ -1990,7 +2001,7 @@ impl<'gc> Compiler<'gc> {
             code: &[ProgramPtr<'gc>],
             name: &LibraryName,
             ecc: &mut ExternalCompilerContext<'_>,
-            library_def: &LibraryDefinitionContext<'gc>,
+            library_def: &LibraryDefinitionContext<'_, 'gc>,
             lib_compiler: &mut Compiler<'gc>,
             global_env: StackEnvironmentPtr<'gc>,
             fuel: &mut Fuel,

@@ -182,6 +182,7 @@ fn execute(
             let library_def = LibraryDefinitionContext {
                 max_fuel: None,
                 value_pointers,
+                additional_features: None,
             };
             Ok(compiler.compile(mc, &mut ecc, &library_def, programs)?)
         });
@@ -335,7 +336,13 @@ fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle)> {
     // max_fuel = None is *inadvisable* in any form of production code, b/c it means that if an infinite loop is
     // defined and executed in a library, it will run forever.
     // Rather, pass in a large amount of fuel.
-    stdlib::base::register_module(&mut interpreter, &compiler, &mut world, Some(10_000))?;
+    stdlib::base::register_module(
+        &mut interpreter,
+        &compiler,
+        &mut world,
+        Some(10_000),
+        std::iter::empty::<&str>(),
+    )?;
 
     // Register cxr source
     // TODO Make this a method on interpreter? input LibraryName, str source, str source filename, max_fuel, compiler handle
@@ -359,6 +366,7 @@ fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle)> {
         let library_def = LibraryDefinitionContext {
             max_fuel: Some(10_000),
             value_pointers,
+            additional_features: None,
         };
         compiler.define_library(mc, &name, &mut ecc, false, &library_def, library_decls)?;
         Ok::<_, anyhow::Error>(())

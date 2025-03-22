@@ -1139,7 +1139,8 @@ impl<'gc> Thread<'gc> {
                                 continue;
                             };
                             let value_list = match *value.borrow() {
-                                Value::Cons(c) if !Gc::ptr_eq(value, ctx.null_value) => {
+                                Value::Cons(c) if Gc::ptr_eq(value, ctx.null_value) => vec![],
+                                Value::Cons(c) => {
                                     if let Some(v) = c.list_values(value, ctx.null_value) {
                                         v.into_iter().collect()
                                     } else {

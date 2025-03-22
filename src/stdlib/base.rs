@@ -19,6 +19,7 @@ use crate::{
 
 pub use conditionals::If;
 pub use define::{Define, SetBang};
+pub use macros::{DefineSyntax, SyntaxRules};
 pub use procedures::{
     Add, Apply, Ascending, Caar, Cadr, CallCc, Car, Cdar, Cddr, Cdr, Cons, Descending, Divide,
     Equal, Exact, Features, Gcd, Inexact, IsEq, IsEqv, IsExact, IsInexact, IsNull, IsPair,
@@ -30,6 +31,7 @@ use super::Formals;
 
 mod conditionals;
 mod define;
+mod macros;
 mod procedures;
 mod quote;
 
@@ -214,6 +216,8 @@ impl Module for Base {
             "gcd",
             "exact?",
             "inexact?",
+            "define-syntax",
+            "syntax-rules",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -278,12 +282,14 @@ impl Module for Base {
             "set!" => Some(Arc::new(SetBang)),
             "if" => Some(Arc::new(If)),
             "quote" => Some(Arc::new(Quote)),
+            "define-syntax" => Some(Arc::new(DefineSyntax)),
+            "syntax-rules" => Some(Arc::new(SyntaxRules)),
             _ => None,
         }
     }
 }
 
-const SCHEME_BASE: &str = include_str!("scheme_base.scm");
+const MODULE_SRC: &str = include_str!("scheme_base.scm");
 /// Registers this module (and it's Scheme implementations) under the name `(scheme base)`
 pub fn register_module(
     interpreter: &mut Interpreter,
@@ -301,7 +307,7 @@ pub fn register_module(
         world
     };
     interpreter.try_enter(|mc, arena, interner| {
-        let programs = ("base_scheme.scm", SCHEME_BASE).parse_program(mc, interner, false)?;
+        let programs = ("base_scheme.scm", MODULE_SRC).parse_program(mc, interner, false)?;
         let library_decls = programs
             .into_iter()
             .map(|p| LibraryDeclaration::convert(p, interner))

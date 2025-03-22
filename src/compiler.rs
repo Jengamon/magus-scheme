@@ -209,7 +209,7 @@ impl<'gc> SyntaxContext<'_, 'gc> {
     }
 
     /// Get all promises in the current compile context
-    #[deprecated = "check if using native lambdas can solve w/o adding bytecode support"]
+    // #[deprecated = "check if using native lambdas can solve w/o adding bytecode support"]
     pub fn promises(&self) -> impl IntoIterator<Item = Box<[Bytecode]>> {
         self.promises.clone()
     }
@@ -227,8 +227,33 @@ impl<'gc> std::ops::Deref for SyntaxContext<'_, 'gc> {
     }
 }
 
-pub trait Transformer<'gc>: Syntax {}
-impl<'gc, T: Syntax + Collect<'gc>> Transformer<'gc> for T {}
+pub trait Transformer<'gc>: std::fmt::Debug {
+    /// Evaluate a macro, until it finishes
+    ///
+    /// # Parameters
+    /// - `mc`: [`gc_arena`] mutation context
+    /// - `args`: external representation corresponding to passed in syntax
+    fn evaluate(
+        &self,
+        ctx: &mut SyntaxContext<'_, 'gc>,
+        compiler: &mut Compiler<'gc>,
+        import_env: StackEnvironmentPtr<'gc>,
+        args: &[ProgramPtr<'gc>],
+    ) -> anyhow::Result<SyntaxReturn<'gc>>;
+
+    /// Registers this syntax item as a definition
+    fn is_definition(&self, _ptr: ProgramPtr<'_>, _compiler: &Compiler<'_>) -> bool {
+        false
+    }
+
+    /// Registers this syntax item as a container
+    ///
+    /// Affects how definitions are registered. A container syntax is considered a
+    /// definition if all of it's components are definitions (or containers of only definitions)
+    fn is_container(&self, _ptr: ProgramPtr<'_>, _compiler: &Compiler<'_>) -> bool {
+        false
+    }
+}
 pub type TransformerPtr<'gc> = Gc<'gc, dyn Transformer<'gc>>;
 
 /// The result of a syntax evaluation
@@ -469,6 +494,10 @@ impl World {
         Ok(())
     }
 
+    pub fn has_library(&self, name: &LibraryName) -> bool {
+        self.modules.contains_key(name)
+    }
+
     pub fn library(&self, name: &LibraryName) -> Option<&(dyn Module + Send + Sync)> {
         self.modules.get(name).map(|m| m.as_ref())
     }
@@ -614,7 +643,22 @@ pub struct Stash<'gc> {
     transformers: slotmap::SlotMap<TransformerKey, TransformerPtr<'gc>>,
     // programs: slotmap::SlotMap<ProgramKey, ProgramPtr<'gc>>,
 }
-// TODO Allow storing and accessing these
+
+impl Stash<'_> {
+    fn cleanup(&mut self) {
+        // Drop transformers where their knobs only have 1 referent: us.
+        let transformers_to_drop = self
+            .transformer_knobs
+            .iter()
+            .filter_map(|(key, knob)| (Arc::strong_count(knob) == 1).then_some(key))
+            .collect::<fxhash::FxHashSet<_>>();
+        for key in transformers_to_drop {
+            self.transformers.remove(key);
+            self.transformer_knobs.remove(key);
+        }
+    }
+}
+
 #[allow(unsafe_code)]
 unsafe impl<'gc> Collect<'gc> for Stash<'gc> {
     fn trace<T: gc_arena::collect::Trace<'gc>>(&self, cc: &mut T) {
@@ -1159,6 +1203,11 @@ impl<'gc> Compiler<'gc> {
         }
     }
 
+    /// Convenience function for cleaning up unused transformers
+    pub fn cleanup(&mut self) {
+        self.stash.cleanup();
+    }
+
     /// Compile an list of programs into a [`Chunk`] (not allowing any imports)
     ///
     /// # Parameters
@@ -1224,6 +1273,8 @@ impl<'gc> Compiler<'gc> {
         library_def: &LibraryDefinitionContext<'gc>,
         programs: impl IntoIterator<Item = ProgramPtr<'gc>>,
     ) -> Result<ChunkPtr<'gc>, CompileError> {
+        self.stash.cleanup();
+
         let mut programs = programs.into_iter().peekable();
         let mut imported = FxHashSet::default();
 
@@ -1509,6 +1560,7 @@ impl<'gc> Compiler<'gc> {
         }
 
         // Unrecurive import set
+        #[derive(Debug, Clone)]
         enum ImportOperations {
             Only {
                 include: FxHashSet<lasso::Spur>,
@@ -1724,14 +1776,18 @@ impl<'gc> Compiler<'gc> {
             }
         }
 
+        let mut names = FxHashSet::default();
+        let mut found_library = false;
+
         // Try to find the library to start the import process
         if let Some(modl) = self.local_world.modules.get(&library_name).cloned() {
+            found_library = true;
             let mut import_symbols: FxHashSet<_> =
                 modl.exported_items.keys().map(|s| **s).collect();
             let mut import_mapping: FxHashMap<_, _> =
                 import_symbols.iter().map(|s| (*s, *s)).collect();
             resolve_operations(
-                operations,
+                operations.clone(),
                 &mut import_symbols,
                 &mut import_mapping,
                 interner,
@@ -1765,11 +1821,16 @@ impl<'gc> Compiler<'gc> {
                     })?
                 }
             }
-            Ok(import_symbols
-                .into_iter()
-                .map(|i| import_mapping.get(&i).copied().unwrap())
-                .collect())
-        } else if let Some(modl) = world.library(&library_name) {
+            names.extend(
+                import_symbols
+                    .into_iter()
+                    .map(|i| import_mapping.get(&i).copied().unwrap()),
+            )
+        }
+
+        // Get native names
+        if let Some(modl) = world.library(&library_name) {
+            found_library = true;
             let mut import_symbols: FxHashSet<_> = modl.all_symbols(interner).into_iter().collect();
             let mut import_mapping: FxHashMap<_, _> =
                 import_symbols.iter().map(|s| (*s, *s)).collect();
@@ -1779,7 +1840,9 @@ impl<'gc> Compiler<'gc> {
                 &mut import_mapping,
                 interner,
             )?;
-            for symbol in &import_symbols {
+
+            // Import from the native library names that *haven't* been imported
+            for symbol in import_symbols.difference(&names) {
                 let mapped_symbol = import_mapping.get(symbol).copied().unwrap_or(*symbol);
                 if let Some(syntax) = modl.syntax(interner, *symbol) {
                     // Define a macro in scope
@@ -1799,14 +1862,20 @@ impl<'gc> Compiler<'gc> {
                     })?
                 }
             }
-            Ok(import_symbols
-                .into_iter()
-                .map(|i| import_mapping.get(&i).copied().unwrap())
-                .collect())
-        } else {
+
+            names.extend(
+                import_symbols
+                    .into_iter()
+                    .map(|i| import_mapping.get(&i).copied().unwrap()),
+            );
+        }
+
+        if !found_library {
             Err(ImportError::LibraryNotFound(
                 library_name.to_string(interner),
             ))
+        } else {
+            Ok(names)
         }
     }
 

@@ -17,6 +17,6 @@ pub mod list {
         }
     }
 
-    const SRFI_LIST: &str = include_str!("srfi_list.scm");
+    const MODULE_SRC: &str = include_str!("srfi_list.scm");
     pub fn register_module() {}
 }

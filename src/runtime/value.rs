@@ -94,7 +94,7 @@ pub enum Value<'gc> {
     // Represents something runnable
     // Procedure(Gc<'gc, Procedure>),
     // TODO Change this to an enum that support Immutable (which would just be import sets)
-    // and Mutable (which are import sets *and* the stack environment pointer)
+    // and Mutable (which is just a CompilerPtr (the environment ptr is implicitly the default env ptr of the compiler))
     // so that `eval` and rebuild the compiler environment when used
     Environment(StackEnvironmentPtr<'gc>),
     UserStruct(UserStruct<'gc>),

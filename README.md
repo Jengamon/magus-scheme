@@ -121,3 +121,16 @@ Due to technicallities of our stack, we try to error where we can, but invalid-*
 b/c it's *technically* not invalid. We should lint code like this (taking advantage of CST~) (the formatter simply makes
 the code follow these lint rules) (essentially linter is suggestions, while formatter
 changes code to match suggestions)
+
+## Scheme Implemented Procedures
+To make things easier on me (hopefully), some of a module's functionality can be implemented in Scheme, as native modules
+are allowed to overlap in name with a local Scheme module. This means that there can be a difference in functionality between
+directly registering a native module with the World, and the method a module might want you to use. In the case
+of the Scheme standard library (located in "src/stdlib/base"), it provides a method `register_module` that will properly set up
+a compiler to fully define the module.
+
+For modules in this repository, there is the method above, but one can also use the public constant `MODULE_SRC` to get the
+code compiled to form the compiler-local Scheme side of a module.
+
+TODO Figure out if this if useful enough to provide an interface that would allow Interpreter to automate this registration step.
+(It probably is useful enough, but check for an actual way to implement)

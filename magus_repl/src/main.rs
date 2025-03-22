@@ -322,16 +322,22 @@ fn execute(
     }
 }
 
-fn repl_stuff() -> (Interpreter, World) {
+fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle)> {
     let mut interpreter = Interpreter::default();
     let mut world = World::default();
-    world
-        .insert(
-            LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme base)),
-            stdlib::base::Base::default(),
-        )
-        .expect("failed to define scheme base module");
-    (interpreter, world)
+    // world
+    //     .insert(
+    //         LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme base)),
+    //         stdlib::base::Base::default(),
+    //     )
+    //     .expect("failed to define scheme base module");
+    let compiler = interpreter.new_compiler();
+    // max_fuel = None is *inadvisable* in any form of production code, b/c it means that if an infinite loop is
+    // defined and executed in a library, it will run forever.
+    // Rather, pass in a large amount of fuel.
+    stdlib::base::register_module(&mut interpreter, &compiler, &mut world, Some(10_000_000))?;
+
+    Ok((interpreter, world, compiler))
 }
 
 fn execute_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> anyhow::Result<()> {
@@ -340,8 +346,7 @@ fn execute_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> an
 
     match compile(&source) {
         Ok(module) => {
-            let (mut interpreter, world) = repl_stuff();
-            let compiler = interpreter.new_compiler();
+            let (mut interpreter, world, compiler) = repl_stuff()?;
             let thread = interpreter.new_empty_thread();
             execute(
                 source,
@@ -387,8 +392,7 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
     println!("Type `#q` or `#quit` to exit. Type `#help` for more commands.");
 
     // compiler setup
-    let (mut interpreter, world) = repl_stuff();
-    let compiler = interpreter.new_compiler();
+    let (mut interpreter, world, compiler) = repl_stuff()?;
     let thread = interpreter.new_empty_thread();
     // import (scheme base)
     interpreter.enter(|mc, arena, interner| {

@@ -139,7 +139,7 @@
     [ "base", "", max, false, "", "" ],
     [ "base", "", member, false, "", "" ],
     [ "base", "procedure", memq, true, "find first sublist where (eq? (car))", "implemented in Scheme" ],
-    [ "base", "procedure", memv, false, "find first sublist where (eqv? (car))", "implemented in Scheme" ],
+    [ "base", "procedure", memv, true, "find first sublist where (eqv? (car))", "implemented in Scheme" ],
     [ "base", "", min, false, "", "" ],
     [ "base", "", modulo, false, "", "" ],
     [ "base", "", negative?, false, "", "" ],

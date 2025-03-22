@@ -324,6 +324,14 @@ impl ExactReal {
                 exponent_neg,
                 is_neg,
             } => {
+                // remove trailing zeros from post_dot
+                let post_dot = {
+                    let mut start = post_dot;
+                    while start % 10 == 0 && start != 0 {
+                        start /= 10;
+                    }
+                    start
+                };
                 let post_dot_10_power = (post_dot as f64).log10().max(1.).ceil()
                     + Self::calc_leading_zeros(leading_zeros) as f64;
                 (if is_neg { -1.0 } else { 1.0 })

@@ -24,7 +24,8 @@ pub use macros::{DefineSyntax, SyntaxRules};
 pub use procedures::{
     Add, Apply, Ascending, Caar, Cadr, CallCc, Car, Cdar, Cddr, Cdr, Cons, Descending, Divide,
     Equal, Exact, Features, Gcd, Inexact, IsEq, IsEqv, IsExact, IsInexact, IsNull, IsPair,
-    MonotonicAscending, MonotonicDescending, Multiply, Subtract, Values,
+    IsString, IsSymbol, MonotonicAscending, MonotonicDescending, Multiply, StringToNumber,
+    StringToSymbol, Subtract, SymbolToString, Values,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -223,6 +224,11 @@ impl Module for Base {
             "syntax-rules",
             "and",
             "or",
+            "string->number",
+            "string->symbol",
+            "symbol->string",
+            "symbol?",
+            "string?",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -277,6 +283,11 @@ impl Module for Base {
             "gcd" => lambda!(Gcd),
             "exact?" => lambda!(IsExact),
             "inexact?" => lambda!(IsInexact),
+            "string->number" => lambda!(StringToNumber),
+            "string->symbol" => lambda!(StringToSymbol),
+            "symbol->string" => lambda!(SymbolToString),
+            "symbol?" => lambda!(IsSymbol),
+            "string?" => lambda!(IsString),
             _ => None,
         }
     }

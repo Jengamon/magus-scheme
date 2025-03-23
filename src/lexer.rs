@@ -1,4 +1,4 @@
-use std::{collections::HashMap, num::NonZeroU16, sync::LazyLock};
+use std::{collections::HashMap, env::consts::OS, num::NonZeroU16, sync::LazyLock};
 
 // TODO Support num::BigInt so that frontend numbers are unbounded, like calculated numbers
 use arbitrary::Arbitrary;
@@ -212,7 +212,7 @@ fn process_string(lexer: &mut logos::Lexer<SyntaxToken>) -> Result<Box<str>, Lex
     Ok(Box::from(string.as_str()))
 }
 
-fn read_number(
+pub(crate) fn read_number(
     lexer: &mut logos::Lexer<SyntaxToken>,
     radix: u32,
 ) -> Result<SchemeNumber, LexerError> {
@@ -250,14 +250,30 @@ fn read_number(
         flags.contains(&flag.to_ascii_lowercase()) || flags.contains(&flag.to_ascii_uppercase())
     };
 
-    if contains_flag('b') && radix != 2
-        || contains_flag('o') && radix != 8
-        || contains_flag('x') && radix != 16
-        || contains_flag('d') && radix != 10
+    // Make sure up to 1 radix is specified
+
+    if ['b', 'o', 'x', 'd']
+        .map(contains_flag)
+        .into_iter()
+        .filter(|b| *b)
+        .count()
+        > 1
     {
-        // Radix mismatch
-        unreachable!("ICE lexer error: mismatched radix {flags:?} radix {radix}");
+        Err(LexerError::MalformedNumber)?
     }
+
+    // Override the radix if a flag specifies a radix
+    let radix = if contains_flag('b') {
+        2
+    } else if contains_flag('o') {
+        8
+    } else if contains_flag('x') {
+        16
+    } else if contains_flag('d') {
+        10
+    } else {
+        radix
+    };
 
     fn read_number_part(
         iter: &mut std::iter::Peekable<impl Iterator<Item = char>>,

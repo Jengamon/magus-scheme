@@ -6,7 +6,7 @@ use crate::{bytecode, environment::StackEnvironmentPtr, runtime::userstruct::Use
 
 use super::{
     lambda::Lambda,
-    value::{ConsCell, ContinuationPtr, Symbol, Value},
+    value::{self, ConsCell, ContinuationPtr, Symbol, Value},
 };
 
 pub trait FromValue<'gc> {
@@ -113,12 +113,15 @@ impl_into_value!(simple ConsCell<'gc> => Cons);
 // impl_into_value!(simple LambdaPtr<'gc> => Lambda);
 impl<'gc> IntoValue<'gc> for String {
     fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {
-        Value::String(Gc::new(mc, RefLock::new(self)))
+        Value::String(value::String::from(Gc::new(mc, RefLock::new(self))))
     }
 }
 impl<'gc> IntoValue<'gc> for std::sync::Arc<str> {
     fn into_value(self, mc: &Mutation<'gc>) -> Value<'gc> {
-        Value::String(Gc::new(mc, RefLock::new(self.to_string())))
+        Value::String(value::String::from(Gc::new(
+            mc,
+            RefLock::new(self.to_string()),
+        )))
     }
 }
 impl<'gc> IntoValue<'gc> for bytecode::Constant {

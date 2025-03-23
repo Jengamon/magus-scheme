@@ -75,7 +75,7 @@ pub enum Value<'gc> {
     Inexact(f64),
     // Strings must be easily accessed/edited, so prefer to store a "String"
     // over slices or intered strings
-    String(Gc<'gc, RefLock<StdString>>),
+    String(String<'gc>),
     /// the value of `'<ident>` `(quote <ident>)`
     Symbol(Symbol),
     Bool(bool),
@@ -132,7 +132,9 @@ impl PartialEq for Value<'_> {
             Value::Void => matches!(other, Value::Void),
             Value::Number(n) => matches!(other, Value::Number(on) if on == n),
             Value::Inexact(i) => matches!(other, Value::Inexact(oi) if oi == i),
-            Value::String(s) => matches!(other, Value::String(os) if Gc::ptr_eq(*s, *os)),
+            Value::String(s) => {
+                matches!(other, Value::String(os) if Gc::ptr_eq(s.string, os.string))
+            }
             Value::Symbol(sym) => matches!(other, Value::Symbol(osym) if osym == sym),
             Value::Bool(b) => matches!(other, Value::Bool(ob) if ob == b),
             Value::Char(c) => matches!(other, Value::Char(oc) if oc == c),
@@ -497,6 +499,40 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
             Value::Continuation(cont) => write!(f, "#<continuation {cont}>"),
             Value::Promise(_) => todo!(),
             Value::Error(e) => write!(f, "#<error {e:p}>"),
+        }
+    }
+}
+
+#[derive(Collect, Clone, Copy, Debug)]
+#[collect(no_drop)]
+pub struct String<'gc> {
+    string: Gc<'gc, RefLock<StdString>>,
+    /// Should this string be mutated?
+    ///
+    /// Native lambdas are technically free to disrespect this flag,
+    /// but it is used to be compliant with the results of something like `(symbol->string)`
+    pub frozen: bool,
+}
+impl<'gc> String<'gc> {
+    /// Create a new string that should not be mutated
+    pub fn new_frozen(string: Gc<'gc, RefLock<StdString>>) -> Self {
+        Self {
+            string,
+            frozen: true,
+        }
+    }
+}
+impl<'gc> std::ops::Deref for String<'gc> {
+    type Target = Gc<'gc, RefLock<StdString>>;
+    fn deref(&self) -> &Self::Target {
+        &self.string
+    }
+}
+impl<'gc> From<Gc<'gc, RefLock<StdString>>> for String<'gc> {
+    fn from(value: Gc<'gc, RefLock<StdString>>) -> Self {
+        Self {
+            string: value,
+            frozen: false,
         }
     }
 }

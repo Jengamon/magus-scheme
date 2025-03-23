@@ -101,7 +101,10 @@ pub type ProgramPtr<'gc> = Gc<'gc, Program<'gc>>;
 #[collect(no_drop)]
 pub enum ProgramData<'gc> {
     Integer(i64),
-    // TODO Support exact rationals
+    // TODO Support exact rationals (b/c string->number supports them, and
+    // not accepting these directly is *odd*)
+    // (sign, numer, denom)
+    // Rational(bool, u64, u64),
     Inexact(f64),
     // TODO complex numbers
     String(#[collect(require_static)] lasso::Spur),

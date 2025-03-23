@@ -1,11 +1,11 @@
 // TODO Split, if this file gets too large, into separate files
 pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, MonotonicDescending};
 pub use control::{Apply, CallCc, Features};
-pub use conversions::{Exact, Inexact};
+pub use conversions::{Exact, Inexact, StringToNumber, StringToSymbol, SymbolToString};
 pub use equality::{IsEq, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
 pub use math::{Add, Divide, Gcd, Multiply, Subtract};
-pub use predicates::{IsExact, IsInexact, IsNull, IsPair};
+pub use predicates::{IsExact, IsInexact, IsNull, IsPair, IsString, IsSymbol};
 pub use structure::{Cons, Values};
 
 mod equality {
@@ -1015,6 +1015,46 @@ mod predicates {
             Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
         }
     }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IsSymbol;
+
+    impl NativeLambda for IsSymbol {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let val = matches!(*args[0].borrow(), Value::Symbol(_));
+
+            Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IsString;
+
+    impl NativeLambda for IsString {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let val = matches!(*args[0].borrow(), Value::String(_));
+
+            Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+        }
+    }
 }
 
 mod structure {
@@ -1075,12 +1115,14 @@ mod structure {
 }
 
 mod conversions {
-    use gc_arena::{Collect, Gc};
+    use gc_arena::{Collect, Gc, RefLock};
+    use num::{BigInt, BigRational, Zero, bigint::Sign};
 
     use crate::{
-        Value,
+        ExactReal, SchemeNumber, Value,
+        lexer::{SyntaxToken, read_number},
         runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
-        value::Number,
+        value::{self, Number},
     };
 
     #[derive(Debug, Collect)]
@@ -1132,6 +1174,175 @@ mod conversions {
             };
 
             Ok(LambdaReturn::Return(vec![ptr]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct StringToNumber;
+
+    impl NativeLambda for StringToNumber {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            if args.len() > 2 {
+                return Err(anyhow::anyhow!(
+                    "string->number expects either 1 or 2 arguments"
+                ))?;
+            }
+
+            let Value::String(string) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "string->number expects a string as its first argument"
+                ))?;
+            };
+
+            let radix = if args.len() == 2 {
+                let Value::Number(radix) = *args[1].borrow() else {
+                    return Err(anyhow::anyhow!(
+                        "string->number expects an exact number as its second argument"
+                    ))?;
+                };
+                Some(radix)
+            } else {
+                None
+            };
+
+            let radix = radix
+                .map(|r| match &*r {
+                    Number::Integer(i) if i == &BigInt::new(Sign::Plus, vec![2]) => Ok(2),
+                    Number::Integer(i) if i == &BigInt::new(Sign::Plus, vec![8]) => Ok(8),
+                    Number::Integer(i) if i == &BigInt::new(Sign::Plus, vec![10]) => Ok(10),
+                    Number::Integer(i) if i == &BigInt::new(Sign::Plus, vec![16]) => Ok(16),
+                    _ => Err(anyhow::anyhow!(
+                        "string->number expects its second argument to be exactly {{2, 8, 10, 16}}"
+                    )),
+                })
+                .unwrap_or(Ok(10))?;
+
+            let input = string.borrow().clone();
+            let mut lexer = SyntaxToken::lexer(&input);
+            // Try to find a possible number token (fail if the lexer fails)
+            while let Some(t) = lexer.next() {
+                if let Ok(SyntaxToken::Number(_)) = t {
+                    // go to the token, lex it as a number, then create the corrresponding number
+                    let num = read_number(&mut lexer, radix);
+                    if let Ok(num) = num {
+                        let res = match num {
+                            SchemeNumber::Exact(e) => match e {
+                                ExactReal::Inf { is_neg } => Some(if is_neg {
+                                    Value::Inexact(f64::NEG_INFINITY)
+                                } else {
+                                    Value::Inexact(f64::INFINITY)
+                                }),
+                                ExactReal::Nan { .. } => Some(Value::Inexact(f64::NAN)),
+                                ExactReal::Integer { value, is_neg } => {
+                                    Some(Value::Number(Gc::new(
+                                        &ctx,
+                                        Number::Integer(BigInt::new(
+                                            if is_neg { Sign::Minus } else { Sign::Plus },
+                                            vec![value as u32, (value >> 32) as u32],
+                                        )),
+                                    )))
+                                }
+                                ExactReal::Rational {
+                                    numer,
+                                    denom,
+                                    is_neg,
+                                } if !denom.is_zero() => Some(Value::Number(Gc::new(
+                                    &ctx,
+                                    Number::Rational(BigRational::new(
+                                        BigInt::new(
+                                            if is_neg { Sign::Minus } else { Sign::Plus },
+                                            vec![numer as u32, (numer >> 32) as u32],
+                                        ),
+                                        BigInt::new(
+                                            Sign::Plus,
+                                            vec![denom as u32, (denom >> 32) as u32],
+                                        ),
+                                    )),
+                                ))),
+                                ExactReal::Rational { .. } => None,
+                                // Exact decimals are not supported
+                                ExactReal::Decimal { .. } => None,
+                            },
+                            SchemeNumber::Inexact(i) => Some(Value::Inexact(i)),
+                            _ => None,
+                        };
+                        if let Some(res) = res {
+                            return Ok(LambdaReturn::Return(vec![res.into_ptr(&ctx)]));
+                        }
+                    }
+                }
+            }
+
+            Ok(LambdaReturn::Return(vec![ctx.thread_ctx.false_value]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct StringToSymbol;
+
+    impl NativeLambda for StringToSymbol {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let Value::String(s) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "string->symbol expects a string as its first argument"
+                ))?;
+            };
+
+            let sym = ctx.interner.get_or_intern(s.borrow().as_str());
+
+            Ok(LambdaReturn::Return(vec![
+                Value::Symbol(sym.into()).into_ptr(&ctx),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct SymbolToString;
+
+    impl NativeLambda for SymbolToString {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let Value::Symbol(s) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "symbol->string expects a symbol as its first argument"
+                ))?;
+            };
+
+            let str = ctx.interner.resolve(&s.0);
+
+            Ok(LambdaReturn::Return(vec![
+                Value::String(value::String::new_frozen(Gc::new(
+                    &ctx,
+                    RefLock::new(str.to_string()),
+                )))
+                .into_ptr(&ctx),
+            ]))
         }
     }
 }

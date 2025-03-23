@@ -313,8 +313,8 @@ impl Eq for Lambda<'_> {}
 impl std::fmt::Pointer for Lambda<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Native(np) => write!(f, "{np:p}"),
-            Self::Compiled(cp) => write!(f, "{cp:p}"),
+            Self::Native(np) => write!(f, "{:p}", *np),
+            Self::Compiled(cp) => write!(f, "{:p}", *cp),
         }
     }
 }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env::consts::OS, num::NonZeroU16, sync::LazyLock};
+use std::{collections::HashMap, num::NonZeroU16, sync::LazyLock};
 
 // TODO Support num::BigInt so that frontend numbers are unbounded, like calculated numbers
 use arbitrary::Arbitrary;

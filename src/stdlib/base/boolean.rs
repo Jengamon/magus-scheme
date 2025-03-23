@@ -5,6 +5,27 @@ use crate::{
     environment::StackEnvironmentPtr,
 };
 
+/*
+TODO match code to report impls so that tail calls work properly
+(define-syntax and
+    (syntax-rules ()
+        ((and) #t)
+        ((and test) test)
+        ((and test1 test2 ...)
+            (if test1 (and test2 ...) #f))))
+(define-syntax or
+    (syntax-rules ()
+        ((or) #f)
+        ((or test) test)
+        ((or test1 test2 ...)
+            (let ((x test1))
+                (if x x (or test2 ...))))))
+
+(instead of a complicated coda, just have v simple coda)
+a simple and good test for transformers is to compare the manually written code here to
+the code it generates
+*/
+
 #[derive(Debug)]
 pub struct And;
 
@@ -38,17 +59,15 @@ impl Syntax for And {
             // jump if -> 'fail
             // ...
             // test_final
-            // duplicate
-            // jump if 2
             // jump 1
             // 'fail: push false
             let mut code = vec![];
-            // at each branch, the jump if -> 'fail target value = size of following branches + number of following branches + 2
-            // (as each branch is followed by a single jump if, except for the final branch, which is followed by a dup, jump if *and* a jump)
+            // at each branch, the jump if -> 'fail target value = size of following branches + number of following branches
+            // (as each branch is followed by a single jump if, except for the final branch, which is followed by a jump instead)
             let jump_targets = (0..args_compiled.len())
                 .map(|idx| {
                     let following = &args_compiled[idx + 1..];
-                    following.iter().map(|blk| blk.len()).sum::<usize>() + following.len() + 2
+                    following.iter().map(|blk| blk.len()).sum::<usize>() + following.len()
                 })
                 .collect::<Vec<_>>();
             let num_branches = args_compiled.len();
@@ -63,8 +82,6 @@ impl Syntax for And {
 
             // The final target gets the return handling coda
             code.extend([
-                Bytecode::Duplicate,
-                Bytecode::If { jump: 1 },
                 Bytecode::Jump { jump: 1 },
                 Bytecode::PushBool { bool: false },
             ]);
@@ -111,18 +128,17 @@ impl Syntax for Or {
             // jump 'success
             // ...
             // test_final
-            // dup
-            // jump if 1
             // jump 1
             // push #f
             // 'success
             let mut code = vec![];
-            // at each branch, the jump 'success target value = size of following branches + number of following branches * 3 + 1
-            // (as each branch is followed by a 3 instructions, except for the final branch, which is followed by 4)
+            // at each branch, the jump 'success target value = size of following branches + number of following branches * 3 - 1
+            // (as each branch is followed by a 3 instructions, except for the final branch, which is followed by 2)
             let jump_targets = (0..args_compiled.len())
                 .map(|idx| {
                     let following = &args_compiled[idx + 1..];
-                    following.iter().map(|blk| blk.len()).sum::<usize>() + following.len() * 3 + 1
+                    (following.iter().map(|blk| blk.len()).sum::<usize>() + following.len() * 3)
+                        .saturating_sub(1)
                 })
                 .collect::<Vec<_>>();
             let num_branches = args_compiled.len();
@@ -141,8 +157,6 @@ impl Syntax for Or {
 
             // The final target gets the return handling coda
             code.extend([
-                Bytecode::Duplicate,
-                Bytecode::If { jump: 1 },
                 Bytecode::Jump { jump: 1 },
                 Bytecode::PushBool { bool: false },
             ]);

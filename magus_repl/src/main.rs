@@ -332,6 +332,12 @@ fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle)> {
     //         stdlib::base::Base::default(),
     //     )
     //     .expect("failed to define scheme base module");
+    world
+        .insert(
+            LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme write)),
+            stdlib::write::Write,
+        )
+        .expect("failed to define scheme base module");
     let compiler = interpreter.new_compiler();
     // max_fuel = None is *inadvisable* in any form of production code, b/c it means that if an infinite loop is
     // defined and executed in a library, it will run forever.

@@ -76,7 +76,7 @@ pub enum Value<'gc> {
     // Strings must be easily accessed/edited, so prefer to store a "String"
     // over slices or intered strings
     String(Gc<'gc, RefLock<StdString>>),
-    // the value of '<ident> (quote <ident>)
+    /// the value of `'<ident>` `(quote <ident>)`
     Symbol(Symbol),
     Bool(bool),
     Char(char),
@@ -112,7 +112,13 @@ pub enum Value<'gc> {
     // So this a blob of bytecode that is to be evaluated in a surrounding chunk's environment,
     // (just a blob and a memoize slot)
     Promise(()),
-    // A Scheme-side error
+    // TODO Impl native parameter objects
+    //
+    // These parameter objects should add something to a frame that is handled at the same time as dynamic-wind
+    // A parameter object is conceptually a stack of values, where each frame that has a value for that parameter
+    // push it onto the object when it sets it, and when execution leaves the scope it was set in, the value is
+    // popped
+    /// A Scheme-side error
     Error(SchemeErrorPtr<'gc>),
 }
 

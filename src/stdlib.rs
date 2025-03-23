@@ -7,6 +7,7 @@ use crate::{
 
 pub mod base;
 pub mod srfi;
+pub mod write;
 // For now, Scheme-only libraries are just exposed as strings here, but a *biiig* TODO is to find
 // a nice way for modules to be registered by users
 pub mod cxr {

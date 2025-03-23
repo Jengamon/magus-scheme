@@ -1070,11 +1070,11 @@ impl<'gc> Thread<'gc> {
                                         &ctx,
                                         l,
                                         args,
-                                        pc + match code[pc] {
+                                        pc + match code.get(pc + 1) {
                                             // make sure true branches can also be properly registered as tail calls
                                             // because a jump unconditionally executes, the actual total movement is
                                             // jump + 1 plus the + 1 base from this instruction
-                                            Bytecode::Jump { jump } => jump + 1,
+                                            Some(Bytecode::Jump { jump }) => jump + 2,
                                             _ => 1,
                                         } >= code.len(),
                                     ) {

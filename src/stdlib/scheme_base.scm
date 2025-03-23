@@ -2,12 +2,25 @@
 ; Here we define things that are simple and wouldn't cause too much of a performance hit.
 ; We only have the relevant native modules available
 (import (scheme base))
-(export list not map memq memv)
+(export list not map memq memv abs square boolean? boolean=?)
 ; Sketch functions (to be removed once implemented properly)
 (export assq assv)
 (begin
   (define (list . in) in)
   (define (not x) (if x #f #t))
+  (define (abs n) (if (< n 0) (- n) n))
+  (define (square n) (* n n))
+  (define (boolean? b) (if (or (eq? b #f) (eq? b #t)) #t #f))
+  (define (boolean=? . lst)
+      (define (boolean=-iter v lst)
+          (if (null? lst)
+              #t
+              (if (eq? v (car lst))
+                  (boolean=-iter v (cdr lst))
+                  #f)))
+      (if (null? lst)
+          #t
+          (boolean=-iter (car lst) (cdr lst))))
   (define (map f xs)
     (if (null? (cdr xs))
         (cons (f (car xs)) '())

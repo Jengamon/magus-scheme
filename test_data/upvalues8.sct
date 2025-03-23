@@ -1,0 +1,16 @@
+---
+#t
+---
+; this *particular* implementation of boolean=? revealed an upvalue bug
+(import (except (scheme base) boolean=?))
+(define (boolean=? . lst)
+  (define (boolean=-iter v lst)
+      (if (null? lst)
+          #t
+          (if (eq? v (car lst))
+              (boolean=-iter v (cdr lst))
+              #f)))
+  (if (null? lst)
+      #t
+      (boolean=-iter (car lst) (cdr lst))))
+(boolean=? (= 0 1) (= 2 1))

@@ -1,0 +1,104 @@
+use crate::{
+    compiler::Module,
+    runtime::{convert::IntoValue, lambda},
+};
+use gc_arena::{Gc, RefLock, unsize};
+
+mod procedures {
+    use gc_arena::Collect;
+
+    use crate::{
+        Value, ValuePtr,
+        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+    };
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct DisplayLam;
+
+    impl NativeLambda for DisplayLam {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            if args.len() > 2 {
+                return Err(anyhow::anyhow!("display expects either 1 or 2 arguments"))?;
+            }
+            todo!()
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct WriteLam;
+
+    impl NativeLambda for WriteLam {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            if args.len() > 2 {
+                return Err(anyhow::anyhow!("write expects either 1 or 2 arguments"))?;
+            }
+
+            eprintln!(
+                "{}",
+                Value::resolve_into(args[0], ctx.interner.clone(), ctx.thread_ctx.null_value)
+            );
+
+            // rn just ignore ports, and just dump to stdout
+            Ok(LambdaReturn::Return(vec![]))
+        }
+    }
+}
+
+pub use procedures::{DisplayLam, WriteLam};
+
+// #[derive(Default)]
+pub struct Write;
+// So that code can change the "default" input/output port, we have to emulate parameter objects natively.
+// And this module would be created with 2 ports that it considered the "default" (and so would set to the parameter objects
+// initially)
+
+impl Module for Write {
+    fn all_symbols(&self, interner: &mut lasso::Rodeo) -> std::collections::HashSet<lasso::Spur> {
+        ["write", "display"]
+            .into_iter()
+            .map(|s| interner.get_or_intern_static(s))
+            .collect()
+    }
+
+    fn value<'gc>(
+        &self,
+        mc: &gc_arena::Mutation<'gc>,
+        symbol: &str,
+    ) -> Option<crate::ValuePtr<'gc>> {
+        macro_rules! lambda {
+            ($lmb:expr) => {
+                 Some(
+                    lambda::Lambda::Native(
+                        unsize![Gc::new(mc, RefLock::new($lmb)) => RefLock<dyn lambda::NativeLambda>],
+                    )
+                    .into_value(mc)
+                    .into_ptr(mc),
+                )
+            };
+        }
+
+        match symbol {
+            "display" => lambda!(DisplayLam),
+            "write" => lambda!(WriteLam),
+            _ => None,
+        }
+    }
+}

@@ -1419,7 +1419,7 @@ impl<'gc> Compiler<'gc> {
                 }])))
             }
             ProgramData::Symbol(spur) => {
-                if let Some(arg) = self.is_argument(*spur) {
+                let is_local = if let Some(arg) = self.is_argument(*spur) {
                     match arg {
                         Arg::Index { scope, index } if scope != 0 => {
                             // Find the argument scope, and define upvalues
@@ -1464,35 +1464,40 @@ impl<'gc> Compiler<'gc> {
                         // Otherwise, handle like a "normal" reference
                         _ => {}
                     };
-                }
+                    true
+                } else {
+                    false
+                };
 
                 // If the name is defined in a parent scope that is *not* the global scope,
                 // then make it an upvalue
 
-                if let Some(scope) = self
-                    .scopes
-                    .iter_mut()
-                    .rev()
-                    // *ignore* the current scope, as these upvalues have not been created yet.
-                    .skip(1)
-                    .find(|s| s.variables_defined.borrow().contains_key(spur))
-                {
-                    // Some parent scope defined this name, use it's already assigned upvalue, or defined a new upvalue
-                    let upvalue_index =
-                        if let Some(v) = &scope.variables_defined.borrow().get(spur).unwrap() {
-                            *v
-                        } else {
-                            let upvalue_index = ctx.add_upvalue();
-                            scope
-                                .variables_defined
-                                .borrow_mut()
-                                .insert(*spur, Some(upvalue_index));
-                            upvalue_index
-                        };
+                if !is_local {
+                    if let Some(scope) = self
+                        .scopes
+                        .iter_mut()
+                        .rev()
+                        // *ignore* the current scope, as these upvalues have not been created yet.
+                        .skip(1)
+                        .find(|s| s.variables_defined.borrow().contains_key(spur))
+                    {
+                        // Some parent scope defined this name, use it's already assigned upvalue, or defined a new upvalue
+                        let upvalue_index =
+                            if let Some(v) = &scope.variables_defined.borrow().get(spur).unwrap() {
+                                *v
+                            } else {
+                                let upvalue_index = ctx.add_upvalue();
+                                scope
+                                    .variables_defined
+                                    .borrow_mut()
+                                    .insert(*spur, Some(upvalue_index));
+                                upvalue_index
+                            };
 
-                    return Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
-                        index: upvalue_index,
-                    }])));
+                        return Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
+                            index: upvalue_index,
+                        }])));
+                    }
                 }
 
                 Ok(SyntaxReturn::Code(Box::from([Bytecode::Reference {
@@ -1694,6 +1699,7 @@ impl<'gc> Compiler<'gc> {
                                     .unwrap_or(*exp)
                             })
                             .collect();
+                        dbg!((&exclude, &subset_symbols));
                         if !exclude.is_subset(&subset_symbols) {
                             let exclude_not_symbols = exclude.difference(&subset_symbols);
                             if fail_on_missing {
@@ -1844,9 +1850,11 @@ impl<'gc> Compiler<'gc> {
                 &mut import_symbols,
                 &mut import_mapping,
                 interner,
-                &found,
+                &FxHashSet::default(),
                 !world.has_library(&library_name),
             )?;
+            // Extend "found" with any name found in the local (Scheme) module (used for existence checks)
+            found.extend(modl.exported_items.keys().map(|k| k.0));
             // for each of the remaining symbols, search for them in the library, erroring if the symbol isn't found, then
             // get the mapped version of the symbol, and store it at that name
             for symbol in &import_symbols {
@@ -1871,7 +1879,6 @@ impl<'gc> Compiler<'gc> {
                         }
                     }
                     names.insert(mapped_symbol);
-                    found.insert(*symbol);
                 } else if !world.has_library(&library_name) {
                     // We fail name resolution if there is no native module corresponding to this
                     // one, and the name was not found
@@ -2523,27 +2530,19 @@ impl<'gc> Compiler<'gc> {
     }
 
     pub fn is_argument(&self, symbol: lasso::Spur) -> Option<Arg> {
-        if let Some(scope) = self
-            .scopes
-            .iter()
-            .rev()
-            .enumerate()
-            .find_map(|(idx, args)| {
-                matches!(args.rest, Some(rest) if symbol == rest).then_some(idx)
-            })
-        {
-            return Some(Arg::Rest { scope });
-        }
-
         self.scopes
             .iter()
             .rev()
             .enumerate()
             .find_map(|(scope, args)| {
-                args.args
-                    .iter()
-                    .position(|s| *s == symbol)
-                    .map(|index| Arg::Index { scope, index })
+                if matches!(args.rest, Some(rest) if symbol == rest) {
+                    Some(Arg::Rest { scope })
+                } else {
+                    args.args
+                        .iter()
+                        .position(|s| *s == symbol)
+                        .map(|index| Arg::Index { scope, index })
+                }
             })
     }
 

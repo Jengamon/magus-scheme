@@ -1,0 +1,13 @@
+---
+#t
+#t
+#t
+#f
+#f
+---
+(import (only (scheme base) values boolean=? =))
+(values (boolean=?)
+		(boolean=? (= 0 0) (= 1 1))
+		(boolean=? (= 0 1) (= 1 0))
+		(boolean=? (= 0 0) (= 1 0))
+		(boolean=? 3))

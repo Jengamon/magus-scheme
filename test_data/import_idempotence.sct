@@ -1,6 +1,8 @@
 ---
 #t
+#t
 ---
-(import (only (scheme base) list eq?))
-(import (prefix (only (scheme base) list) |2nd-|))
-(eq? list |2nd-list|)
+(import (only (scheme base) list null? eq? values))
+(import (prefix (only (scheme base) list null?) |2nd-|))
+(values (eq? list |2nd-list|)
+        (eq? null? |2nd-null?|))

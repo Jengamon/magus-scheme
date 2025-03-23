@@ -695,6 +695,13 @@ unsafe impl<'gc> Collect<'gc> for Stash<'gc> {
     }
 }
 
+#[derive(Debug, Collect, Clone)]
+#[collect(no_drop)]
+enum NativeItem<'gc> {
+    Syntax(#[collect(require_static)] ArcSyntax),
+    Value(ValuePtr<'gc>),
+}
+
 // Compiles Programs into Chunks
 #[derive(Debug, Collect)]
 #[collect(no_drop)]
@@ -722,6 +729,9 @@ pub struct Compiler<'gc> {
     environments: Vec<StackEnvironmentPtr<'gc>>,
     // which environment to use
     env_ptr: usize,
+
+    // cache for native modules
+    native_cache: FxHashMap<LibraryName, FxHashMap<Static<lasso::Spur>, NativeItem<'gc>>>,
 
     // stash that can be used by macros to store things
     pub stash: Stash<'gc>,
@@ -1222,6 +1232,7 @@ impl<'gc> Compiler<'gc> {
             environments: vec![Gc::new(mc, RefLock::new(Environment::new(mc, None)))],
             env_ptr: 0,
             stash: Stash::default(),
+            native_cache: FxHashMap::default(),
         }
     }
 
@@ -1685,8 +1696,6 @@ impl<'gc> Compiler<'gc> {
                                         .map(|i| Box::from(interner.resolve(i)))
                                         .collect(),
                                 });
-                            } else {
-                                return Ok(());
                             }
                         }
                         *symbols = include;
@@ -1702,7 +1711,6 @@ impl<'gc> Compiler<'gc> {
                                     .unwrap_or(*exp)
                             })
                             .collect();
-                        dbg!((&exclude, &subset_symbols));
                         if !exclude.is_subset(&subset_symbols) {
                             let exclude_not_symbols = exclude.difference(&subset_symbols);
                             if fail_on_missing {
@@ -1711,8 +1719,6 @@ impl<'gc> Compiler<'gc> {
                                         .map(|i| Box::from(interner.resolve(i)))
                                         .collect(),
                                 });
-                            } else {
-                                return Ok(());
                             }
                         }
                         *symbols = symbols.difference(&exclude).copied().collect();
@@ -1730,17 +1736,13 @@ impl<'gc> Compiler<'gc> {
                                     .ok_or(*exp)
                             })
                             .partition(Result::is_ok);
-                        if !not_found.is_empty() {
-                            if fail_on_missing {
-                                return Err(ImportError::NamesNotFound {
-                                    names: not_found
-                                        .into_iter()
-                                        .map(|r| Box::from(interner.resolve(&r.unwrap_err())))
-                                        .collect(),
-                                });
-                            } else {
-                                return Ok(());
-                            }
+                        if !not_found.is_empty() && fail_on_missing {
+                            return Err(ImportError::NamesNotFound {
+                                names: not_found
+                                    .into_iter()
+                                    .map(|r| Box::from(interner.resolve(&r.unwrap_err())))
+                                    .collect(),
+                            });
                         }
                         let keyed: FxHashSet<_> = keyed.into_iter().map(|r| r.unwrap()).collect();
                         if !keyed.is_subset(&subset_symbols) {
@@ -1751,8 +1753,6 @@ impl<'gc> Compiler<'gc> {
                                         .map(|i| Box::from(interner.resolve(i)))
                                         .collect(),
                                 });
-                            } else {
-                                return Ok(());
                             }
                         }
                         let mapped = rename
@@ -1910,9 +1910,33 @@ impl<'gc> Compiler<'gc> {
             // Import from the native library names that *haven't* been imported
             for symbol in import_symbols.difference(&found).copied() {
                 let mapped_symbol = import_mapping.get(&symbol).copied().unwrap_or(symbol);
-                if let Some(syntax) = modl.syntax(interner, symbol) {
+                // Check the cache first for already loaded symbols
+                if let Some(item) = self
+                    .native_cache
+                    .entry(library_name.clone())
+                    .or_default()
+                    .get(&Static(symbol))
+                    .cloned()
+                {
+                    match item {
+                        NativeItem::Syntax(syntax) => {
+                            self.define_macro(mapped_symbol, Arc::clone(&syntax));
+                        }
+                        NativeItem::Value(value) => {
+                            self._current_env()
+                                .borrow_mut(mc)
+                                .define(mc, mapped_symbol, value, true)
+                                .map_err(|_| ImportError::FailedToDefine(mapped_symbol))?;
+                        }
+                    }
+                } else if let Some(syntax) = modl.syntax(interner, symbol) {
                     // Define a macro in scope
-                    self.define_macro(mapped_symbol, syntax);
+                    self.define_macro(mapped_symbol, Arc::clone(&syntax));
+                    // cache result
+                    self.native_cache
+                        .entry(library_name.clone())
+                        .or_default()
+                        .insert(Static(symbol), NativeItem::Syntax(syntax));
                 } else if let Some(mut value) = modl.value(mc, interner.resolve(&symbol)) {
                     // freeze a module imported value (TODO check how this actually impacts things)
                     if mapped_symbol != symbol {
@@ -1922,6 +1946,11 @@ impl<'gc> Compiler<'gc> {
                         .borrow_mut(mc)
                         .define(mc, mapped_symbol, value, true)
                         .map_err(|_| ImportError::FailedToDefine(mapped_symbol))?;
+                    // cache result
+                    self.native_cache
+                        .entry(library_name.clone())
+                        .or_default()
+                        .insert(Static(symbol), NativeItem::Value(value));
                 } else {
                     Err(ImportError::NameNotFound {
                         name: Box::from(interner.resolve(&mapped_symbol)),

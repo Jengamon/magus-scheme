@@ -9,7 +9,7 @@ use crate::{
     bytecode::{Bytecode, Chunk, ChunkPtr},
     compiler::{
         ArcSyntax, Compiler, ExternalCompilerContext, LibraryDeclaration, LibraryDefinitionContext,
-        Module, ParseProgram, ProgramPtr, Syntax, SyntaxContext, SyntaxReturn,
+        Module, ParseProgram, ProgramData, ProgramPtr, Syntax, SyntaxContext, SyntaxReturn,
     },
     environment::StackEnvironmentPtr,
     interpreter::NullIncluder,
@@ -126,8 +126,17 @@ impl Syntax for Begin {
         Ok(SyntaxReturn::Code(program_code.into_boxed_slice()))
     }
 
-    fn is_container(&self, _ptr: ProgramPtr<'_>, _compiler: &Compiler<'_>) -> bool {
-        true
+    fn is_container<'gc>(
+        &self,
+        ptr: ProgramPtr<'gc>,
+        _compiler: &Compiler<'_>,
+    ) -> Vec<ProgramPtr<'gc>> {
+        // Only a list can trigger this proper (if not a list, return the empty list, which means "don't consider this a container")
+        let ProgramData::List { body, .. } = &ptr.data else {
+            return Vec::new();
+        };
+
+        body.clone()
     }
 }
 
@@ -170,6 +179,15 @@ impl Syntax for Lambda {
         ])))
     }
 }
+
+#[derive(Debug)]
+pub struct CondExpand;
+
+#[derive(Debug)]
+pub struct Include;
+
+#[derive(Debug)]
+pub struct IncludeCi;
 
 /// (scheme base) module
 #[derive(Default, Clone)]
@@ -277,9 +295,7 @@ impl Module for Base {
             "apply" => lambda!(Apply),
             "exact" => lambda!(Exact),
             "inexact" => lambda!(Inexact),
-            "features" => lambda!(Features::from_iter(
-                self.additional_features.iter().cloned()
-            )),
+            "features" => lambda!(Features::from(Arc::clone(&self.additional_features))),
             "gcd" => lambda!(Gcd),
             "exact?" => lambda!(IsExact),
             "inexact?" => lambda!(IsInexact),

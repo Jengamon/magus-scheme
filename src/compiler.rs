@@ -295,12 +295,16 @@ pub trait Transformer<'gc>: std::fmt::Debug {
         false
     }
 
-    /// Registers this syntax item as a container
+    /// Registers this syntax item as a container if all the returned program pointers are definitions
     ///
     /// Affects how definitions are registered. A container syntax is considered a
     /// definition if all of it's components are definitions (or containers of only definitions)
-    fn is_container(&self, _ptr: ProgramPtr<'gc>, _compiler: &Compiler<'gc>) -> bool {
-        false
+    fn is_container(
+        &self,
+        _ptr: ProgramPtr<'gc>,
+        _compiler: &Compiler<'gc>,
+    ) -> Vec<ProgramPtr<'gc>> {
+        Vec::new()
     }
 }
 pub type TransformerPtr<'gc> = Gc<'gc, dyn Transformer<'gc>>;
@@ -357,8 +361,14 @@ pub trait Syntax: std::fmt::Debug {
     ///
     /// Affects how definitions are registered. A container syntax is considered a
     /// definition if all of it's components are definitions (or containers of only definitions)
-    fn is_container<'gc>(&self, _ptr: ProgramPtr<'gc>, _compiler: &Compiler<'gc>) -> bool {
-        false
+    ///
+    /// If this returns an empty list, the syntax is *not* considered a container (and thus not a definition)
+    fn is_container<'gc>(
+        &self,
+        _ptr: ProgramPtr<'gc>,
+        _compiler: &Compiler<'gc>,
+    ) -> Vec<ProgramPtr<'gc>> {
+        Vec::new()
     }
 
     /// Marks this syntax as deriving from a local Transformer
@@ -666,7 +676,11 @@ impl Syntax for PrivateTransformer {
             .unwrap_or_default()
     }
 
-    fn is_container<'gc>(&self, ptr: ProgramPtr<'gc>, compiler: &Compiler<'gc>) -> bool {
+    fn is_container<'gc>(
+        &self,
+        ptr: ProgramPtr<'gc>,
+        compiler: &Compiler<'gc>,
+    ) -> Vec<ProgramPtr<'gc>> {
         compiler
             .stash
             .transformers
@@ -2577,16 +2591,19 @@ impl<'gc> Compiler<'gc> {
         let container_symbols = self
             .syntax_items
             .iter()
-            .filter_map(|(k, syn)| syn.is_container(program, self).then_some(*k))
-            .collect::<fxhash::FxHashSet<_>>();
+            .filter_map(|(k, syn)| {
+                let to_check = syn.is_container(program, self);
+                (!to_check.is_empty()).then_some((*k, to_check))
+            })
+            .collect::<fxhash::FxHashMap<_, _>>();
 
         match &program.data {
-            ProgramData::List { head, body } => {
+            ProgramData::List { head, .. } => {
                 matches!(head, ListHead::Program(p) if match p.data {
                     ProgramData::Symbol(s) if definition_symbols.contains(&s) => true,
                     ProgramData::Symbol(s)
-                        if container_symbols.contains(&s)
-                            && body.iter().all(|bp| self.is_definition(*bp)) =>
+                        if container_symbols.contains_key(&s)
+                            && container_symbols.get(&s).unwrap().iter().all(|bp| self.is_definition(*bp)) =>
                     {
                         true
                     }

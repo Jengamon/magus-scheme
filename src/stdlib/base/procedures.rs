@@ -67,6 +67,8 @@ mod equality {
 }
 
 mod control {
+    use std::sync::Arc;
+
     use crate::{
         Value, compiler,
         runtime::{
@@ -208,15 +210,13 @@ mod control {
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct Features {
-        additional_features: Vec<Box<str>>,
+        additional_features: Arc<[Arc<str>]>,
     }
 
-    impl<I: AsRef<str>> FromIterator<I> for Features {
-        fn from_iter<T: IntoIterator<Item = I>>(iter: T) -> Self {
+    impl From<Arc<[Arc<str>]>> for Features {
+        fn from(value: Arc<[Arc<str>]>) -> Self {
             Self {
-                additional_features: Vec::from_iter(
-                    iter.into_iter().map(|s| Box::from(s.as_ref())),
-                ),
+                additional_features: value,
             }
         }
     }

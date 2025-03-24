@@ -79,11 +79,15 @@ impl<'gc> Transformer<'gc> for SyntaxRulesImpl {
         false
     }
 
-    fn is_container(&self, _ptr: ProgramPtr<'gc>, _compiler: &Compiler<'gc>) -> bool {
-        // Check the head of the matched code and if it is a container, then we
-        // are a container
-        // No match is considered false
-        false
+    fn is_container(
+        &self,
+        _ptr: ProgramPtr<'gc>,
+        _compiler: &Compiler<'gc>,
+    ) -> Vec<ProgramPtr<'gc>> {
+        // Check the head of the matched code and if it is a container, then return the items to check
+        // for container definiition (basically check if the head of the code below is a macro and if so, forward
+        // the is_container check to it)
+        Vec::new()
     }
 }
 

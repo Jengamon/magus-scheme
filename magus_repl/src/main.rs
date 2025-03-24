@@ -1,7 +1,7 @@
 use std::{borrow::Cow, collections::HashSet};
 
 use anyhow::Context;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use codesnake::{Block, CodeWidth, Label, LineIndex};
 use magus::{
     bytecode::{Bytecode, Constant},
@@ -12,7 +12,7 @@ use magus::{
     interpreter::{CompilerHandle, Includer, Interpreter, NullIncluder, ThreadHandle, ValueHandle},
     library_name,
     runtime::lambda::Lambda,
-    stdlib, ContainsDatum, ExternalCompilerContext, Fuel, GAstNode, Module, Value,
+    stdlib, ChunkHandle, ContainsDatum, ExternalCompilerContext, Fuel, GAstNode, Module, Value,
 };
 use reedline::{
     Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus, PromptViMode, Reedline,
@@ -25,11 +25,23 @@ mod datum_printer;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    /// Input file to read (use `-` for stdin, and not present to use REPL mode)
-    file: Option<String>,
+    #[command(subcommand)]
+    mode: Option<Mode>,
     /// Read code case-insensitively (by default)
     #[arg(long, short = 'i')]
     case_insensitive: bool,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Mode {
+    /// Read input from a file instead of starting a REPL
+    File {
+        /// Input file to read
+        name: String,
+        /// Compile the code, but do not run the result
+        #[arg(long, short = 'c')]
+        compile: bool,
+    },
 }
 
 struct PwdIncluder;
@@ -43,12 +55,14 @@ fn main() -> anyhow::Result<()> {
     yansi::whenever(Condition::TTY_AND_COLOR);
 
     let args = Cli::parse();
-    if let Some(file) = args.file {
-        if file == "-" {
+    if let Some(Mode::File { name, compile }) = args.mode {
+        if name == "-" {
             // Find a good way to display compiled data (using the visitor)
             todo!("read from standard input")
+        } else if compile {
+            compile_file(name, args.case_insensitive)
         } else {
-            execute_file(file, args.case_insensitive)
+            execute_file(name, args.case_insensitive)
         }
     } else {
         repl(args.case_insensitive)
@@ -147,6 +161,113 @@ fn compile(source: impl AsRef<str>) -> Result<Module, Vec<GeneralParserError>> {
     }
 }
 
+fn compile_to_chunk(
+    case_insensitive: bool,
+    module: &Module,
+    includer: &dyn Includer,
+    interpreter: &mut Interpreter,
+    compiler: &CompilerHandle,
+    world: &World,
+) -> anyhow::Result<ChunkHandle> {
+    // Run the code in through our compiler to get a chunk,
+    // then execute that chunk on a new thread
+    interpreter.compiler_context(compiler, |mc, compiler, value_pointers, interner| {
+        let programs = ("repl.scm", module).parse_program(mc, interner, case_insensitive)?;
+        let mut ecc = ExternalCompilerContext {
+            includer,
+            world,
+            interner,
+        };
+        let library_def = LibraryDefinitionContext {
+            max_fuel: None,
+            value_pointers,
+            additional_features: None,
+        };
+        Ok(compiler.compile(mc, &mut ecc, &library_def, programs)?)
+    })
+}
+
+fn chunk_debug(interpreter: &mut Interpreter, chunk: &ChunkHandle) {
+    interpreter.enter(|_mc, arena, interner| {
+        let Some(chunk) = arena.get_chunk(chunk) else {
+            unreachable!()
+        };
+        // TODO Make an actual debugger view?
+        println!("==CONSTANTS TABLE==");
+        for (idx, constant) in chunk.constants.iter().enumerate() {
+            println!("{idx}: {constant:?}");
+        }
+        println!("==END CONSTANTS==");
+        // expose what each spur means
+        let mut shown = HashSet::new();
+        println!("==SYMBOLS REFERENCED==");
+        for code in chunk.code.iter().copied().chain(
+            chunk
+                .lambdas
+                .iter()
+                .filter_map(|l| {
+                    if let Lambda::Compiled(l) = l {
+                        Some(l)
+                    } else {
+                        None
+                    }
+                })
+                .flat_map(|l| l.chunk().code.iter().copied().collect::<Vec<_>>()),
+        ) {
+            match code {
+                Bytecode::Reference { symbol } if !shown.contains(&symbol) => {
+                    shown.insert(symbol);
+                    println!("{} -> `{}`", symbol.into_inner(), interner.resolve(&symbol));
+                }
+                Bytecode::Define { symbol } if !shown.contains(&symbol) => {
+                    shown.insert(symbol);
+                    println!("{} -> `{}`", symbol.into_inner(), interner.resolve(&symbol));
+                }
+                Bytecode::SetBang { symbol } if !shown.contains(&symbol) => {
+                    shown.insert(symbol);
+                    println!("{} -> `{}`", symbol.into_inner(), interner.resolve(&symbol));
+                }
+                _ => {}
+            }
+        }
+        for constant in chunk.constants.iter() {
+            if let Constant::Symbol(symbol) = constant {
+                if !shown.contains(symbol) {
+                    println!("{} -> `{}`", symbol.into_inner(), interner.resolve(symbol));
+                }
+            }
+        }
+        println!("==END SYMBOLS==");
+        println!("==LAMBDAS==");
+        for (idx, l) in chunk
+            .lambdas
+            .iter()
+            .filter_map(|l| {
+                if let Lambda::Compiled(l) = l {
+                    Some(l)
+                } else {
+                    None
+                }
+            })
+            .enumerate()
+        {
+            println!("==LAMBDA {idx}==");
+            for (idx, code) in l.chunk().code.iter().enumerate() {
+                println!("{idx:>3}: {code}")
+            }
+            println!("==END LAMBDA {idx}==");
+        }
+        println!("==END LAMBDAS==");
+        // nice mnemonic format??
+        println!("==CHUNK CODE (upvalues: {})==", chunk.upvalues);
+        for (idx, code) in chunk.code.iter().enumerate() {
+            // Use display
+            println!("{idx:>3}: {code}");
+        }
+        println!("==END CHUNK==");
+    });
+}
+
 /// Executes a given module
 #[expect(clippy::too_many_arguments)]
 fn execute(
@@ -171,104 +292,25 @@ fn execute(
 
     // Run the code in through our compiler to get a chunk,
     // then execute that chunk on a new thread
-    let chunk: Result<_, anyhow::Error> =
-        interpreter.compiler_context(compiler, |mc, compiler, value_pointers, interner| {
-            let programs = ("repl.scm", module).parse_program(mc, interner, case_insensitive)?;
-            let mut ecc = ExternalCompilerContext {
-                includer,
-                world,
-                interner,
-            };
-            let library_def = LibraryDefinitionContext {
-                max_fuel: None,
-                value_pointers,
-                additional_features: None,
-            };
-            Ok(compiler.compile(mc, &mut ecc, &library_def, programs)?)
-        });
+    let chunk: Result<_, anyhow::Error> = compile_to_chunk(
+        case_insensitive,
+        module,
+        includer,
+        interpreter,
+        compiler,
+        world,
+    );
 
     match chunk {
         Ok(chunk) => {
             let mut fuel = Fuel::with(1_000_000);
+            chunk_debug(interpreter, &chunk);
             interpreter.run(thread, |ctx, arena, interner| {
-                let Some(chunk) = arena.get_chunk(&chunk) else {
-                    unreachable!()
-                };
-                // TODO Make an actual debugger view?
-                println!("==CONSTANTS TABLE==");
-                for (idx, constant) in chunk.constants.iter().enumerate() {
-                    println!("{idx}: {constant:?}");
-                }
-                println!("==END CONSTANTS==");
-                // expose what each spur means
-                let mut shown = HashSet::new();
-                println!("==SYMBOLS REFERENCED==");
-                for code in chunk.code.iter().copied().chain(
-                    chunk
-                        .lambdas
-                        .iter()
-                        .filter_map(|l| {
-                            if let Lambda::Compiled(l) = l {
-                                Some(l)
-                            } else {
-                                None
-                            }
-                        })
-                        .flat_map(|l| l.chunk().code.iter().copied().collect::<Vec<_>>()),
-                ) {
-                    match code {
-                        Bytecode::Reference { symbol } if !shown.contains(&symbol) => {
-                            shown.insert(symbol);
-                            println!("{} -> `{}`", symbol.into_inner(), interner.resolve(&symbol));
-                        }
-                        Bytecode::Define { symbol } if !shown.contains(&symbol) => {
-                            shown.insert(symbol);
-                            println!("{} -> `{}`", symbol.into_inner(), interner.resolve(&symbol));
-                        }
-                        Bytecode::SetBang { symbol } if !shown.contains(&symbol) => {
-                            shown.insert(symbol);
-                            println!("{} -> `{}`", symbol.into_inner(), interner.resolve(&symbol));
-                        }
-                        _ => {}
-                    }
-                }
-                for constant in chunk.constants.iter() {
-                    if let Constant::Symbol(symbol) = constant {
-                        if !shown.contains(symbol) {
-                            println!("{} -> `{}`", symbol.into_inner(), interner.resolve(symbol));
-                        }
-                    }
-                }
-                println!("==END SYMBOLS==");
-                println!("==LAMBDAS==");
-                for (idx, l) in chunk
-                    .lambdas
-                    .iter()
-                    .filter_map(|l| {
-                        if let Lambda::Compiled(l) = l {
-                            Some(l)
-                        } else {
-                            None
-                        }
-                    })
-                    .enumerate()
-                {
-                    println!("==LAMBDA {idx}==");
-                    for (idx, code) in l.chunk().code.iter().enumerate() {
-                        println!("{idx:>3}: {code}")
-                    }
-                    println!("==END LAMBDA {idx}==");
-                }
-                println!("==END LAMBDAS==");
-                // nice mnemonic format??
-                println!("==CHUNK CODE (upvalues: {})==", chunk.upvalues);
-                for (idx, code) in chunk.code.iter().enumerate() {
-                    // Use display
-                    println!("{idx:>3}: {code}");
-                }
-                println!("==END CHUNK==");
                 let thread = ctx.thread;
                 {
+                    let Some(chunk) = arena.get_chunk(&chunk) else {
+                        unreachable!()
+                    };
                     let mut thread = thread.borrow_mut(&ctx);
                     thread.include(ctx.mc, chunk, None, true);
                     // TODO Make an actual way to do this properly, and not so shenangian-y
@@ -379,6 +421,51 @@ fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle)> {
     })?;
 
     Ok((interpreter, world, compiler))
+}
+
+fn compile_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> anyhow::Result<()> {
+    let path = path.as_ref();
+    let source = std::fs::read_to_string(path).context("failed to read input file")?;
+
+    match compile(&source) {
+        Ok(module) => {
+            let (mut interpreter, world, compiler) = repl_stuff()?;
+            let chunk = compile_to_chunk(
+                case_insensitive,
+                &module,
+                &PwdIncluder,
+                &mut interpreter,
+                &compiler,
+                &world,
+            );
+            match chunk {
+                Ok(chunk) => {
+                    chunk_debug(&mut interpreter, &chunk);
+                }
+                Err(e) => {
+                    println!("{}: {e}", "COMPILE ERROR".red());
+                }
+            }
+        }
+        Err(errors) => {
+            let idx = LineIndex::new(&source);
+            let blocks = errors.iter().flat_map(|err| {
+                Block::new(
+                    &idx,
+                    [Label::new(err.span())
+                        .with_text(err.to_string())
+                        .with_style(|s| s.red().to_string())],
+                )
+            });
+
+            for block in blocks.map(|blk| blk.map_code(|c| CodeWidth::new(c, c.len()))) {
+                println!("{}[{path:?}]", block.prologue());
+                print!("{block}");
+                println!("{}", block.epilogue());
+            }
+        }
+    }
+    Ok(())
 }
 
 fn execute_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> anyhow::Result<()> {

@@ -27,7 +27,6 @@ pub enum Execution<'gc> {
         #[collect(require_static)]
         arity: Arity,
         pc: usize,
-        upvalue_index: Option<usize>,
         fallback: ImportFallback<'gc>,
     },
     Native {
@@ -45,16 +44,21 @@ impl Execution<'_> {
 }
 
 impl<'gc> Execution<'gc> {
-    fn from_lambda(lambda: Lambda<'gc>, prev_fallback: ImportFallback<'gc>) -> Self {
+    fn from_lambda(
+        lambda: Lambda<'gc>,
+        prev_fallback: ImportFallback<'gc>,
+    ) -> (Self, Option<usize>) {
         match lambda {
-            Lambda::Native(gc) => Self::Native { native: gc },
-            Lambda::Compiled(gc) => Self::Bytecode {
-                chunk: gc.chunk,
-                arity: gc.arity,
-                pc: 0,
-                upvalue_index: Some(gc.upvalue_id.expect("cannot use unlabeled lambda")),
-                fallback: gc.chunk.fallback.or(prev_fallback),
-            },
+            Lambda::Native(gc) => (Self::Native { native: gc }, None),
+            Lambda::Compiled(gc) => (
+                Self::Bytecode {
+                    chunk: gc.chunk,
+                    arity: gc.arity,
+                    pc: 0,
+                    fallback: gc.chunk.fallback.or(prev_fallback),
+                },
+                Some(gc.upvalue_id.expect("cannot use unlabeled lambda")),
+            ),
         }
     }
 }
@@ -66,14 +70,12 @@ impl PartialEq for Execution<'_> {
                 chunk,
                 arity,
                 pc,
-                upvalue_index,
                 fallback,
             } => {
                 let Self::Bytecode {
                     chunk: ochunk,
                     arity: oarity,
                     pc: opc,
-                    upvalue_index: oupvalue_index,
                     fallback: ofallback,
                 } = other
                 else {
@@ -82,7 +84,6 @@ impl PartialEq for Execution<'_> {
                 Gc::ptr_eq(*chunk, *ochunk)
                     && arity == oarity
                     && pc == opc
-                    && upvalue_index == oupvalue_index
                     && (matches!((fallback, ofallback), (None, None))
                         || matches!((fallback, ofallback), (Some(f), Some(of)) if Gc::ptr_eq(*f, *of)))
             }
@@ -114,6 +115,7 @@ pub struct ThreadFrame<'gc> {
     args: Box<[ValuePtr<'gc>]>,
     exception: Option<SchemeErrorPtr<'gc>>,
     env: StackEnvironmentPtr<'gc>,
+    upvalue_index: Option<usize>,
     bottom: usize,
     // TODO add a "promise slot" that when a frame is exiting, will fill the promise with the value it is
     // exiting the frame with.
@@ -158,18 +160,10 @@ impl std::fmt::Debug for ThreadFrame<'_> {
             .field("args", &self.args)
             .field("exception", &self.exception)
             .field("bottom", &self.bottom)
-            .field("execution", &self.kind());
-        if let Execution::Bytecode {
-            arity,
-            pc,
-            upvalue_index,
-            ..
-        } = &self.execution
-        {
-            debug
-                .field("arity", arity)
-                .field("pc", pc)
-                .field("upvalue_index", upvalue_index);
+            .field("execution", &self.kind())
+            .field("upvalue_index", &self.upvalue_index);
+        if let Execution::Bytecode { arity, pc, .. } = &self.execution {
+            debug.field("arity", arity).field("pc", pc);
         }
         debug.finish_non_exhaustive()
     }
@@ -258,13 +252,13 @@ impl<'gc> Thread<'gc> {
                     chunk,
                     pc: 0,
                     arity: Arity::Exact(0),
-                    upvalue_index: None,
                     fallback: chunk.fallback,
                 },
                 env: Gc::new(
                     mc,
                     RefLock::new(StackEnvironment::new(mc, Some(chunk.import_env))),
                 ),
+                upvalue_index: None,
                 args: Box::from([]),
                 handler: None,
                 dynamic_wind: None,
@@ -326,7 +320,6 @@ impl<'gc> Thread<'gc> {
             chunk,
             pc: 0,
             arity: Arity::Exact(0),
-            upvalue_index: None,
             fallback: chunk.fallback,
         };
 
@@ -345,6 +338,7 @@ impl<'gc> Thread<'gc> {
                 mc,
                 RefLock::new(StackEnvironment::new(mc, Some(chunk.import_env))),
             ),
+            upvalue_index: None,
             args: Box::new([]),
             handler: error_handler,
             dynamic_wind: None,
@@ -556,17 +550,20 @@ impl<'gc> Thread<'gc> {
                 }
             }
         }
+        let (execution, upvalue_index) = Execution::from_lambda(
+            lambda,
+            self.frames.last().and_then(|f| match f.execution {
+                Execution::Bytecode { fallback, .. } => fallback,
+                _ => None,
+            }),
+        );
+        let prev_upvalue = self.frames.last().and_then(|f| f.upvalue_index);
         let new_frame = ThreadFrame {
             // Ignore voids at the top of the stack when determining the bottom of a frame
             bottom: self.stack.len(),
-            execution: Execution::from_lambda(
-                lambda,
-                self.frames.last().and_then(|f| match f.execution {
-                    Execution::Bytecode { fallback, .. } => fallback,
-                    _ => None,
-                }),
-            ),
+            execution,
             handler: None,
+            upvalue_index: upvalue_index.or(prev_upvalue),
             dynamic_wind: None,
             args: Box::from(args.as_slice()),
             exception: None,
@@ -593,7 +590,7 @@ impl<'gc> Thread<'gc> {
     /// # Parameters
     /// - `is_tail`: will exclude the current frame if true.
     pub fn create_continuation(&self, mc: &Mutation<'gc>, is_tail: bool) -> Continuation<'gc> {
-        let mut frames_copy: Vec<_> = if !is_tail {
+        let frames_copy: Vec<_> = if !is_tail {
             &self.frames[..]
         } else {
             &self.frames[..self.frames.len() - 1]
@@ -610,29 +607,29 @@ impl<'gc> Thread<'gc> {
         })
         .collect();
         // Adjust the last to actually be the continuation (if bytecode frame)
-        if let Some(Execution::Bytecode { pc, chunk, .. }) =
-            frames_copy.last_mut().map(|f| &mut f.execution)
-        {
-            // handle Jumps
-            match chunk.code.get(*pc) {
-                Some(code) => match code {
-                    Bytecode::If { .. } => {
-                        // don't move the pc, as the If instruction will handle it
-                    }
-                    Bytecode::Jump { jump } => {
-                        // jump forward (as this is unconditional)
-                        *pc += jump + 1;
-                    }
-                    _ => {
-                        // all other instructions move linearly
-                        *pc += 1;
-                    }
-                },
-                None => {
-                    // no instruction here, don't move pc, as the frame will be popped once handled
-                }
-            }
-        };
+        // if let Some(Execution::Bytecode { pc, chunk, .. }) =
+        //     frames_copy.last_mut().map(|f| &mut f.execution)
+        // {
+        //     // handle Jumps
+        //     match chunk.code.get(*pc) {
+        //         Some(code) => match code {
+        //             Bytecode::If { .. } => {
+        //                 // don't move the pc, as the If instruction will handle it
+        //             }
+        //             Bytecode::Jump { jump } => {
+        //                 // jump forward (as this is unconditional)
+        //                 *pc += jump;
+        //             }
+        //             _ => {
+        //                 // all other instructions move linearly
+        //                 *pc += 1;
+        //             }
+        //         },
+        //         None => {
+        //             // no instruction here, don't move pc, as the frame will be popped once handled
+        //         }
+        //     }
+        // };
 
         Continuation::new(frames_copy)
     }
@@ -667,12 +664,32 @@ impl<'gc> Thread<'gc> {
             // at the start) or the previous frame (if there was an index), something to the effect of:
             // c.frames.iter()
             // .scan(last_upvalue_index, |upvalue_index, f| if f.upvalue_index.is_none() { ThreadFrame{upvalue_index, ..f} } else { *upvalue_index = f.upvalue_index; f }).collect()
-            // TODO instead of the scan, investigate just replacing the upvalue_index of all continuation frames with the index of the
-            // last frame
+            let Some(last) = self.frames.last() else {
+                unreachable!()
+            };
+            let upvalue_index = last.upvalue_index;
+            let cont = c
+                .frames
+                .iter()
+                .scan(upvalue_index, |ui, f| {
+                    if f.upvalue_index.is_none() {
+                        Some(ThreadFrame {
+                            upvalue_index: *ui,
+                            ..f.clone()
+                        })
+                    } else if let Some(v) = f.upvalue_index {
+                        *ui = Some(v);
+                        Some(f.clone())
+                    } else {
+                        Some(f.clone())
+                    }
+                })
+                .collect::<Vec<_>>();
+            self.frames = cont;
             // then we create dynamic-wind frames as necessary on top of these frames, where the handler copies the upvalue_index of the frame it comes from.
             // Then the frames we just created, together with the dynamic-wind frames generated from all frames (including the current ones) *replace* the current frames
             // (this is why we "cheat" then the continuation is empty, at that point, we only have to handle dynamic-wind)
-            todo!("continuation handling {c:?}")
+            // todo!("continuation handling {c:?}")
         }
     }
 
@@ -777,11 +794,7 @@ impl<'gc> Thread<'gc> {
             // handle execution
             match &mut frame.execution {
                 Execution::Bytecode {
-                    chunk,
-                    pc,
-                    arity,
-                    upvalue_index,
-                    ..
+                    chunk, pc, arity, ..
                 } => {
                     // If framepointer is oob, then that means execution of this frame is finished
                     if chunk.code.len() <= *pc {
@@ -840,7 +853,7 @@ impl<'gc> Thread<'gc> {
                                 &ctx,
                                 RefLock::new(Value::Lambda({
                                     let l = chunk.lambdas[index];
-                                    let l = if let Some(upvalue_index) = *upvalue_index {
+                                    let l = if let Some(upvalue_index) = frame.upvalue_index {
                                         l.label(&ctx, upvalue_index)
                                     } else {
                                         l.label(
@@ -853,7 +866,8 @@ impl<'gc> Thread<'gc> {
                                     l
                                 })),
                             ));
-                            advance_to_next_inst!();
+                            let frame = self.frames.last_mut();
+                            advance_to_next_inst!(frame);
                         }
                         Bytecode::FetchArg { index } => {
                             if index < frame.args.len()
@@ -880,23 +894,9 @@ impl<'gc> Thread<'gc> {
                         }
                         Bytecode::SetUpvalue { index } => {
                             let upvalues_len = self.upvalues.len();
-                            // // Assign a new upvalue scope if this one already exists
-                            // let Some(upvalue_index) = *upvalue_index else {
-                            //     todo!("not in upvalue scope");
-                            // };
-                            // if let Some(mapping) = self.upvalue_mapping.get(&lupvalue_index) {
-                            //     if mapping.get(&index).is_some() {
-                            //         // duplicate and make unique
-                            //         let new_scope =
-                            //             Self::allocate_upvalue_index(&mut self.next_upvalue_index);
-                            //         self.upvalue_mapping.insert(new_scope, mapping.clone());
-                            //         *upvalue_index = Some(new_scope);
-                            //         // lupvalue_index = new_scope;
-                            //     }
-                            // }
                             // dbg!((&self.upvalue_mapping, *upvalue_index));
                             self.upvalue_mapping
-                                .entry(upvalue_index.expect("not in upvaluable scope"))
+                                .entry(frame.upvalue_index.expect("not in upvaluable scope"))
                                 .or_default()
                                 .insert(index, upvalues_len);
                             let index = upvalues_len;
@@ -919,9 +919,15 @@ impl<'gc> Thread<'gc> {
                             // dbg!((&self.upvalue_mapping, *upvalue_index));
                             let Some(index) = self
                                 .upvalue_mapping
-                                .get(upvalue_index.as_ref().expect("not in upvaluable scope"))
+                                .get(
+                                    frame
+                                        .upvalue_index
+                                        .as_ref()
+                                        .expect("not in upvaluable scope"),
+                                )
                                 .and_then(|upm| upm.get(&index).copied())
                             else {
+                                // dbg!(frame.upvalue_index, &self.upvalue_mapping);
                                 todo!("TODO upvalue misreference miscompilation");
                             };
                             if let Some(val) = self.upvalues.get(index) {
@@ -1045,7 +1051,7 @@ impl<'gc> Thread<'gc> {
                             };
 
                             match *val.borrow() {
-                                Value::Lambda(mut l @ Lambda::Compiled(_)) => {
+                                Value::Lambda(mut l) => {
                                     // dbg!((&self.upvalue_mapping, *upvalue_index, &l));
                                     // Generate copy of lambda scope if it already exists (for new upvalues)
                                     if let Some(mapping) =
@@ -1075,28 +1081,6 @@ impl<'gc> Thread<'gc> {
                                             // because a jump unconditionally executes, the actual total movement is
                                             // jump + 1 plus the + 1 base from this instruction
                                             Some(Bytecode::Jump { jump }) => jump + 2,
-                                            _ => 1,
-                                        } >= code.len(),
-                                    ) {
-                                        make_error!(SchemeErrorType::LambdaException(err));
-                                        advance_to_next_inst!(undo self.frames.last_mut());
-                                        continue;
-                                    };
-                                }
-                                Value::Lambda(l @ Lambda::Native(_)) => {
-                                    let pc = *pc;
-                                    let code = std::rc::Rc::clone(&chunk.code);
-                                    // advance to next inst *before* pushing lambda
-                                    advance_to_next_inst!();
-                                    if let Err(err) = self.call_lambda(
-                                        &ctx,
-                                        l,
-                                        args,
-                                        pc + match code[pc] {
-                                            // make sure true branches can also be properly registered as tail calls
-                                            // because a jump unconditionally executes, the actual total movement is
-                                            // jump + 1 plus the + 1 base from this instruction
-                                            Bytecode::Jump { jump } => jump + 1,
                                             _ => 1,
                                         } >= code.len(),
                                     ) {
@@ -1186,7 +1170,12 @@ impl<'gc> Thread<'gc> {
                             // Get the *actual* index or error
                             let Some(index) = self
                                 .upvalue_mapping
-                                .get(upvalue_index.as_ref().expect("not in upvaluable scope"))
+                                .get(
+                                    frame
+                                        .upvalue_index
+                                        .as_ref()
+                                        .expect("not in upvaluable scope"),
+                                )
                                 .and_then(|upm| upm.get(&index).copied())
                             else {
                                 todo!("TODO upvalue misreference miscompilation");
@@ -1325,10 +1314,14 @@ impl<'gc> Thread<'gc> {
                             let args_len = args.len();
                             self.stack.extend(args);
                             // label the lambda
-                            let lambda = lambda.label(
-                                &ctx,
-                                Self::allocate_upvalue_index(&mut self.next_upvalue_index),
-                            );
+                            let lambda = if lambda.needs_label() {
+                                lambda.label(
+                                    &ctx,
+                                    Self::allocate_upvalue_index(&mut self.next_upvalue_index),
+                                )
+                            } else {
+                                lambda
+                            };
                             if let Err(err) = self.call_lambda(&ctx, lambda, args_len, false) {
                                 make_error!(SchemeErrorType::LambdaException(err));
                                 continue;
@@ -1344,10 +1337,14 @@ impl<'gc> Thread<'gc> {
                             let args_len = args.len();
                             self.stack.extend(args);
                             // label the lambda
-                            let lambda = lambda.label(
-                                &ctx,
-                                Self::allocate_upvalue_index(&mut self.next_upvalue_index),
-                            );
+                            let lambda = if lambda.needs_label() {
+                                lambda.label(
+                                    &ctx,
+                                    Self::allocate_upvalue_index(&mut self.next_upvalue_index),
+                                )
+                            } else {
+                                lambda
+                            };
                             if let Err(err) = self.call_lambda(&ctx, lambda, args_len, true) {
                                 make_error!(SchemeErrorType::LambdaException(err));
                                 continue;

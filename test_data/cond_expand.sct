@@ -1,0 +1,15 @@
+---
+#f
+---
+#;(define-library (rizz))
+(define-library (z rizzler)
+    (import (scheme base))
+    (export got-rizz?)
+    (cond-expand ((library (rizz))
+        (import (rizz))
+        (begin
+            (define got-rizz? #t)))
+    (else (begin
+        (define got-rizz? #f)))))
+(import (z rizzler))
+got-rizz?

@@ -341,7 +341,7 @@ pub fn register_module(
         let programs = ("scheme_base.scm", MODULE_SRC).parse_program(mc, interner, false)?;
         let library_decls = programs
             .into_iter()
-            .map(|p| LibraryDeclaration::convert(p, interner))
+            .map(|p| LibraryDeclaration::convert(p, mc, interner))
             .collect::<Result<Vec<_>, _>>()?;
         let value_pointers = arena.value_pointers();
         let compiler = arena

@@ -85,6 +85,35 @@ impl ListHead<'_> {
     }
 }
 
+impl<'gc> ListHead<'gc> {
+    pub fn into_program(
+        self,
+        mc: &Mutation<'gc>,
+        interner: &mut lasso::Rodeo,
+        source: Option<SourceData>,
+    ) -> ProgramPtr<'gc> {
+        let import = interner.get_or_intern_static("import");
+        let define_library = interner.get_or_intern_static("define-library");
+        match self {
+            ListHead::Program(p) => p,
+            ListHead::Import => Gc::new(
+                mc,
+                Program {
+                    data: ProgramData::Symbol(import),
+                    source,
+                },
+            ),
+            ListHead::DefineLibrary => Gc::new(
+                mc,
+                Program {
+                    data: ProgramData::Symbol(define_library),
+                    source,
+                },
+            ),
+        }
+    }
+}
+
 pub type ProgramPtr<'gc> = Gc<'gc, Program<'gc>>;
 /// This corresponds directly with external representations.
 ///
@@ -1048,6 +1077,87 @@ impl ExportSet {
         }
     }
 }
+
+/// A `cond-expand` feature requirement
+#[derive(Debug, Clone)]
+pub enum FeatureRequirement {
+    // Some feature identifier (has to be a valid one, either from the default features list, or the input `additional_features`)
+    Feature(lasso::Spur),
+    Library(LibraryName),
+    And(Rc<[Box<Self>]>),
+    Or(Rc<[Box<Self>]>),
+    Not(Box<Self>),
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("not a feature requirement")]
+pub struct NotFeatureRequirement(Option<SourceData>);
+
+impl FeatureRequirement {
+    pub fn is_satisfied(
+        &self,
+        compiler: &Compiler<'_>,
+        world: &World,
+        features: &[lasso::Spur],
+    ) -> bool {
+        match self {
+            Self::Feature(f) => features.contains(f),
+            Self::Library(ln) => compiler.has_library(ln, world),
+            Self::And(and) => and
+                .iter()
+                .all(|f| f.is_satisfied(compiler, world, features)),
+            Self::Or(or) => or.iter().any(|f| f.is_satisfied(compiler, world, features)),
+            Self::Not(feat) => !feat.is_satisfied(compiler, world, features),
+        }
+    }
+
+    pub fn convert(
+        ptr: ProgramPtr<'_>,
+        interner: &mut lasso::Rodeo,
+    ) -> Result<Self, NotFeatureRequirement> {
+        let library = interner.get_or_intern_static("library");
+        let and = interner.get_or_intern_static("and");
+        let or = interner.get_or_intern_static("or");
+        let not = interner.get_or_intern_static("not");
+
+        match &ptr.data {
+            ProgramData::Symbol(s) => Ok(Self::Feature(*s)),
+            ProgramData::List {
+                head: ListHead::Program(head),
+                body,
+            } => match &head.data {
+                ProgramData::Symbol(s) if *s == library && body.len() == 1 => {
+                    if let Some(library_name) = LibraryName::convert(body[0], interner) {
+                        Ok(Self::Library(library_name))
+                    } else {
+                        Err(NotFeatureRequirement(ptr.source))
+                    }
+                }
+                ProgramData::Symbol(s) if *s == not && body.len() == 1 => {
+                    let sub = Self::convert(body[0], interner)?;
+                    Ok(Self::Not(Box::new(sub)))
+                }
+                ProgramData::Symbol(s) if *s == and => {
+                    let sub = body
+                        .iter()
+                        .map(|p| Self::convert(*p, interner).map(Box::new))
+                        .collect::<Result<_, _>>()?;
+                    Ok(Self::And(sub))
+                }
+                ProgramData::Symbol(s) if *s == or => {
+                    let sub = body
+                        .iter()
+                        .map(|p| Self::convert(*p, interner).map(Box::new))
+                        .collect::<Result<_, _>>()?;
+                    Ok(Self::Or(sub))
+                }
+                _ => Err(NotFeatureRequirement(ptr.source)),
+            },
+            _ => Err(NotFeatureRequirement(ptr.source)),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum LibraryDeclaration<'gc> {
     Import(Rc<[ImportSet]>),
@@ -1058,7 +1168,10 @@ pub enum LibraryDeclaration<'gc> {
     },
     Begin(Rc<[ProgramPtr<'gc>]>),
     Export(Rc<[ExportSet]>),
-    CondExpand(()),
+    CondExpand {
+        branches: Rc<[(FeatureRequirement, Box<[Self]>)]>,
+        else_branch: Option<Box<[Self]>>,
+    },
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -1069,11 +1182,14 @@ pub enum LibraryDeclarationError {
     NotAnExportSet(Option<SourceData>),
     #[error(transparent)]
     ImportSetError(#[from] ImportSetError),
+    #[error(transparent)]
+    FeatureRequirement(#[from] NotFeatureRequirement),
 }
 
 impl<'gc> LibraryDeclaration<'gc> {
     pub fn convert(
         ptr: ProgramPtr<'gc>,
+        mc: &Mutation<'gc>,
         interner: &mut lasso::Rodeo,
     ) -> Result<Self, LibraryDeclarationError> {
         let export = interner.get_or_intern_static("export");
@@ -1083,6 +1199,7 @@ impl<'gc> LibraryDeclaration<'gc> {
         let include_ci = interner.get_or_intern_static("include-ci");
         let begin = interner.get_or_intern_static("begin");
         let cond_expand = interner.get_or_intern_static("cond-expand");
+        let else_sym = interner.get_or_intern_static("else");
 
         match &ptr.data {
             ProgramData::List { head, body } => match head {
@@ -1166,7 +1283,58 @@ impl<'gc> LibraryDeclaration<'gc> {
                 }
                 ListHead::Program(p) if matches!(&p.data, ProgramData::Symbol(s) if *s == cond_expand) =>
                 {
-                    todo!()
+                    // A cond-expand consists of at least 1 clause of form (FeatureRequirement <lib decls>...)
+                    // followed by up to one (else <lib decls>...)
+                    let mut branches = vec![];
+                    let mut else_branch = vec![];
+                    let mut last_non_else_index = None;
+                    for (idx, p) in body.iter().enumerate() {
+                        if let ProgramData::List { head, body } = &p.data {
+                            if let Some(s) = head.into_symbol(interner) {
+                                if s == else_sym {
+                                    // This is the else decl, add to else stuff, then break (so that this *has* to be the last one)
+                                    let decls = body
+                                        .iter()
+                                        .map(|b| Self::convert(*b, mc, interner))
+                                        .collect::<Result<Vec<_>, _>>()?;
+                                    else_branch.extend(decls);
+                                    break;
+                                }
+                            }
+                            // The head this the requirement, the body the declarationss
+                            last_non_else_index = Some(idx);
+                            let head = FeatureRequirement::convert(
+                                head.into_program(mc, interner, ptr.source),
+                                interner,
+                            )?;
+                            let decls = body
+                                .iter()
+                                .map(|b| Self::convert(*b, mc, interner))
+                                .collect::<Result<_, _>>()?;
+                            branches.push((head, decls));
+                        } else {
+                            // not a valid cond-expand decl
+                            return Err(LibraryDeclarationError::NotALibraryDeclaration(
+                                ptr.source,
+                            ));
+                        }
+                    }
+
+                    if last_non_else_index.is_none_or(|lb| {
+                        ![body.len(), body.len().saturating_sub(1)].contains(&(lb + 1))
+                    }) {
+                        // else branch is not the last branch
+                        return Err(LibraryDeclarationError::NotALibraryDeclaration(ptr.source));
+                    }
+
+                    Ok(Self::CondExpand {
+                        branches: branches.into(),
+                        else_branch: if !else_branch.is_empty() {
+                            Some(Box::from_iter(else_branch))
+                        } else {
+                            None
+                        },
+                    })
                 }
                 _ => Err(LibraryDeclarationError::NotALibraryDeclaration(ptr.source)),
             },
@@ -1383,7 +1551,7 @@ impl<'gc> Compiler<'gc> {
                     let library_decls = body
                         .iter()
                         .skip(1)
-                        .map(|p| LibraryDeclaration::convert(*p, ecc.interner))
+                        .map(|p| LibraryDeclaration::convert(*p, mc, ecc.interner))
                         .collect::<Result<Vec<_>, _>>()?;
 
                     // manually match and ignore OoF errors
@@ -1969,6 +2137,25 @@ impl<'gc> Compiler<'gc> {
         }
     }
 
+    /// Does this compiler have access to a library with the given name
+    pub fn has_library(&self, name: &LibraryName, world: &World) -> bool {
+        self.local_world.modules.contains_key(name) || world.has_library(name)
+    }
+
+    /// Generate full features list
+    pub fn features<S: AsRef<str>>(
+        additional_features: impl IntoIterator<Item = S>,
+        interner: &mut lasso::Rodeo,
+    ) -> Vec<lasso::Spur> {
+        let mut features = Self::base_features(interner);
+        features.extend(
+            additional_features
+                .into_iter()
+                .map(|addf| interner.get_or_intern(addf)),
+        );
+        features
+    }
+
     /// Interpret a library definition into a given LocalWorld
     ///
     /// # Parameters
@@ -2087,6 +2274,11 @@ impl<'gc> Compiler<'gc> {
             }
         }
 
+        // Generate features list
+        let features = Self::features(library_def.additional_features.unwrap_or(&[]), ecc.interner);
+
+        let mut library_code = vec![];
+
         while let Some(decl) = decls.pop_front() {
             match decl {
                 LibraryDeclaration::Import(imports) => {
@@ -2114,7 +2306,7 @@ impl<'gc> Compiler<'gc> {
                         for decl in code
                             .into_iter()
                             .rev()
-                            .map(|p| LibraryDeclaration::convert(p, ecc.interner))
+                            .map(|p| LibraryDeclaration::convert(p, mc, ecc.interner))
                             .collect::<Result<Vec<_>, _>>()?
                         {
                             decls.push_front(decl);
@@ -2137,34 +2329,51 @@ impl<'gc> Compiler<'gc> {
                                 ecc.interner,
                                 case_insensitive,
                             )?;
-                        execute_code(
-                            mc,
-                            &code,
-                            name,
-                            ecc,
-                            library_def,
-                            &mut lib_compiler,
-                            global_env,
-                            &mut fuel,
-                        )?
+                        library_code.extend(code);
                     }
                 }
-                LibraryDeclaration::Begin(code) => execute_code(
-                    mc,
-                    &code,
-                    name,
-                    ecc,
-                    library_def,
-                    &mut lib_compiler,
-                    global_env,
-                    &mut fuel,
-                )?,
+                LibraryDeclaration::Begin(code) => {
+                    library_code.extend(code.iter());
+                }
                 LibraryDeclaration::Export(names) => {
                     export_sets.extend(names.iter().copied());
                 }
-                LibraryDeclaration::CondExpand(_) => todo!(),
+                LibraryDeclaration::CondExpand {
+                    branches,
+                    else_branch,
+                } => {
+                    let mut branch_satisfied = false;
+                    for (req, cond_decls) in branches.iter() {
+                        if req.is_satisfied(self, ecc.world, &features) {
+                            branch_satisfied = true;
+                            for decl in cond_decls.iter() {
+                                decls.push_front(decl.clone());
+                            }
+                        }
+                    }
+                    if !branch_satisfied {
+                        // expand else branch
+                        if let Some(else_branch) = else_branch {
+                            for decl in else_branch.iter() {
+                                decls.push_front(decl.clone());
+                            }
+                        }
+                    }
+                }
             }
         }
+
+        // Execute all code defined in libraries (done all at once here, so that cond-expand is handled nicely)
+        execute_code(
+            mc,
+            &library_code,
+            name,
+            ecc,
+            library_def,
+            &mut lib_compiler,
+            global_env,
+            &mut fuel,
+        )?;
 
         // Handle all exports at the end! (b/c export decls can come *before* the items they define)
         let mut exports = fxhash::FxHashMap::default();

@@ -2349,6 +2349,8 @@ impl<'gc> Compiler<'gc> {
                             for decl in cond_decls.iter() {
                                 decls.push_front(decl.clone());
                             }
+                            // Ignore the remaining clauses
+                            break;
                         }
                     }
                     if !branch_satisfied {

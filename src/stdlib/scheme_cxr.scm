@@ -26,8 +26,8 @@
 ; 4
 (export caaaar
         caaadr caadar cadaar cdaaar
-        caaddr caddar cddaar
-        cadddr cdddar
+        caaddr caddar cadadr cddaar cdadar cdaadr
+        cadddr cdaddr cddadr cdddar
         cddddr)
 (begin
     (define (caaaar lst)
@@ -44,10 +44,20 @@
         (car (car (cdr (cdr lst)))))
     (define (caddar lst)
         (car (cdr (cdr (car lst)))))
+    (define (cadadr lst)
+        (car (cdr (car (cdr lst)))))
     (define (cddaar lst)
         (cdr (cdr (car (car lst)))))
+    (define (cdadar lst)
+        (cdr (car (cdr (car lst)))))
+    (define (cdaadr lst)
+        (cdr (car (car (cdr lst)))))
     (define (cadddr lst)
         (car (cdr (cdr (cdr lst)))))
+    (define (cdaddr lst)
+        (cdr (car (cdr (cdr lst)))))
+    (define (cddadr lst)
+        (cdr (cdr (car (cdr lst)))))
     (define (cdddar lst)
         (cdr (cdr (cdr (car lst)))))
     (define (cddddr lst)

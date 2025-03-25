@@ -74,28 +74,26 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
         });
     }
 
-    if !is_finished {
-        // we didn't finish, so we ran out of fuel
-        println!("test ran out of fuel");
-        Err(DatatestError(Box::from(path)))?
-    }
-
     let file_name_spur = interp.interner_mut().get_or_intern(file_name);
     let results = interp.try_run(&thread, |ctx, _arena, interner| {
-        match ctx.thread.borrow().result().expect("finished execution") {
-            Ok(v) => Ok(v
-                .into_iter()
-                .map(|v| Value::resolve_into(v, interner.clone(), ctx.null_value).to_string())
-                .map(|s| Box::from(s.as_str()))
+        if is_finished {
+            match ctx.thread.borrow().result().expect("finished execution") {
+                Ok(v) => Ok(v
+                    .into_iter()
+                    .map(|v| Value::resolve_into(v, interner.clone(), ctx.null_value).to_string())
+                    .map(|s| Box::from(s.as_str()))
+                    .collect::<Vec<_>>()),
+                // Alternate display, which removes pointer data (for UI tests)
+                Err(e) => Err(format!(
+                    "{:#}",
+                    e.display(interner, [(file_name_spur, data.source())])
+                )
+                .split('\n')
+                .map(Box::from)
                 .collect::<Vec<_>>()),
-            // Alternate display, which removes pointer data (for UI tests)
-            Err(e) => Err(format!(
-                "{:#}",
-                e.display(interner, [(file_name_spur, data.source())])
-            )
-            .split('\n')
-            .map(Box::from)
-            .collect::<Vec<_>>()),
+            }
+        } else {
+            Err(vec![Box::from("test ran out of fuel")])
         }
     });
     let errored = match results.as_ref() {

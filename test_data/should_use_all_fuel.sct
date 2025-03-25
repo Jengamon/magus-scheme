@@ -1,0 +1,7 @@
+test ran out of fuel
+---
+---
+; this shouldn't return anything, and should just fruitlessly use up its fuel
+(import (only (scheme base) define))
+(define (loop-4eva) (loop-4eva))
+(loop-4eva)

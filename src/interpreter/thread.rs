@@ -567,10 +567,16 @@ impl<'gc> Thread<'gc> {
             dynamic_wind: None,
             args: Box::from(args.as_slice()),
             exception: None,
-            env: Gc::new(
-                ctx,
-                RefLock::new(StackEnvironment::new(ctx, Self::current_env(&self.frames))),
-            ),
+            // "Steal" the last frame environment if we are tail-calling the function
+            env: if !is_tail {
+                Gc::new(
+                    ctx,
+                    RefLock::new(StackEnvironment::new(ctx, Self::current_env(&self.frames))),
+                )
+            } else {
+                Self::current_env(&self.frames)
+                    .unwrap_or_else(|| Gc::new(ctx, RefLock::new(StackEnvironment::new(ctx, None))))
+            },
         };
 
         if is_tail {

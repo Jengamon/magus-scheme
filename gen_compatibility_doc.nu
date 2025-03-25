@@ -58,7 +58,8 @@ $"### (if ($it.impl-type | is_empty) {"symbol"} else {$it.impl-type} | str capit
 
 let section_text = $sections | sort-by library | each {
 let all_impled = ($in.items | all { $in.impl-status == true})
-let impl_mark = if $all_impled { $" ($impled)"} else {""}
+let all_nevered = ($in.items | all { $in.impl-status == never})
+let impl_mark = if $all_impled { $" ($impled)" } else if $all_nevered { $" ($never_impled)" } else { "" }
 $"## Scheme Standard: ($in.library | str title-case | upcase_scheme) Library `\(scheme ($in.library)\)`($impl_mark)
 ($in.items | each $section_format | str join "\n")"};
 

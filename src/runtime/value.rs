@@ -47,6 +47,7 @@ pub enum ValueType {
     Lambda,
     Continuation,
     Promise,
+    Parameter,
     Error,
 }
 
@@ -111,7 +112,8 @@ pub enum Value<'gc> {
     // for the first time)
     // So this a blob of bytecode that is to be evaluated in a surrounding chunk's environment,
     // (just a blob and a memoize slot)
-    Promise(()),
+    Promise(PromisePtr<'gc>),
+    Parameter(()),
     // TODO Impl native parameter objects
     //
     // These parameter objects should add something to a frame that is handled at the same time as dynamic-wind
@@ -181,7 +183,8 @@ impl PartialEq for Value<'_> {
             Value::UserStruct(_) => todo!(),
             Value::Lambda(lptr) => matches!(other, Value::Lambda(optr) if lptr == optr),
             Value::Continuation(c) => matches!(other, Value::Continuation(oc) if c == oc),
-            Value::Promise(_) => todo!(),
+            Value::Promise(p) => matches!(other, Value::Promise(op) if Gc::ptr_eq(*p, *op)),
+            Value::Parameter(_) => todo!(),
             Value::Error(_) => todo!(),
         }
     }
@@ -210,6 +213,7 @@ impl<'gc> Value<'gc> {
             Value::Lambda(_) => ValueType::Lambda,
             Value::Continuation(_) => ValueType::Continuation,
             Value::Promise(_) => ValueType::Promise,
+            Value::Parameter(_) => ValueType::Parameter,
             Value::Error(_) => ValueType::Error,
         }
     }
@@ -497,7 +501,12 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
             // Value::Lambda(lambda) => write!(f, "<lambda {:p}>", *lambda.borrow()),
             Value::Lambda(lambda) => write!(f, "#<lambda {lambda:p}>"),
             Value::Continuation(cont) => write!(f, "#<continuation {cont}>"),
-            Value::Promise(_) => todo!(),
+            Value::Promise(p) => write!(
+                f,
+                "#<promise {} . {p:p}>",
+                if p.borrow().is_evaled() { "#t" } else { "#f" }
+            ),
+            Value::Parameter(_) => todo!(),
             Value::Error(e) => write!(f, "#<error {e:p}>"),
         }
     }
@@ -642,6 +651,49 @@ impl<'gc> Continuation<'gc> {
 impl fmt::Display for Continuation<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:p} ({})", self.frames.len())
+    }
+}
+
+/// A promise is a lambda that is run at most once
+#[derive(Clone, Copy, Collect, Debug)]
+#[collect(no_drop)]
+pub enum Promise<'gc> {
+    /// Will be called with 0 args
+    Unevaled(Lambda<'gc>),
+    /// The promise has been evaluated, so just return the value
+    Evaled(ValuePtr<'gc>),
+}
+pub type PromisePtr<'gc> = Gc<'gc, RefLock<Promise<'gc>>>;
+
+impl<'gc> Promise<'gc> {
+    pub fn promise(mc: &Mutation<'gc>, promise: PromisePtr<'gc>, value: ValuePtr<'gc>) {
+        if matches!(*promise.borrow(), Promise::Unevaled(_)) {
+            *promise.borrow_mut(mc) = Promise::Evaled(value);
+        }
+    }
+
+    pub fn label(
+        &self,
+        mc: &Mutation<'gc>,
+        maybe_label: Option<usize>,
+        f: impl FnOnce() -> usize,
+    ) -> Option<Self> {
+        if let Promise::Unevaled(l) = self {
+            let l = if let Some(upvalue_index) = maybe_label {
+                l.label(mc, upvalue_index)
+            } else {
+                l.label(mc, f())
+            };
+            Some(Promise::Unevaled(l))
+        } else {
+            None
+        }
+    }
+}
+
+impl Promise<'_> {
+    pub fn is_evaled(&self) -> bool {
+        matches!(self, Promise::Evaled(_))
     }
 }
 

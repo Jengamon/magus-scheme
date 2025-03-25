@@ -1,0 +1,18 @@
+---
+2
+---
+; manually expanded letrec, annoying b/c i wasn't sure if my impl
+; was bugged, or this was
+(import (only (scheme base) lambda define set! quote + cons car cdr)
+        (only (scheme lazy) delay force))
+(define integers
+    ((lambda (next) ((lambda (tmpnext)
+        (set! next tmpnext)
+        (next 0)
+    )
+    (lambda (n) (delay (cons n (next (+ n 1))))))) 'undefined))
+(define head
+    (lambda (stream) (car (force stream))))
+(define tail
+    (lambda (stream) (cdr (force stream))))
+(head (tail (tail integers)))

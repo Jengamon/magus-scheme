@@ -6,7 +6,9 @@ use std::{collections::HashMap, rc::Rc, sync::Arc};
 use fxhash::FxHashMap;
 use gc_arena::{Collect, Gc, Mutation, Static};
 
-use crate::{ValuePtr, environment::StackEnvironmentPtr, runtime::lambda::Lambda};
+use crate::{
+    ValuePtr, environment::StackEnvironmentPtr, runtime::lambda::Lambda, value::PromisePtr,
+};
 
 /*
 compiled form is at its root primitive forms:
@@ -37,35 +39,21 @@ pub enum Bytecode {
     /// Push a void value to the stack
     PushVoid,
     /// Push to stack a constant value at a given index of the constant table
-    PushConst {
-        index: usize,
-    },
+    PushConst { index: usize },
     /// Push a boolean value to stack
-    PushBool {
-        bool: bool,
-    },
+    PushBool { bool: bool },
     /// Push a compiled lambda to the stack
-    PushLambda {
-        index: usize,
-    },
-    // TODO Push a compiled promise to the stack
-    // A promise is just a blob of bytecode, with a runtime object that can record
-    // what value the blob resulted in
-    PushPromise {
-        index: usize,
-    },
+    PushLambda { index: usize },
+    /// Push a promise to the stack
+    PushPromise { index: usize },
+    /// Pop the top of the stack and wrap it in an evaluated promise
+    MakePromise,
     /// Sets an upvalue referencing the value at the top of stack (does not pop)
-    SetUpvalue {
-        index: usize,
-    },
+    SetUpvalue { index: usize },
     /// Fetch an upvalue (an argument of a parent scope)
-    FetchUpvalue {
-        index: usize,
-    },
+    FetchUpvalue { index: usize },
     /// Fetch args from the current scope
-    FetchArg {
-        index: usize,
-    },
+    FetchArg { index: usize },
     /// Fetch the rest arg from the current scope
     FetchRest,
     /// Pop the top 2 arguments from the stack and make a cons cell out of them
@@ -73,33 +61,23 @@ pub enum Bytecode {
     MakePair,
     /// Make a vector (popping from stack), using the amount specified as the number of
     /// items
-    MakeVector {
-        length: usize,
-    },
+    MakeVector { length: usize },
     /// Look up the symbol in the stack environment, and push the result to
     /// stack (if not found or not a symbol, errors)
-    Reference {
-        symbol: lasso::Spur,
-    },
+    Reference { symbol: lasso::Spur },
     /// Pop the top value (must be a callable)
     /// Call the given lambda, making it a tail call if possible (there are
     /// no more instructions in the current context to execute)
-    Call {
-        args: usize,
-    },
+    Call { args: usize },
     /// Pop a list and a value, and append the value to the list, pushing the list back to
     /// stack
     Splice,
 
     // Holes are the way to make self-referential datatypes
     /// Creates a hole for self-reference
-    MakeHole {
-        id: usize,
-    },
+    MakeHole { id: usize },
     /// Pop the top of the stack as the value of a hole, and clear the hole.
-    FillHole {
-        id: usize,
-    },
+    FillHole { id: usize },
 
     // NOTE These are the "definitive forms" that are
     // theoretically all that's needed to implement the
@@ -108,31 +86,21 @@ pub enum Bytecode {
     // b/c `lambda`, is more "make a compiled lambda, add it to the chunk,
     // the used the `PushLambda` instructions to push it to stack.")
     /// Pop the value on the stack, and define a given symbol using that value.
-    Define {
-        symbol: lasso::Spur,
-    },
+    Define { symbol: lasso::Spur },
     /// Pop the value on the stack and set! a given symbol using that value
     /// (error if the symbol is not already defined in the environment)
-    SetBang {
-        symbol: lasso::Spur,
-    },
+    SetBang { symbol: lasso::Spur },
     /// Set the value of an upvalue if it exists
-    SetBangUpvalue {
-        index: usize,
-    },
+    SetBangUpvalue { index: usize },
     /// Branching instruction
     ///
     /// Jump forward by a certain number of instructions if the value popped from the top of the stack is false (any other
     /// value is considered true)
-    If {
-        jump: usize,
-    },
+    If { jump: usize },
     /// Jump forward a certain number of instructions
     ///
     /// Used for `if` on the true branch
-    Jump {
-        jump: usize,
-    },
+    Jump { jump: usize },
     /// Force the top of the stack if it is a promise.
     /// Otherwise, does nothing.
     Force,
@@ -157,6 +125,7 @@ impl Bytecode {
             Self::PushBool { .. } => 1,
             Self::PushLambda { .. } => 1,
             Self::PushPromise { .. } => 1,
+            Self::MakePromise => 1,
             Self::SetUpvalue { .. } => 1,
             Self::FetchUpvalue { .. } => 1,
             Self::FetchArg { .. } => 1,
@@ -193,6 +162,7 @@ impl fmt::Display for Bytecode {
             }
             Bytecode::PushLambda { index } => write!(f, "LMBD {index}"),
             Bytecode::PushPromise { index } => write!(f, "PROM {index}"),
+            Bytecode::MakePromise => write!(f, "MPRM"),
             Bytecode::SetUpvalue { index } => write!(f, "UPVL {index}"),
             Bytecode::FetchUpvalue { index } => write!(f, "FUPV {index}"),
             Bytecode::FetchArg { index } => write!(f, "FARG {index}"),
@@ -265,8 +235,7 @@ pub struct Chunk<'gc> {
     /// lambdas this chunk defines
     pub lambdas: Rc<[Lambda<'gc>]>,
     /// promises this chunk defines
-    #[collect(require_static)]
-    pub promises: Rc<[Box<[Bytecode]>]>,
+    pub promises: Rc<[PromisePtr<'gc>]>,
     /// environment this chunk references
     // We only need 1 because of the fact that a Scheme program is all the imports *then*
     // commands and definitions
@@ -292,7 +261,7 @@ impl<'gc> Chunk<'gc> {
         code: impl IntoIterator<Item = Bytecode>,
         constants: impl IntoIterator<Item = Constant>,
         lambdas: impl IntoIterator<Item = Lambda<'gc>>,
-        promises: impl IntoIterator<Item = Box<[Bytecode]>>,
+        promises: impl IntoIterator<Item = PromisePtr<'gc>>,
         upvalues: usize,
         import_stack_env: StackEnvironmentPtr<'gc>,
         labels: FxHashMap<usize, SourceData>,
@@ -317,7 +286,7 @@ impl<'gc> Chunk<'gc> {
         code: impl IntoIterator<Item = Bytecode>,
         constants: impl IntoIterator<Item = Constant>,
         lambdas: impl IntoIterator<Item = Lambda<'gc>>,
-        promises: impl IntoIterator<Item = Box<[Bytecode]>>,
+        promises: impl IntoIterator<Item = PromisePtr<'gc>>,
         upvalues: usize,
         import_stack_env: StackEnvironmentPtr<'gc>,
         labels: FxHashMap<usize, SourceData>,

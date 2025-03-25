@@ -17,6 +17,7 @@ use crate::{
     environment::{Environment, StackEnvironment, StackEnvironmentPtr},
     interpreter::{Includer, ValuePointers, thread::Thread},
     runtime::lambda::{CompiledLambda, CompiledLambdaPtr, Lambda, NativeLambdaPtr},
+    value::PromisePtr,
 };
 
 /// List of Scheme feature identifiers that we support
@@ -193,7 +194,7 @@ pub struct SyntaxContext<'a, 'gc> {
     pub world: &'a World,
     constants: &'a mut Vec<Constant>,
     lambdas: &'a mut Vec<Lambda<'gc>>,
-    promises: &'a mut Vec<Box<[Bytecode]>>,
+    promises: &'a mut Vec<PromisePtr<'gc>>,
     upvalues: &'a mut usize,
 }
 
@@ -239,6 +240,21 @@ impl<'gc> SyntaxContext<'_, 'gc> {
         }
     }
 
+    /// Add a promise to the current compile context to refer to it from bytecode
+    pub fn add_promise(&mut self, prom: PromisePtr<'gc>) -> usize {
+        if let Some(p) = self
+            .promises
+            .iter()
+            .position(|pptr| Gc::ptr_eq(*pptr, prom))
+        {
+            p
+        } else {
+            let idx = self.promises.len();
+            self.promises.push(prom);
+            idx
+        }
+    }
+
     /// Internal method to create an upvalue reference in the current compile context
     pub(crate) fn add_upvalue(&mut self) -> usize {
         // Upvalues should be comparable to see if they are referencing the same out-of-scope value
@@ -259,7 +275,7 @@ impl<'gc> SyntaxContext<'_, 'gc> {
 
     /// Get all promises in the current compile context
     // #[deprecated = "check if using native lambdas can solve w/o adding bytecode support"]
-    pub fn promises(&self) -> impl IntoIterator<Item = Box<[Bytecode]>> {
+    pub fn promises(&self) -> impl IntoIterator<Item = PromisePtr<'gc>> {
         self.promises.clone()
     }
 

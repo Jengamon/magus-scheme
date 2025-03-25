@@ -32,6 +32,10 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
     //     LibraryName::from_iter(library_name!(interp.interner_mut() => scheme base)),
     //     stdlib::base::Base::default(),
     // )?;
+    test_world.insert(
+        LibraryName::from_iter(library_name!(interp.interner_mut() => scheme lazy)),
+        stdlib::lazy::Lazy,
+    )?;
     let includer = NullIncluder;
     let comp = interp.new_compiler();
     stdlib::base::register_module(

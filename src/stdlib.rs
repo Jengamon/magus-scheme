@@ -6,6 +6,7 @@ use crate::{
 };
 
 pub mod base;
+pub mod lazy;
 pub mod srfi;
 pub mod write;
 // For now, Scheme-only libraries are just exposed as strings here, but a *biiig* TODO is to find

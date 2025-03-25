@@ -13,7 +13,7 @@ use crate::{
             NativeLambdaPtr,
         },
     },
-    value::{self, ConsCell, Continuation, ContinuationPtr, ValuePtr},
+    value::{self, ConsCell, Continuation, ContinuationPtr, Promise, ValuePtr},
 };
 
 use super::{Context, Includer};
@@ -848,6 +848,37 @@ impl<'gc> Thread<'gc> {
                             ));
                             advance_to_next_inst!();
                         }
+                        Bytecode::PushPromise { index } => {
+                            self.stack.push(
+                                Value::Promise({
+                                    let prom = *chunk.promises[index].borrow();
+                                    Gc::new(
+                                        &ctx,
+                                        RefLock::new(
+                                            prom.label(&ctx, frame.upvalue_index, || {
+                                                Self::allocate_upvalue_index(
+                                                    &mut self.next_upvalue_index,
+                                                )
+                                            })
+                                            .unwrap_or(prom),
+                                        ),
+                                    )
+                                })
+                                .into_ptr(&ctx),
+                            );
+                            advance_to_next_inst!();
+                        }
+                        Bytecode::MakePromise => {
+                            let Some(value) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+                            self.stack.push(
+                                Value::Promise(Gc::new(&ctx, RefLock::new(Promise::Evaled(value))))
+                                    .into_ptr(&ctx),
+                            );
+                            advance_to_next_inst!();
+                        }
                         Bytecode::PushLambda { index } => {
                             self.stack.push(Gc::new(
                                 &ctx,
@@ -1336,7 +1367,9 @@ impl<'gc> Thread<'gc> {
                             let lambda = if lambda.needs_label() {
                                 lambda.label(
                                     &ctx,
-                                    Self::allocate_upvalue_index(&mut self.next_upvalue_index),
+                                    frame.upvalue_index.unwrap_or_else(|| {
+                                        Self::allocate_upvalue_index(&mut self.next_upvalue_index)
+                                    }),
                                 )
                             } else {
                                 lambda
@@ -1359,7 +1392,9 @@ impl<'gc> Thread<'gc> {
                             let lambda = if lambda.needs_label() {
                                 lambda.label(
                                     &ctx,
-                                    Self::allocate_upvalue_index(&mut self.next_upvalue_index),
+                                    frame.upvalue_index.unwrap_or_else(|| {
+                                        Self::allocate_upvalue_index(&mut self.next_upvalue_index)
+                                    }),
                                 )
                             } else {
                                 lambda

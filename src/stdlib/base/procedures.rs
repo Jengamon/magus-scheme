@@ -71,10 +71,7 @@ mod control {
 
     use crate::{
         Value, compiler,
-        runtime::{
-            convert::IntoValue as _,
-            lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
-        },
+        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
         value::ConsCell,
     };
     use either::Either;
@@ -97,27 +94,31 @@ mod control {
             // get the continuation of the stack frame right above us
             let cont = ctx.thread_ref.create_continuation(&ctx, true);
 
-            let arg = args.first();
-            let Some(Value::Lambda(lambda)) = arg.map(|p| *p.borrow()) else {
-                return Err(anyhow::anyhow!(
-                    "call-with-current-continuation must be given a lambda, was given {:?}",
-                    arg.map(|p| p.borrow().value_type())
-                )
-                .into());
-            };
+            let cont_value = Value::Continuation(Gc::new(&ctx, cont)).into_ptr(&ctx);
 
-            if !ctx.get_arity(self, lambda).is_satisfied(1) {
-                return Err(anyhow::anyhow!(
-                    "call-with-current-continuation must be given a 1-arity lambda"
+            match *args[0].borrow() {
+                Value::Lambda(lambda) => {
+                    if !ctx.get_arity(self, lambda).is_satisfied(1) {
+                        return Err(anyhow::anyhow!(
+                    "call-with-current-continuation must be given a 1-arity lambda as its first argument"
                 )
                 .into());
+                    }
+
+                    Ok(LambdaReturn::TailCall {
+                        lambda,
+                        args: vec![cont_value],
+                        dynamic_wind: None,
+                    })
+                }
+                Value::Continuation(cont) => Ok(LambdaReturn::Continue {
+                    cont,
+                    args: vec![cont_value],
+                }),
+                _ => Err(anyhow::anyhow!(
+                    "call-with-current-continuation expects a procedure as its first argument",
+                ))?,
             }
-
-            Ok(LambdaReturn::TailCall {
-                lambda,
-                args: vec![Gc::new(&ctx, cont).into_value(&ctx).into_ptr(&ctx)],
-                dynamic_wind: None,
-            })
         }
     }
 

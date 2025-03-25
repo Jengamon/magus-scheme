@@ -77,6 +77,9 @@ pub enum LambdaReturn<'gc> {
         args: Vec<ValuePtr<'gc>>,
         dynamic_wind: DynamicWind<'gc>,
     },
+    // TODO Parameter, that takes a parameter object, and pushes its current value to stack
+    // (must call, b/c parameter objects can have a converter function associated with them, which processes the input value)
+    // (NOTE Parameters are only allowed to return exactly 1 ValuePtr (which can be more than 1 value))
     /// Set an exception handler for this frame
     ///
     /// If an error arises on a frame:

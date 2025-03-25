@@ -1070,6 +1070,7 @@ mod predicates {
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            // TODO parameters (which are considered procedures with arity 0)
             let val = matches!(*args[0].borrow(), Value::Lambda(_) | Value::Continuation(_));
 
             Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
@@ -1102,9 +1103,13 @@ mod structure {
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<crate::runtime::lambda::LambdaReturn<'gc>, crate::runtime::lambda::LambdaError>
         {
-            Ok(LambdaReturn::Return(vec![
-                Value::Values(Gc::new(&ctx, args.to_vec())).into_ptr(&ctx),
-            ]))
+            if args.len() > 1 {
+                Ok(LambdaReturn::Return(vec![
+                    Value::Values(Gc::new(&ctx, args.to_vec())).into_ptr(&ctx),
+                ]))
+            } else {
+                Ok(LambdaReturn::Return(Vec::from_iter(args.first().copied())))
+            }
         }
     }
 

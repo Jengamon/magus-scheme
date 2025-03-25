@@ -1,0 +1,10 @@
+---
+3
+4
+5
+---
+; continuations are weird, dude
+(import (only (scheme base) call/cc define lambda procedure? if))
+(define x (call/cc (lambda (k) k)))
+(if (procedure? x) (x 3 4 5) x)
+

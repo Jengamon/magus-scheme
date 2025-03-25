@@ -1090,6 +1090,20 @@ impl<'gc> Thread<'gc> {
                                     };
                                 }
                                 Value::Continuation(c) => {
+                                    // Wrap the top *args* values into 1 value (or error with not enough values)
+                                    if args > 1 {
+                                        if self.stack.len() >= args {
+                                            let cont_input =
+                                                self.stack.drain(self.stack.len() - args..);
+                                            let values =
+                                                Value::Values(Gc::new(&ctx, cont_input.collect()))
+                                                    .into_ptr(&ctx);
+                                            self.stack.push(values);
+                                        } else {
+                                            make_error!(SchemeErrorType::NoValue(inst));
+                                            continue;
+                                        }
+                                    }
                                     self.handle_continuation(&ctx, c, args);
                                 }
                                 _ => {

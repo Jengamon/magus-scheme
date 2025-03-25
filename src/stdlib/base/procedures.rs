@@ -5,7 +5,7 @@ pub use conversions::{Exact, Inexact, StringToNumber, StringToSymbol, SymbolToSt
 pub use equality::{IsEq, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
 pub use math::{Add, Divide, Gcd, Multiply, Subtract};
-pub use predicates::{IsExact, IsInexact, IsNull, IsPair, IsString, IsSymbol};
+pub use predicates::{IsExact, IsInexact, IsNull, IsPair, IsProcedure, IsString, IsSymbol};
 pub use structure::{Cons, Values};
 
 mod equality {
@@ -1051,6 +1051,26 @@ mod predicates {
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
             let val = matches!(*args[0].borrow(), Value::String(_));
+
+            Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IsProcedure;
+
+    impl NativeLambda for IsProcedure {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let val = matches!(*args[0].borrow(), Value::Lambda(_) | Value::Continuation(_));
 
             Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
         }

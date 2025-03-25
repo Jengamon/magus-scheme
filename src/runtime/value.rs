@@ -736,7 +736,10 @@ impl<'gc> ConsCell<'gc> {
         self_ptr: ValuePtr<'gc>,
         null_ptr: ValuePtr<'gc>,
     ) -> Option<impl IntoIterator<Item = ValuePtr<'gc>> + use<'gc>> {
-        debug_assert!(self.is_list(self_ptr, null_ptr));
+        if !self.is_list(self_ptr, null_ptr) {
+            return None;
+        }
+
         if Gc::ptr_eq(self_ptr, null_ptr) {
             Some(vec![])
         } else {

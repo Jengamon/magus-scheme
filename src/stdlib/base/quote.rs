@@ -165,7 +165,22 @@ fn quasiquote_program<'gc>(
                 && body.len() == 1 =>
         {
             *level += 1;
-            let res = quasiquote_program(body[0], compiler, ctx, labels, level)?;
+            let res = if *level > 0 {
+                let res = quasiquote_program(body[0], compiler, ctx, labels, level)?;
+                [Bytecode::PushNull]
+                    .into_iter()
+                    .chain(res)
+                    .chain([
+                        Bytecode::MakePair,
+                        Bytecode::PushConst {
+                            index: ctx.add_constant(Constant::Symbol(quasiquote)),
+                        },
+                        Bytecode::MakePair,
+                    ])
+                    .collect()
+            } else {
+                quasiquote_program(body[0], compiler, ctx, labels, level)?
+            };
             *level -= 1;
             res
         }
@@ -175,7 +190,22 @@ fn quasiquote_program<'gc>(
                 && body.len() == 1 =>
         {
             *level -= 1;
-            let res = quasiquote_program(body[0], compiler, ctx, labels, level)?;
+            let res = if *level > 0 {
+                let res = quasiquote_program(body[0], compiler, ctx, labels, level)?;
+                [Bytecode::PushNull]
+                    .into_iter()
+                    .chain(res)
+                    .chain([
+                        Bytecode::MakePair,
+                        Bytecode::PushConst {
+                            index: ctx.add_constant(Constant::Symbol(unquote)),
+                        },
+                        Bytecode::MakePair,
+                    ])
+                    .collect()
+            } else {
+                quasiquote_program(body[0], compiler, ctx, labels, level)?
+            };
             *level += 1;
             res
         }
@@ -185,9 +215,25 @@ fn quasiquote_program<'gc>(
                 && body.len() == 1 =>
         {
             *level -= 1;
-            let mut res = quasiquote_program(body[0], compiler, ctx, labels, level)?;
+            let res = if *level > 0 {
+                let res = quasiquote_program(body[0], compiler, ctx, labels, level)?;
+                [Bytecode::PushNull]
+                    .into_iter()
+                    .chain(res)
+                    .chain([
+                        Bytecode::MakePair,
+                        Bytecode::PushConst {
+                            index: ctx.add_constant(Constant::Symbol(unquote_splicing)),
+                        },
+                        Bytecode::MakePair,
+                    ])
+                    .collect()
+            } else {
+                let mut res = quasiquote_program(body[0], compiler, ctx, labels, level)?;
+                res.push(Bytecode::Splice);
+                res
+            };
             *level += 1;
-            res.push(Bytecode::Splice);
             res
         }
         // evaluate the list if level == 0, otherwise, quote the list (done here so that level is passed through)

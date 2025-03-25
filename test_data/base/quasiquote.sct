@@ -1,9 +1,13 @@
 ---
 (1 2 3 4 5)
 (1 2 3 4 5)
+(quote 3 4)
+(quasiquote (quote (unquote-splicing (list 3 4))))
 ---
 (import (only (scheme base) quasiquote list define map lambda + values))
 (define nums (list 1 2 3))
 (define @op 4)
 (values `(1 2 3 , @op 5)
-		`(1 ,@(map (lambda (x) (+ x 1)) nums) 5))
+        `(1 ,@(map (lambda (x) (+ x 1)) nums) 5)
+        `,`',@(list 3 4)
+        ``',@(list 3 4))

@@ -2866,17 +2866,30 @@ impl<'gc> Compiler<'gc> {
         }
     }
 
-    pub fn define_arguments(
+    pub fn define_parameters(
         &mut self,
+        interner: &mut lasso::Rodeo,
         args: impl IntoIterator<Item = lasso::Spur>,
         rest: Option<lasso::Spur>,
-    ) {
+    ) -> Result<(), anyhow::Error> {
+        let args: Rc<[lasso::Spur]> = args.into_iter().collect();
+        let unique: FxHashSet<_> = args.iter().copied().collect();
+        if unique.len() != args.len() {
+            let repeated_params = unique
+                .iter()
+                .map(|s| (*s, args.iter().filter(|ps| ps == &s).count()))
+                .filter(|(_, c)| *c > 1)
+                .map(|(sym, _)| interner.resolve(&sym))
+                .collect::<Vec<_>>();
+            return Err(anyhow::anyhow!("parameters repeated: {repeated_params:?}"));
+        }
         // Create and push a new argument scope
         self.scopes.push(Scope {
-            args: args.into_iter().collect(),
+            args,
             rest,
             ..Default::default()
         });
+        Ok(())
     }
 
     /// Get the [`Scope`] of a given scope where 0 is local, 1 is parent, etc..

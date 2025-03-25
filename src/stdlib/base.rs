@@ -47,7 +47,11 @@ pub fn lambda_helper<'gc>(
     body: impl IntoIterator<Item = ProgramPtr<'gc>>,
 ) -> anyhow::Result<ChunkPtr<'gc>> {
     compiler.hygenic(ctx, import_env, |ctx, compiler, import_env| {
-        compiler.define_arguments(formals.non_rest_params(), formals.rest_param());
+        compiler.define_parameters(
+            ctx.interner,
+            formals.non_rest_params(),
+            formals.rest_param(),
+        )?;
 
         let mut labels = fxhash::FxHashMap::default();
         let mut definitions_allowed = true;

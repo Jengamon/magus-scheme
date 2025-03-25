@@ -6,7 +6,7 @@ pub use equality::{IsEq, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
 pub use math::{Add, Divide, Gcd, Multiply, Subtract};
 pub use predicates::{IsExact, IsInexact, IsNull, IsPair, IsProcedure, IsString, IsSymbol};
-pub use structure::{Cons, Values};
+pub use structure::{CallWithValues, Cons, Values};
 
 mod equality {
     //! defines eq? and eqv?
@@ -1086,7 +1086,7 @@ mod structure {
         runtime::lambda::{Arity, LambdaReturn, NativeLambda},
     };
 
-    // Stuff like cons and values
+    // Stuff like cons and values (and dealing with values)
 
     #[derive(Debug, Collect)]
     #[collect(require_static)]
@@ -1109,6 +1109,59 @@ mod structure {
                 ]))
             } else {
                 Ok(LambdaReturn::Return(Vec::from_iter(args.first().copied())))
+            }
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct CallWithValues;
+
+    impl NativeLambda for CallWithValues {
+        fn arity(&self) -> Arity {
+            Arity::Exact(2)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: crate::runtime::lambda::NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
+            if ctx.stack.is_empty() {
+                // We haven't produced anything, work on that
+                let Value::Lambda(producer) = *args[0].borrow() else {
+                    return Err(anyhow::anyhow!(
+                        "call-with-values expects a lambda as its first argument"
+                    ))?;
+                };
+
+                Ok(LambdaReturn::Call {
+                    lambda: producer,
+                    args: vec![],
+                    dynamic_wind: None,
+                })
+            } else {
+                let Value::Lambda(consumer) = *args[1].borrow() else {
+                    return Err(anyhow::anyhow!(
+                        "call-with-values expects a lambda as its second argument"
+                    ))?;
+                };
+
+                // We've produced something, so get args to tail-call the consumer
+                let args = if let Some(produced) = ctx.stack.last().copied() {
+                    match *produced.borrow() {
+                        Value::Values(v) => (*v).clone(),
+                        _ => vec![produced],
+                    }
+                } else {
+                    unreachable!("all lambdas must produce a value, even if it is #<void>")
+                };
+
+                Ok(LambdaReturn::TailCall {
+                    lambda: consumer,
+                    args,
+                    dynamic_wind: None,
+                })
             }
         }
     }

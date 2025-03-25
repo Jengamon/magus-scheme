@@ -41,7 +41,7 @@
     [ "base", "procedure", cadr, true, "gets the car field of the cdr field of a pair", "" ],
     [ "base", "procedure", call-with-current-continuation, true, "tail-calls a function passing as the only argument the current continuation", "passes the yinyang puzzle" ],
     [ "base", "", call-with-port, false, "", "" ],
-    [ "base", "", call-with-values, false, "", "" ],
+    [ "base", "procedure", call-with-values, true, "call a producer thunk to produce values which are sent to a consumer lambda", "" ],
     [ "base", "procedure", call/cc, true, "tail-calls a function passing as the only argument the current continuation", "passes the yinyang puzzle" ],
     [ "base", "procedure", car, true, "get the car field of a pair", "" ],
     [ "base", "", case, false, "", "" ],

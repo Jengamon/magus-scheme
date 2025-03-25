@@ -22,10 +22,10 @@ pub use conditionals::If;
 pub use define::{Define, SetBang};
 pub use macros::{DefineSyntax, SyntaxRules};
 pub use procedures::{
-    Add, Apply, Ascending, Caar, Cadr, CallCc, Car, Cdar, Cddr, Cdr, Cons, Descending, Divide,
-    Equal, Exact, Features, Gcd, Inexact, IsEq, IsEqv, IsExact, IsInexact, IsNull, IsPair,
-    IsProcedure, IsString, IsSymbol, MonotonicAscending, MonotonicDescending, Multiply,
-    StringToNumber, StringToSymbol, Subtract, SymbolToString, Values,
+    Add, Apply, Ascending, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr, Cons,
+    Descending, Divide, Equal, Exact, Features, Gcd, Inexact, IsEq, IsEqv, IsExact, IsInexact,
+    IsNull, IsPair, IsProcedure, IsString, IsSymbol, MonotonicAscending, MonotonicDescending,
+    Multiply, StringToNumber, StringToSymbol, Subtract, SymbolToString, Values,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -248,6 +248,7 @@ impl Module for Base {
             "symbol?",
             "string?",
             "procedure?",
+            "call-with-values",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -306,6 +307,7 @@ impl Module for Base {
             "symbol?" => lambda!(IsSymbol),
             "string?" => lambda!(IsString),
             "procedure?" => lambda!(IsProcedure),
+            "call-with-values" => lambda!(CallWithValues),
             _ => None,
         }
     }

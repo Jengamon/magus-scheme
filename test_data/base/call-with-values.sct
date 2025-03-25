@@ -1,0 +1,6 @@
+---
+5
+---
+(import (only (scheme base) call-with-values values lambda +))
+(call-with-values (lambda () (values 1 2 3 4 5))
+				  (lambda (_ a b . rest) (+ a b)))

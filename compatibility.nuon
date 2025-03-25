@@ -322,7 +322,7 @@
     [ "inexact", "", sqrt, false, "", "" ],
     [ "inexact", "", tan, false, "", "" ],
     [ "lazy", "syntax", delay, true, "delays execution", "" ],
-    [ "lazy", "syntax", delay-force, true, "delays the result of excution", "" ],
+    [ "lazy", "syntax", delay-force, true, "delays the result of excution", "buggy? not having bindings (let, letrec, etc.) makes this hard to test" ],
     [ "lazy", "procedure", force, true, "forces execution (if not executed already) (passes through non-promises)", "" ],
     [ "lazy", "procedure", make-promise, true, "makes a promise that returns a value (except if that value is a promise)", "" ],
     [ "lazy", "procedure", promise?, true, "test if its input is a promise", "" ],

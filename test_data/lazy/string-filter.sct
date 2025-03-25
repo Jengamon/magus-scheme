@@ -1,0 +1,26 @@
+---
+5
+---
+(import (only (scheme base) lambda define set! quote + cons car cdr null? if <= = -)
+        (only (scheme lazy) delay force delay-force))
+(define integers
+    ((lambda (next) ((lambda (tmpnext)
+        (set! next tmpnext)
+        (next 0)
+    )
+    (lambda (n) (delay (cons n (next (+ n 1))))))) 'undefined))
+(define head
+    (lambda (stream) (car (force stream))))
+(define tail
+    (lambda (stream) (cdr (force stream))))
+(define (stream-filter p? s)
+        (delay-force
+            (if (null? (force s))
+                (delay '())
+                ((lambda (h t)
+                    (if (p? h)
+                        (delay (cons h (stream-filter p? t)))
+                        (stream-filter p? t))) (car (force s)) (cdr (force s))) )))
+; no odd? yet in base
+(define (odd? x) (if (<= x 0) #f (if (= x 1) #t (odd? (- x 2)))))
+(head (tail (tail (stream-filter odd? integers))))

@@ -46,8 +46,6 @@ pub enum Bytecode {
     PushLambda { index: usize },
     /// Push a promise to the stack
     PushPromise { index: usize },
-    /// Pop the top of the stack and wrap it in an evaluated promise
-    MakePromise,
     /// Sets an upvalue referencing the value at the top of stack (does not pop)
     SetUpvalue { index: usize },
     /// Fetch an upvalue (an argument of a parent scope)
@@ -125,7 +123,6 @@ impl Bytecode {
             Self::PushBool { .. } => 1,
             Self::PushLambda { .. } => 1,
             Self::PushPromise { .. } => 1,
-            Self::MakePromise => 1,
             Self::SetUpvalue { .. } => 1,
             Self::FetchUpvalue { .. } => 1,
             Self::FetchArg { .. } => 1,
@@ -162,7 +159,6 @@ impl fmt::Display for Bytecode {
             }
             Bytecode::PushLambda { index } => write!(f, "LMBD {index}"),
             Bytecode::PushPromise { index } => write!(f, "PROM {index}"),
-            Bytecode::MakePromise => write!(f, "MPRM"),
             Bytecode::SetUpvalue { index } => write!(f, "UPVL {index}"),
             Bytecode::FetchUpvalue { index } => write!(f, "FUPV {index}"),
             Bytecode::FetchArg { index } => write!(f, "FARG {index}"),

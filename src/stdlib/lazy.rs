@@ -11,14 +11,16 @@ pub use procedures::{Force, IsPromise, MakePromise};
 pub use syntax::{Delay, DelayForce};
 
 mod syntax {
-    use gc_arena::{Gc, RefLock};
+    use gc_arena::{Gc, RefLock, unsize};
 
     use crate::{
         Syntax, SyntaxReturn,
         bytecode::{Bytecode, Chunk},
-        runtime::lambda::{Arity, CompiledLambda, Lambda},
+        runtime::lambda::{Arity, CompiledLambda, Lambda, NativeLambda},
         value::Promise,
     };
+
+    use super::procedures;
 
     #[derive(Debug)]
     pub struct Delay;
@@ -90,20 +92,70 @@ mod syntax {
             &self,
             ctx: &mut crate::SyntaxContext<'_, 'gc>,
             compiler: &mut crate::compiler::Compiler<'gc>,
-            _import_env: crate::environment::StackEnvironmentPtr<'gc>,
+            import_env: crate::environment::StackEnvironmentPtr<'gc>,
             args: &[crate::compiler::ProgramPtr<'gc>],
         ) -> anyhow::Result<SyntaxReturn<'gc>> {
             if args.len() != 1 {
-                anyhow::bail!("delay expects exactly 1 argument");
+                anyhow::bail!("delay-force expects exactly 1 argument");
             }
 
-            let mut code: Vec<_> = compiler
-                .compile_code(ctx, args[0])?
-                .into_bytecode()
-                .into_iter()
-                .collect();
-            code.push(Bytecode::MakePromise);
-            Ok(SyntaxReturn::Code(code.into_boxed_slice()))
+            let delay_index = {
+                let promise_lambda =
+                    compiler.hygenic(ctx, import_env, |ctx, compiler, import_env| {
+                        compiler.define_parameters(ctx.interner, vec![], None)?;
+                        let force_lambda = ctx.add_native_lambda(unsize!(Gc::new(ctx,
+                                RefLock::new(procedures::Force)) => RefLock<dyn NativeLambda>));
+                        let code = compiler.compile_code(ctx, args[0])?.into_bytecode();
+                        let mut labels = if let Some(source) = args[0].source {
+                            [(0, source)].into_iter().collect()
+                        } else {
+                            fxhash::FxHashMap::default()
+                        };
+                        let prelude: Vec<_> = compiler.lambda_prelude().into_iter().collect();
+                        // adjust code labels for arguments code
+                        for k in labels.keys().copied().collect::<Vec<_>>() {
+                            let v = labels.remove(&k).expect("[ICE] mislabeled data");
+                            labels.insert(k + prelude.len(), v);
+                        }
+                        let code: Vec<_> = prelude
+                            .into_iter()
+                            .chain(code)
+                            .chain([
+                                Bytecode::PushLambda {
+                                    index: force_lambda,
+                                },
+                                Bytecode::Call { args: 1 },
+                            ])
+                            .chain(compiler.lambda_postlude())
+                            .collect();
+                        let compiled = Gc::new(
+                            ctx,
+                            CompiledLambda::new(
+                                Arity::Exact(0),
+                                Chunk::new(
+                                    ctx,
+                                    code,
+                                    ctx.constants(),
+                                    ctx.lambdas(),
+                                    ctx.promises(),
+                                    ctx.upvalues(),
+                                    import_env,
+                                    labels,
+                                ),
+                            ),
+                        );
+                        Ok::<_, anyhow::Error>(compiled)
+                    })?;
+
+                ctx.add_promise(Gc::new(
+                    ctx,
+                    RefLock::new(Promise::Unevaled(Lambda::Compiled(promise_lambda))),
+                ))
+            };
+
+            Ok(SyntaxReturn::Code(Box::from([Bytecode::PushPromise {
+                index: delay_index,
+            }])))
         }
     }
 }

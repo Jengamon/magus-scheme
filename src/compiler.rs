@@ -794,6 +794,9 @@ pub struct Compiler<'gc> {
 
     // stash that can be used by macros to store things
     stash: Stash<'gc>,
+
+    /// Recursion counter
+    rec_counter: Gc<'gc, RefLock<usize>>,
 }
 #[derive(Debug, Clone, Copy)]
 pub struct Checkpoint(usize);
@@ -836,6 +839,8 @@ pub enum CompileError {
     Library(#[from] DefineLibraryError),
     #[error("import resolves to overlapping names")]
     DoubleImport(Box<[lasso::Spur]>),
+    #[error("too many recursions at macro-expansion time")]
+    TooRecursive,
 }
 
 #[derive(Debug, Clone)]
@@ -1419,6 +1424,9 @@ pub struct LibraryDefinitionContext<'a, 'gc> {
 }
 
 impl<'gc> Compiler<'gc> {
+    /// Maximum number of recursive calls before macro expansion fails
+    const MAX_RECURSION: usize = 200;
+
     pub fn new(mc: &Mutation<'gc>) -> Self {
         Self {
             local_world: LocalWorld::default(),
@@ -1431,6 +1439,7 @@ impl<'gc> Compiler<'gc> {
             env_ptr: 0,
             stash: Stash::default(),
             native_cache: FxHashMap::default(),
+            rec_counter: Gc::new(mc, RefLock::new(0)),
         }
     }
 
@@ -1739,8 +1748,15 @@ impl<'gc> Compiler<'gc> {
                 // their corresponding symbols
                 let head_symbol = head.into_symbol(ctx.interner);
                 if let Some(mcr) = head_symbol.and_then(|sym| self.get_macro(sym)) {
-                    mcr.evaluate(ctx, self, self._current_env(), body)
-                        .map_err(|e| CompileError::Macro(Arc::new(e), program.source))
+                    if *self.rec_counter.borrow() > Self::MAX_RECURSION {
+                        return Err(CompileError::TooRecursive);
+                    }
+                    *self.rec_counter.borrow_mut(ctx) += 1;
+                    let ret = mcr
+                        .evaluate(ctx, self, self._current_env(), body)
+                        .map_err(|e| CompileError::Macro(Arc::new(e), program.source));
+                    *self.rec_counter.borrow_mut(ctx) -= 1;
+                    ret
                 } else {
                     let mut code = vec![];
                     let args = body.len();

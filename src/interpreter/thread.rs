@@ -13,7 +13,7 @@ use crate::{
             NativeLambdaPtr,
         },
     },
-    value::{self, ConsCell, Continuation, ContinuationPtr, Promise, ValuePtr},
+    value::{self, ConsCell, Continuation, ContinuationPtr, ValuePtr},
 };
 
 use super::{Context, Includer};
@@ -824,6 +824,7 @@ impl<'gc> Thread<'gc> {
                     let inst = chunk.code[*pc];
                     // eprintln!("EXEC >> {inst:?} {:?}", self.stack.len());
                     fuel.consume(inst.cost());
+                    // eprintln!("Fuel: {}", fuel.remaining());
                     match inst {
                         Bytecode::PushNull => {
                             self.stack.push(ctx.null_value);
@@ -865,17 +866,6 @@ impl<'gc> Thread<'gc> {
                                     )
                                 })
                                 .into_ptr(&ctx),
-                            );
-                            advance_to_next_inst!();
-                        }
-                        Bytecode::MakePromise => {
-                            let Some(value) = self.stack.pop() else {
-                                make_error!(SchemeErrorType::NoValue(inst));
-                                continue;
-                            };
-                            self.stack.push(
-                                Value::Promise(Gc::new(&ctx, RefLock::new(Promise::Evaled(value))))
-                                    .into_ptr(&ctx),
                             );
                             advance_to_next_inst!();
                         }

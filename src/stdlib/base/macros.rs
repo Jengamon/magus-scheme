@@ -52,16 +52,14 @@ impl Syntax for DefineSyntax {
 
 // A transformer implementing the matching of syntax rules from the declaration
 #[derive(Debug, Collect)]
-#[collect(no_drop)]
-pub struct SyntaxRulesImpl<'gc> {
+#[collect(require_static)]
+pub struct SyntaxRulesImpl {
     /// Checkpoint to interpret code in
     #[collect(require_static)]
     checkpoint: Checkpoint,
     /// Import env of definition environment
     #[collect(require_static)]
     source_env: Option<EnvironmentSpec>,
-    /// Recursion counter
-    rec_counter: Gc<'gc, RefLock<usize>>,
 
     #[collect(require_static)]
     ellipsis_symbol: lasso::Spur,
@@ -71,9 +69,6 @@ pub struct SyntaxRulesImpl<'gc> {
     // because all executable Scheme code are proper lists (even (3 . 4) is a list of number 3, identifier ., then number 4)
     branches: Vec<(Box<[Matcher]>, Template)>,
 }
-
-/// Maximum number of recursive calls before macro expansion fails
-const MAX_RECURSION: usize = 200;
 
 /// These are literal datatypes as written in the input
 #[derive(Debug, Collect)]
@@ -173,7 +168,7 @@ struct Bindings<'gc> {
     binding: Gc<'gc, ()>,
 }
 
-impl<'gc> Transformer<'gc> for SyntaxRulesImpl<'gc> {
+impl<'gc> Transformer<'gc> for SyntaxRulesImpl {
     fn evaluate(
         &self,
         ctx: &mut SyntaxContext<'_, 'gc>,
@@ -181,16 +176,10 @@ impl<'gc> Transformer<'gc> for SyntaxRulesImpl<'gc> {
         _import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
     ) -> anyhow::Result<SyntaxReturn<'gc>> {
-        if *self.rec_counter.borrow() >= MAX_RECURSION {
-            return Err(anyhow::anyhow!("max recursion reached in macro expansion"));
-        }
-
         let mut code = Vec::new();
-        *self.rec_counter.borrow_mut(ctx) += 1;
         // Execute on our matching! (hygenic, load checkpoint/env in that hygenic env, so that the binding doesn't stay around
         // outside of templated code.)
         code.push(Bytecode::PushNull); // TODO
-        *self.rec_counter.borrow_mut(ctx) -= 1;
         Ok(SyntaxReturn::Code(code.into_boxed_slice()))
     }
 
@@ -234,7 +223,6 @@ impl Syntax for SyntaxRules {
         let syntax_rules = SyntaxRulesImpl {
             checkpoint,
             source_env,
-            rec_counter: Gc::new(ctx, RefLock::new(0)),
             ellipsis_symbol,
             literals,
             branches,

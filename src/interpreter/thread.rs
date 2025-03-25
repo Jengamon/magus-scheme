@@ -640,7 +640,7 @@ impl<'gc> Thread<'gc> {
         Continuation::new(frames_copy)
     }
 
-    fn handle_continuation(&mut self, mc: &Mutation<'gc>, c: ContinuationPtr<'gc>, args: usize) {
+    fn handle_continuation(&mut self, c: ContinuationPtr<'gc>) {
         // TODO Make sure to add before and after calls on *top* of the native call for all
         // frames that are left
         // with all befores below all afters , e.g.:
@@ -653,16 +653,9 @@ impl<'gc> Thread<'gc> {
         // TODO handle dynamic-wind and non-empty continuations
         // Don't advance the frame b/c it will be wiped by the continuation
         if c.frames.is_empty() {
-            // wrap the last args values as a values object
-            let values = self
-                .stack
-                .drain(self.stack.len() - args.min(self.stack.len())..);
-            let values = Value::Values(Gc::new(mc, Vec::from_iter(values))).into_ptr(mc);
-            self.stack.push(values);
             // We just dump execution
             self.frames.clear();
         } else {
-            // self.frames = c.frames.to_vec();
             // TODO The above would work but for upvalues (and dynamic-wind handling TODO). Figure out why.
             // "Duh". The continuation at capture might not have an upvalue_index assigned at capture, while the current continuation
             // *might*. What is the behavior expected of a continuation call?
@@ -670,28 +663,29 @@ impl<'gc> Thread<'gc> {
             // at the start) or the previous frame (if there was an index), something to the effect of:
             // c.frames.iter()
             // .scan(last_upvalue_index, |upvalue_index, f| if f.upvalue_index.is_none() { ThreadFrame{upvalue_index, ..f} } else { *upvalue_index = f.upvalue_index; f }).collect()
-            let Some(last) = self.frames.last() else {
-                unreachable!()
-            };
-            let upvalue_index = last.upvalue_index;
-            let cont = c
-                .frames
-                .iter()
-                .scan(upvalue_index, |ui, f| {
-                    if f.upvalue_index.is_none() {
-                        Some(ThreadFrame {
-                            upvalue_index: *ui,
-                            ..f.clone()
-                        })
-                    } else if let Some(v) = f.upvalue_index {
-                        *ui = Some(v);
-                        Some(f.clone())
-                    } else {
-                        Some(f.clone())
-                    }
-                })
-                .collect::<Vec<_>>();
-            self.frames = cont;
+            // let Some(last) = self.frames.last() else {
+            //     unreachable!()
+            // };
+            // let upvalue_index = last.upvalue_index;
+            // let cont = c
+            //     .frames
+            //     .iter()
+            //     .scan(upvalue_index, |ui, f| {
+            //         if f.upvalue_index.is_none() {
+            //             Some(ThreadFrame {
+            //                 upvalue_index: *ui,
+            //                 ..f.clone()
+            //             })
+            //         } else if let Some(v) = f.upvalue_index {
+            //             *ui = Some(v);
+            //             Some(f.clone())
+            //         } else {
+            //             Some(f.clone())
+            //         }
+            //     })
+            //     .collect::<Vec<_>>();
+            self.frames = c.frames.to_vec();
+            // TODO Handle dynamic-wind and parameters
             // then we create dynamic-wind frames as necessary on top of these frames, where the handler copies the upvalue_index of the frame it comes from.
             // Then the frames we just created, together with the dynamic-wind frames generated from all frames (including the current ones) *replace* the current frames
             // (this is why we "cheat" then the continuation is empty, at that point, we only have to handle dynamic-wind)
@@ -1110,7 +1104,7 @@ impl<'gc> Thread<'gc> {
                                             continue;
                                         }
                                     }
-                                    self.handle_continuation(&ctx, c, args);
+                                    self.handle_continuation(c);
                                 }
                                 _ => {
                                     make_error!(SchemeErrorType::NonCallable);
@@ -1299,9 +1293,14 @@ impl<'gc> Thread<'gc> {
                             self.handle_frame_end(&ctx, true);
                         }
                         Ok(LambdaReturn::Continue { cont, args }) => {
-                            let args_len = args.len();
-                            self.stack.extend(args);
-                            self.handle_continuation(&ctx, cont, args_len);
+                            if args.len() > 1 {
+                                self.stack
+                                    .push(Value::Values(Gc::new(&ctx, args)).into_ptr(&ctx));
+                            } else {
+                                // |args| <= 1, so this is correct
+                                self.stack.extend(args.first());
+                            }
+                            self.handle_continuation(cont);
                         }
                         Ok(LambdaReturn::Raise {
                             error,

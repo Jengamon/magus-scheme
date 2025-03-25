@@ -777,7 +777,7 @@ pub struct Compiler<'gc> {
     native_cache: FxHashMap<LibraryName, FxHashMap<Static<lasso::Spur>, NativeItem<'gc>>>,
 
     // stash that can be used by macros to store things
-    pub stash: Stash<'gc>,
+    stash: Stash<'gc>,
 }
 #[derive(Debug, Clone, Copy)]
 pub struct Checkpoint(usize);

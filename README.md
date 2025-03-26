@@ -134,3 +134,55 @@ code compiled to form the compiler-local Scheme side of a module.
 
 TODO Figure out if this if useful enough to provide an interface that would allow Interpreter to automate this registration step.
 (It probably is useful enough, but check for an actual way to implement)
+
+## Threat Model
+
+I've been working with this mindset, but I want to record it here for posterity. The basic
+gist is that Rust code is fully* trusted to know what it is doing, while Scheme code should not:
+- be able to run forever, unless Rust code explicitly allows it to do so
+- cause a panic (rn upvalue miscompilation causes a todo! to trigger, but this should
+  be turned into an SchemeErrorKind as soon as possible)
+
+There sre 3 interaction points with Rust:
+- Syntax, defining ways to compile code forms (ProgramPtr) into code for
+  the VM (Bytecode / Chunk). These are fully trusted to do their job (except for
+  infinite recursion, which is handled by the Compiler).
+- NativeLambda, a way to get code that Scheme code can call into. These are trusted
+  in their operation, but the world attempts to be sanitized by providing (generally)
+  immutable/shared access to internals (It *can* mutate things, but we try to stop it
+  by doing things like freezeing the env pointer it accesses, or providing a shared ref to Thread,
+  and encouraging that instead of using the ThreadPtr in the Context it has access to).
+  Less trusted than Syntax, but still heavily trusted.
+- external API, like any `&mut` method on Thread, and `Compiler::compile`. It should
+  not be possible with a combination of API calls to cause a panic. We don't prevent broken
+  execution with misused APIs, but panics should generally be considered errors that need fixing.
+
+I will/should work on documentation once `syntax-rules` works (and thus the Hard Parts: libraries,
+continuations, and Scheme macros all work) and some stable base to work on is created.
+
+## Notes
+
+- Rn, as displayed in `magus_repl`, registering modules is a bit ad-hoc and different for
+  the different kinds of modules (pure Scheme `(scheme cxr)`, pure Rust `(scheme lazy)`, and
+  a mixture `(scheme base)`). Provide a nice API so that registration looks more like:
+  ```rust
+  interpreter.register_module(
+    |interner| magus::library_name!(interner => scheme base),
+    Some(10_000),
+    magus::stdlib::base::Base {
+    // .. config ..
+    }
+  );
+  interpreter.register_module(
+    |interner| magus::library_name!(interner => scheme lazy),
+    Some(10_000),
+    magus::stdlib::lazy::Lazy
+  );
+  interpreter.register_module(
+    |interner| magus::library_name!(interner => scheme cxr),
+    Some(10_000), // max_fuel
+    magus::stdlib::cxr::Cxr
+  );
+  ```
+  so that there is some uniform interface to declare modules (and it would be an implementation detail
+  what kind of module it is).

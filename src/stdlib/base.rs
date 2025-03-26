@@ -24,7 +24,7 @@ pub use macros::{DefineSyntax, SyntaxRules};
 pub use procedures::{
     Add, Apply, Ascending, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr, Cons,
     Descending, Divide, Equal, Exact, Features, Gcd, Inexact, IsEq, IsEqv, IsExact, IsInexact,
-    IsNull, IsPair, IsProcedure, IsString, IsSymbol, MonotonicAscending, MonotonicDescending,
+    IsNull, IsPair, IsProcedure, IsString, IsSymbol, Lcm, MonotonicAscending, MonotonicDescending,
     Multiply, StringToNumber, StringToSymbol, Subtract, SymbolToString, Values,
 };
 pub use quote::{Quasiquote, Quote};
@@ -240,6 +240,7 @@ impl Module for Base {
             "inexact",
             "features",
             "gcd",
+            "lcm",
             "exact?",
             "inexact?",
             "define-syntax",
@@ -303,6 +304,7 @@ impl Module for Base {
             "inexact" => lambda!(Inexact),
             "features" => lambda!(Features::from(Arc::clone(&self.additional_features))),
             "gcd" => lambda!(Gcd),
+            "lcm" => lambda!(Lcm),
             "exact?" => lambda!(IsExact),
             "inexact?" => lambda!(IsInexact),
             "string->number" => lambda!(StringToNumber),

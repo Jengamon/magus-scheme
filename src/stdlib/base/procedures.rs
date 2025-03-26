@@ -4,7 +4,7 @@ pub use control::{Apply, CallCc, Features};
 pub use conversions::{Exact, Inexact, StringToNumber, StringToSymbol, SymbolToString};
 pub use equality::{IsEq, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
-pub use math::{Add, Divide, Gcd, Multiply, Subtract};
+pub use math::{Add, Divide, Gcd, Lcm, Multiply, Subtract};
 pub use predicates::{IsExact, IsInexact, IsNull, IsPair, IsProcedure, IsString, IsSymbol};
 pub use structure::{CallWithValues, Cons, Values};
 
@@ -715,6 +715,90 @@ mod math {
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct Lcm;
+
+    impl NativeLambda for Lcm {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(0)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            if args
+                .iter()
+                .any(|a| !matches!(*a.borrow(), Value::Number(_) | Value::Inexact(_)))
+            {
+                Err(anyhow::anyhow!(
+                    "lcm does not support non-numerical arguments"
+                ))?
+            }
+
+            if args.len() == 1 {
+                // If there is only 1 argument, that is the result
+                return Ok(LambdaReturn::Return(vec![args[0]]));
+            } else if args.is_empty() {
+                // handle 0 arguments
+                return Ok(LambdaReturn::Return(vec![
+                    Value::Number(Gc::new(&ctx, Number::one())).into_ptr(&ctx),
+                ]));
+            }
+
+            // handle the first 2 arguments
+            let mut res = match (*args[0].borrow(), *args[1].borrow()) {
+                (Value::Number(n1), Value::Number(n2)) => Either::Left(n1.lcm(&n2)),
+                (Value::Number(n1), Value::Inexact(n2)) if n2.fract() == 0.0 => {
+                    let n2 =
+                        Number::from(BigInt::from_f64(n2).expect("failed to convert to integer"));
+                    Either::Right(n1.lcm(&n2))
+                }
+                (Value::Inexact(n1), Value::Number(n2)) if n1.fract() == 0.0 => {
+                    let n1 =
+                        Number::from(BigInt::from_f64(n1).expect("failed to convert to integer"));
+                    Either::Right(n1.lcm(&n2))
+                }
+                (Value::Inexact(n1), Value::Inexact(n2))
+                    if n1.fract() == 0.0 && n2.fract() == 0.0 =>
+                {
+                    let n1 =
+                        Number::from(BigInt::from_f64(n1).expect("failed to convert to integer"));
+                    let n2 =
+                        Number::from(BigInt::from_f64(n2).expect("failed to convert to integer"));
+                    Either::Right(n1.lcm(&n2))
+                }
+                _ => Err(anyhow::anyhow!(
+                    "lcm does not support non-integer inexact numbers"
+                ))?,
+            };
+
+            for arg in args.iter().skip(2) {
+                res = match *arg.borrow() {
+                    Value::Number(n) => match res {
+                        Either::Left(n1) => Either::Left(n1.lcm(&n)),
+                        Either::Right(n1) => Either::Right(n1.lcm(&n)),
+                    },
+                    Value::Inexact(n) if n.fract() == 0.0 => {
+                        let n = Number::from(
+                            BigInt::from_f64(n).expect("failed to convert to integer"),
+                        );
+                        match res {
+                            Either::Left(n1) => Either::Right(n1.lcm(&n)),
+                            Either::Right(n1) => Either::Right(n1.lcm(&n)),
+                        }
+                    }
+                    _ => Err(anyhow::anyhow!(
+                        "lcm does not support non-integer inexact numbers"
+                    ))?,
+                }
+            }
+
+            Ok(LambdaReturn::Return(vec![match res {
+                Either::Left(n) => Value::Number(Gc::new(&ctx, n)).into_ptr(&ctx),
+                Either::Right(f) => Value::Inexact(f.to_inexact()).into_ptr(&ctx),
+            }]))
+        }
+    }
 }
 
 mod list {

@@ -1842,29 +1842,29 @@ impl<'gc> Compiler<'gc> {
             },
         }
 
-        fn unrecurivize(set: &ImportSet) -> impl IntoIterator<Item = ImportOperations> {
+        fn unrecursivize(set: &ImportSet) -> impl IntoIterator<Item = ImportOperations> {
             match set {
                 ImportSet::Name(_) => vec![],
                 ImportSet::Only { set, symbols } => std::iter::once(ImportOperations::Only {
                     include: symbols.iter().copied().collect(),
                 })
-                .chain(unrecurivize(set))
+                .chain(unrecursivize(set))
                 .collect(),
                 ImportSet::Except { set, symbols } => std::iter::once(ImportOperations::Except {
                     exclude: symbols.iter().copied().collect(),
                 })
-                .chain(unrecurivize(set))
+                .chain(unrecursivize(set))
                 .collect(),
                 ImportSet::Prefix { set, prefix } => std::iter::once(ImportOperations::Prefix {
                     prefix: Arc::clone(prefix),
                 })
-                .chain(unrecurivize(set))
+                .chain(unrecursivize(set))
                 .collect(),
                 ImportSet::Rename { set, rename_pairs } => {
                     std::iter::once(ImportOperations::Rename {
                         rename: rename_pairs.iter().copied().collect(),
                     })
-                    .chain(unrecurivize(set))
+                    .chain(unrecursivize(set))
                     .collect()
                 }
             }
@@ -1873,7 +1873,7 @@ impl<'gc> Compiler<'gc> {
         // Get an inside-out list of the operations to get from the set of all symbols in the library to
         // a mapping of specific symbols to import -> what name to import them under
         let operations = {
-            let mut ops: Vec<_> = unrecurivize(import_set).into_iter().collect();
+            let mut ops: Vec<_> = unrecursivize(import_set).into_iter().collect();
             ops.reverse();
             ops
         };
@@ -2440,7 +2440,7 @@ impl<'gc> Compiler<'gc> {
                 } else {
                     Some(ExportItem::Macro(Arc::clone(syntax)))
                 }
-            } else if let Some(binding) = global_env.borrow().get(*name) {
+            } else if let Ok(binding) = global_env.borrow().get(*name) {
                 // TODO A lambda can depend on references, so go through the code of compiled lambdas and
                 // add as a "dependency" any reference it or its lambdas depend on? (as long as it is not defined in scope!)
                 binding.read(|v| {
@@ -2502,7 +2502,7 @@ impl<'gc> Compiler<'gc> {
                                 dependants
                             } else {
                                 for dname in dependants.clone().into_iter() {
-                                    if let Some(Value::Lambda(Lambda::Compiled(c))) = global_env
+                                    if let Ok(Value::Lambda(Lambda::Compiled(c))) = global_env
                                         .borrow()
                                         .get(dname)
                                         .map(|bnd| *(*bnd.get().borrow()).borrow())
@@ -2517,7 +2517,7 @@ impl<'gc> Compiler<'gc> {
                         } else {
                             let mut dependants = get_deps(*name, &c);
                             for name in dependants.clone().into_iter() {
-                                if let Some(Value::Lambda(Lambda::Compiled(c))) = global_env
+                                if let Ok(Value::Lambda(Lambda::Compiled(c))) = global_env
                                     .borrow()
                                     .get(name)
                                     .map(|bnd| *(*bnd.get().borrow()).borrow())
@@ -2542,7 +2542,7 @@ impl<'gc> Compiler<'gc> {
 
                         let mut map = ImportFallbackMap::default();
                         for dependant in dependants {
-                            if let Some(val) = global_env.borrow().get(dependant) {
+                            if let Ok(val) = global_env.borrow().get(dependant) {
                                 map.insert(Static(dependant), *val.get().borrow());
                             }
                         }

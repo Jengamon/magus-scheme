@@ -119,6 +119,14 @@ impl<'gc, V: Collect<'gc> + Copy> Environment<'gc, V> {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum GetError {
+    #[error("environment could not find the given symbol")]
+    NameNotFound(Symbol),
+    #[error("environment reached maximum parent search depth")]
+    TooFar,
+}
+
 impl<'gc, V: Collect<'gc>> Environment<'gc, V> {
     pub fn new(mc: &Mutation<'gc>, parent: Option<EnvironmentPtr<'gc, V>>) -> Self {
         Self {
@@ -131,6 +139,10 @@ impl<'gc, V: Collect<'gc>> Environment<'gc, V> {
             ),
             is_frozen: false,
         }
+    }
+
+    pub(crate) fn parent(&self) -> Option<EnvironmentPtr<'gc, V>> {
+        self.parent
     }
 
     #[inline]
@@ -149,6 +161,11 @@ impl<'gc, V: Collect<'gc>> Environment<'gc, V> {
         self.is_frozen = true;
     }
 
+    /// Check if no names are defined by this environment
+    pub fn is_empty(&self) -> bool {
+        self.inner.borrow().values.is_empty()
+    }
+
     /// Sets the frozen flag for all bindings in this environment.
     #[inline]
     pub fn inner_freeze(&mut self, mc: &Mutation<'gc>) {
@@ -157,14 +174,28 @@ impl<'gc, V: Collect<'gc>> Environment<'gc, V> {
         }
     }
 
-    pub fn get(&self, name: impl Into<Symbol>) -> Option<GeneralBinding<'gc, V>> {
+    pub fn get(&self, name: impl Into<Symbol>) -> Result<GeneralBinding<'gc, V>, GetError> {
+        self.get_internal(name, 0)
+    }
+
+    /// Maimum number of envs we can recurse into before we "hide" and say None
+    const MAX_RECURSION: usize = 2048;
+
+    fn get_internal(
+        &self,
+        name: impl Into<Symbol>,
+        level: usize,
+    ) -> Result<GeneralBinding<'gc, V>, GetError> {
         let name = name.into();
         if let Some(value) = self.inner.borrow().values.get(&name) {
-            Some(*value)
+            Ok(*value)
         } else if let Some(parent) = self.parent {
-            parent.borrow().get(name)
+            if level >= Self::MAX_RECURSION {
+                return Err(GetError::TooFar);
+            }
+            parent.borrow().get_internal(name, level + 1)
         } else {
-            None
+            Err(GetError::NameNotFound(name))
         }
     }
 

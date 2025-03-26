@@ -4,7 +4,7 @@ use crate::{
     Fuel, Value, ValueType,
     bytecode::{Bytecode, ChunkPtr, ImportFallback, SourceData},
     compiler::World,
-    environment::{StackEnvironment, StackEnvironmentPtr},
+    environment::{GetError, StackEnvironment, StackEnvironmentPtr},
     runtime::{
         convert::IntoValue,
         error::{SchemeError, SchemeErrorPtr, SchemeErrorType, StackFrame},
@@ -968,18 +968,26 @@ impl<'gc> Thread<'gc> {
                             // push the value to stack
                             //
                             // if-chaining would be *posh* here
-                            if let Some(val) = current_env.unwrap().borrow().get(symbol) {
-                                if !matches!(*val.read(|v| v.borrow()), Value::Undefined) {
-                                    self.stack.push(*val.get().borrow());
-                                    advance_to_next_inst!();
-                                } else {
-                                    make_error!(SchemeErrorType::EnvLoad(Box::from(
-                                        interner.resolve(&symbol),
-                                    )));
+                            match current_env.unwrap().borrow().get(symbol) {
+                                Ok(val) => {
+                                    if !matches!(*val.read(|v| v.borrow()), Value::Undefined) {
+                                        self.stack.push(*val.get().borrow());
+                                        advance_to_next_inst!();
+                                    } else {
+                                        make_error!(SchemeErrorType::EnvLoad(Box::from(
+                                            interner.resolve(&symbol),
+                                        )));
+                                    }
+                                    continue;
                                 }
-                            } else if let Some(fallback) =
-                                Self::fallback_handling(&self.frames, symbol)
-                            {
+                                Err(GetError::NameNotFound(_)) => {}
+                                Err(GetError::TooFar) => {
+                                    make_error!(SchemeErrorType::TooMuchRecursion);
+                                    continue;
+                                }
+                            }
+
+                            if let Some(fallback) = Self::fallback_handling(&self.frames, symbol) {
                                 self.stack.push(fallback);
                                 let Some(frame) = self.frames.last_mut() else {
                                     unreachable!()

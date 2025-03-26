@@ -81,6 +81,8 @@ pub enum SchemeErrorType<'gc> {
     },
     #[error("{0} expected a list, got a non-list cons")]
     ExpectedList(&'static str),
+    #[error("too much recursion, try using lazy evaluation")]
+    TooMuchRecursion,
 }
 
 impl SchemeErrorType<'_> {

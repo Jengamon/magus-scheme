@@ -2,7 +2,8 @@
 ; Here we define things that are simple and wouldn't cause too much of a performance hit.
 ; We only have the relevant native modules available
 (import (scheme base))
-(export list not map memq memv abs square boolean? boolean=?)
+(export list not map memq memv abs square boolean? boolean=?
+    zero? positive? negative?)
 ; Sketch functions (to be removed once implemented properly)
 (export assq assv)
 (begin
@@ -10,6 +11,20 @@
   (define (not x) (if x #f #t))
   (define (abs n) (if (< n 0) (- n) n))
   (define (square n) (* n n))
+  ; this impl should work bc = keeps numbers exact as long as the input is exact
+  ; and we use exact to force the input to be exact
+  (define (zero? n)
+      ; something that is neither exact nor inexact is not a number!
+      ; We do this cuz we don't support number? and friends yet
+      (if (or (inexact? n) (exact? n)) (= n 0) #f))
+  (define (positive? n)
+      ; something that is neither exact nor inexact is not a number!
+      ; We do this cuz we don't support number? and friends yet
+      (if (or (inexact? n) (exact? n)) (> n 0) #f))
+  (define (negative? n)
+      ; something that is neither exact nor inexact is not a number!
+      ; We do this cuz we don't support number? and friends yet
+      (if (or (inexact? n) (exact? n)) (< n 0) #f))
   (define (boolean? b) (if (or (eq? b #f) (eq? b #t)) #t #f))
   (define (boolean=? . lst)
     (define (boolean=-iter v lst)

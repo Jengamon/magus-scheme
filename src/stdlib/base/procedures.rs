@@ -282,7 +282,12 @@ mod comparison {
 
     // If `None`, one of the numbers is a NaN
     fn compare<'gc>(lhs: &Num<'gc>, rhs: &Num<'gc>) -> Option<std::cmp::Ordering> {
-        lhs.partial_cmp(rhs)
+        match (lhs, rhs) {
+            (Either::Left(e), Either::Left(e2)) => Some(e.cmp(e2)),
+            (Either::Right(i), Either::Right(i2)) => i.partial_cmp(i2),
+            (Either::Left(e), Either::Right(i2)) => e.to_inexact().partial_cmp(i2),
+            (Either::Right(i), Either::Left(e2)) => i.partial_cmp(&e2.to_inexact()),
+        }
     }
 
     macro_rules! comparison_impl {

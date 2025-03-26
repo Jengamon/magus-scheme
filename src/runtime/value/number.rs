@@ -3,6 +3,7 @@ use std::sync::LazyLock;
 
 use gc_arena::{Collect, Gc, Mutation};
 use num::bigint::{ParseBigIntError, Sign};
+use num::traits::ConstZero;
 use num::{BigInt, BigRational, Complex, Integer, ToPrimitive};
 
 pub type ComplexNumberPtr<'gc> = Gc<'gc, ComplexNumber>;
@@ -53,7 +54,7 @@ impl Number {
     }
 
     pub fn from_inexact(f: f64) -> Option<Self> {
-        Some(Number::Rational(BigRational::from_float(f)?))
+        Some(Self::simplify(BigRational::from_float(f)?))
     }
 
     fn i64_to_bigint(i: i64) -> BigInt {
@@ -118,6 +119,8 @@ impl Number {
         } else if r.denom() == &*NEG_ONE {
             let (_, num) = r.numer().clone().into_parts();
             Number::Integer(BigInt::from_biguint(Sign::Minus, num))
+        } else if r.numer() == &BigInt::ZERO {
+            Number::Integer(BigInt::ZERO)
         } else {
             Number::Rational(r)
         }

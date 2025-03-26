@@ -354,8 +354,7 @@ fn execute(
                             }
                         }
                     };
-                    thread.reset_error();
-                    thread.clear_stack();
+                    thread.reset();
                 }
             });
         }

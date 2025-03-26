@@ -3,7 +3,6 @@ use std::sync::LazyLock;
 
 use gc_arena::{Collect, Gc, Mutation};
 use num::bigint::{ParseBigIntError, Sign};
-use num::traits::ConstZero;
 use num::{BigInt, BigRational, Complex, Integer, ToPrimitive};
 
 pub type ComplexNumberPtr<'gc> = Gc<'gc, ComplexNumber>;

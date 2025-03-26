@@ -351,18 +351,21 @@ impl<'gc> Thread<'gc> {
     pub fn reset(&mut self) {
         self.reset_error();
         self.clear_stack();
-        self.frames.clear();
-        debug_assert!(self.is_finished());
+        self.clear_frames();
     }
 
     /// Clears error
-    #[inline]
     pub fn reset_error(&mut self) {
         let _ = self.error.take();
     }
 
+    /// Clears frames
+    pub fn clear_frames(&mut self) {
+        self.frames.clear();
+        debug_assert!(self.is_finished());
+    }
+
     /// Clears stack
-    #[inline]
     pub fn clear_stack(&mut self) {
         self.stack.clear();
         // holes only really matter to stack values, so, drop all holes
@@ -581,7 +584,10 @@ impl<'gc> Thread<'gc> {
 
         if is_tail {
             if let Some(frame) = self.frames.last_mut() {
+                let old_bottom = frame.bottom;
                 *frame = new_frame;
+                // Inherit old stack bottom
+                frame.bottom = old_bottom;
                 return Ok(());
             }
         }
@@ -1284,7 +1290,11 @@ impl<'gc> Thread<'gc> {
                         self_ptr: native,
                         thread_ctx: ctx,
                         world,
-                        stack: &self.stack[frame.bottom..],
+                        stack: if frame.bottom < self.stack.len() {
+                            &self.stack[frame.bottom..]
+                        } else {
+                            &[]
+                        },
                         interner,
                         includer,
                         fuel,

@@ -141,10 +141,6 @@ impl<'gc, V: Collect<'gc>> Environment<'gc, V> {
         }
     }
 
-    pub(crate) fn parent(&self) -> Option<EnvironmentPtr<'gc, V>> {
-        self.parent
-    }
-
     #[inline]
     // pub(crate) fn reparent(&mut self, new_parent: Option<EnvironmentPtr<'gc, V>>) {
     pub fn reparent(&mut self, new_parent: Option<EnvironmentPtr<'gc, V>>) {

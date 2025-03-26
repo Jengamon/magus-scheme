@@ -85,8 +85,14 @@ impl<'gc, V: Collect<'gc> + Copy> Environment<'gc, V> {
             }
 
             let old_value = *old_binding.value.borrow();
-            *old_binding = binding;
+            *old_binding.value.borrow_mut(mc) = *binding.value.borrow();
+            old_binding.is_frozen = binding.is_frozen;
             Ok(old_value)
+        } else if let Some(parent) = self.parent {
+            // We failed to bind, so bind in the parent (if it can)
+            parent
+                .borrow_mut(mc)
+                .rebind_binding(mc, name, binding, interner)
         } else {
             Err(RebindError::NameNotFound(Box::from(
                 interner.resolve(&name.0),
@@ -101,24 +107,15 @@ impl<'gc, V: Collect<'gc> + Copy> Environment<'gc, V> {
         value: V,
         interner: &Rodeo,
     ) -> Result<V, RebindError> {
-        if self.is_frozen {
-            return Err(FrozenError::Environment)?;
-        }
-
-        let name = name.into();
-        if let Some(binding) = self.inner.borrow_mut(mc).values.get_mut(&name) {
-            if binding.is_frozen {
-                return Err(FrozenError::Binding)?;
-            }
-
-            let old_value = *binding.value.borrow();
-            *binding.value.borrow_mut(mc) = value;
-            Ok(old_value)
-        } else {
-            Err(RebindError::NameNotFound(Box::from(
-                interner.resolve(&name.0),
-            )))
-        }
+        self.rebind_binding(
+            mc,
+            name,
+            GeneralBinding {
+                value: Gc::new(mc, RefLock::new(value)),
+                is_frozen: false,
+            },
+            interner,
+        )
     }
 }
 

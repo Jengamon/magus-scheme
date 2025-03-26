@@ -1,0 +1,21 @@
+---
+6
+6
+10
+6
+---
+; soooo, envs were broken, but only in the presence of set! (which *should* have
+; been able to set values in the parent scope...)
+; this code made it apparent!
+(import (only (scheme base) define begin if set! + > values) (only (scheme lazy) delay force))
+(define count 0)
+(define p (delay (begin
+    (set! count (+ count 1))
+    (if (> count x)
+        count
+        (force p)))))
+(define x 5)
+(define ret1 (force p))
+(define ret2 (begin (set! x 10) (force p)))
+
+(values ret1 ret2 x count)

@@ -361,6 +361,11 @@ pub fn register_module(
     let world = {
         let mut world = World::default();
         world.insert(name.clone(), base_module)?;
+        // We require "(magus impl) for (undefined) in the implementation of letrec!"
+        world.insert(
+            LibraryName::from_iter(library_name!(interpreter.interner_mut() => magus impl)),
+            super::magus_impl::MagusImpl,
+        )?;
         world
     };
     interpreter.try_enter(|mc, arena, interner| {

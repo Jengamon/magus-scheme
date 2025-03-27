@@ -2,6 +2,10 @@
 ; Here we define things that are simple and wouldn't cause too much of a performance hit.
 ; We only have the relevant native modules available
 (import (scheme base))
+; For now, just (undefined) which is used in the implementation of letrec so
+; that getting the name before it's defined is...undefined. But any runtime tricks
+; are in this module
+(import (magus impl))
 (export list not map memq memv abs square boolean? boolean=?
     zero? positive? negative?)
 ; Sketch functions (to be removed once implemented properly)

@@ -5,11 +5,11 @@ use clap::{Parser, Subcommand};
 use codesnake::{Block, CodeWidth, Label, LineIndex};
 use magus::{
     bytecode::{Bytecode, Constant},
-    compiler::{LibraryDeclaration, LibraryDefinitionContext, LibraryName, ParseProgram, World},
+    compiler::{LibraryDefinitionContext, LibraryName, ParseProgram, World},
     environment::StackEnvironment,
     gc_arena::{Gc, RefLock},
     general_parser::GeneralParserError,
-    interpreter::{CompilerHandle, Includer, Interpreter, NullIncluder, ThreadHandle, ValueHandle},
+    interpreter::{CompilerHandle, Includer, Interpreter, ThreadHandle, ValueHandle},
     library_name,
     runtime::lambda::Lambda,
     stdlib, ChunkHandle, ContainsDatum, ExternalCompilerContext, Fuel, GAstNode, Module, Value,

@@ -1398,7 +1398,7 @@ pub enum DefineLibraryError {
     ReservedName(LibraryName),
     #[error("attempted to define an existing library")]
     AlreadyExists(LibraryName),
-    #[error("interpretation ran out of fuel while interpreting ({0})")]
+    #[error("ran out of fuel while interpreting library ({0})")]
     OutOfFuel(Box<str>),
     #[error("no name in library: {0}")]
     UndefinedExport(Box<str>),
@@ -1607,7 +1607,7 @@ impl<'gc> Compiler<'gc> {
 
                     // manually match and ignore OoF errors
                     match self.define_library(mc, &name, ecc, true, library_def, library_decls) {
-                        Ok(_) | Err(DefineLibraryError::OutOfFuel(_)) => {}
+                        Ok(_) => {}
                         Err(e) => return Err(e.into()),
                     }
                 }

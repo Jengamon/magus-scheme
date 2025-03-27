@@ -189,7 +189,7 @@ fn compile_to_chunk(
             interner,
         };
         let library_def = LibraryDefinitionContext {
-            max_fuel: None,
+            max_fuel: Some(1_000_000),
             value_pointers,
             additional_features: Some(&additional_features),
         };

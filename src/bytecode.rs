@@ -109,8 +109,11 @@ pub enum Bytecode {
     // This should be a rare instruction to emit, mostly used to get upvalues working
     // nicely with definitions
     Pop,
-    // /// Explicitly end an execution frame
-    // Return,
+    /// Pops a parameter, then a value, and sets the value at that parameter
+    /// to the given value for the dynamic extent of the frame (when a continuation
+    /// causes the frame to be left, it is unset, and if a continuation causes the frame
+    /// to resume it is set again)
+    Parameterize,
 }
 
 impl Bytecode {
@@ -142,6 +145,7 @@ impl Bytecode {
             Self::Jump { .. } => 2,
             Self::Duplicate => 1,
             Self::Pop => 1,
+            Self::Parameterize => 2,
             // Self::Return => 4,
         }
     }
@@ -178,6 +182,7 @@ impl fmt::Display for Bytecode {
             Bytecode::Force => write!(f, "FORS"),
             Bytecode::Duplicate => write!(f, "DUPL"),
             Bytecode::Pop => write!(f, "SPOP"),
+            Bytecode::Parameterize => write!(f, "PRMZ"),
         }
     }
 }

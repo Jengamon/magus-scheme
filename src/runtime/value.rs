@@ -113,7 +113,7 @@ pub enum Value<'gc> {
     // So this a blob of bytecode that is to be evaluated in a surrounding chunk's environment,
     // (just a blob and a memoize slot)
     Promise(PromisePtr<'gc>),
-    Parameter(()),
+    Parameter(Parameter<'gc>),
     // TODO Impl native parameter objects
     //
     // These parameter objects should add something to a frame that is handled at the same time as dynamic-wind
@@ -184,7 +184,7 @@ impl PartialEq for Value<'_> {
             Value::Lambda(lptr) => matches!(other, Value::Lambda(optr) if lptr == optr),
             Value::Continuation(c) => matches!(other, Value::Continuation(oc) if c == oc),
             Value::Promise(p) => matches!(other, Value::Promise(op) if Gc::ptr_eq(*p, *op)),
-            Value::Parameter(_) => todo!(),
+            Value::Parameter(p) => matches!(other, Value::Parameter(op) if p == op),
             Value::Error(_) => todo!(),
         }
     }
@@ -506,7 +506,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
                 "#<promise {} . {p:p}>",
                 if p.borrow().is_evaled() { "#t" } else { "#f" }
             ),
-            Value::Parameter(_) => todo!(),
+            Value::Parameter(p) => write!(f, "#<parameter {p:p}>"),
             Value::Error(e) => write!(f, "#<error {e:p}>"),
         }
     }
@@ -622,17 +622,7 @@ impl<'gc> Vector<'gc> {
     }
 }
 
-// FIXME make this a struct of usize (stack index) and a ThreadPtr (a "brand")
-// (the brand will keep us from trying to execute a continuation on the wrong thread)
-// FIXME FIXME Racket is very helpful. (from a racket manual) We start by formulating a representation of the context.
-// An evaluation context will be represented as a continuation: a list of frames, where a frame is a single flat evaluation context,
-// i.e. either a conditional or application context with no nested evaluation context inside (the hole will be represented by []).
-// Conceptually, the continuation is a stack of actions that remain to be done.
-// It’s also easy to see that continuations and evaluation contexts are inter-convertible: the inner-most part of an evaluation context is the first frame of a continuation; the outer-most part of the context corresponds to the final frame of a continuation; an empty context is represented by an empty list of frames.
-//
-// So a continuation is the entire frame state from a point in time. When we sub in frames, if a frame has a handler, and !Gc::ptr_eq to the
-// frame in its position, then we handle any dynamic-wind handlers it may have.
-/// A bytecode chunk and program counter bundled together
+/// The state of execution frames at some point in time
 #[derive(Debug, Collect, Clone, PartialEq, Eq)]
 #[collect(no_drop)]
 pub struct Continuation<'gc> {
@@ -694,6 +684,45 @@ impl<'gc> Promise<'gc> {
 impl Promise<'_> {
     pub fn is_evaled(&self) -> bool {
         matches!(self, Promise::Evaled(_))
+    }
+}
+
+#[derive(Debug, Collect, Clone, Copy)]
+#[collect(no_drop)]
+/// A dynamically bound value location with a
+/// default value, and possibly a conversion lambda
+pub struct Parameter<'gc> {
+    id: Gc<'gc, ()>,
+    pub(crate) init: ValuePtr<'gc>,
+    pub(crate) convert: Option<Lambda<'gc>>,
+}
+impl PartialEq for Parameter<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        Gc::ptr_eq(self.id, other.id)
+    }
+}
+impl Eq for Parameter<'_> {}
+impl std::fmt::Pointer for Parameter<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:p}", self.id)
+    }
+}
+
+impl<'gc> Parameter<'gc> {
+    pub fn new(mc: &Mutation<'gc>, init: ValuePtr<'gc>) -> Self {
+        Self {
+            id: Gc::new(mc, ()),
+            init,
+            convert: None,
+        }
+    }
+
+    pub fn with_convert(mc: &Mutation<'gc>, init: ValuePtr<'gc>, convert: Lambda<'gc>) -> Self {
+        Self {
+            id: Gc::new(mc, ()),
+            init,
+            convert: Some(convert),
+        }
     }
 }
 

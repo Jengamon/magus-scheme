@@ -2,11 +2,13 @@
 
 use std::{ops::Deref, sync::Arc};
 
+use anyhow::Context as _;
 use gc_arena::{Collect, Gc, Mutation, RefLock, Rootable};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
 
 use crate::{
-    bytecode, compiler,
+    ExternalCompilerContext, LibraryName, World, bytecode,
+    compiler::{self, LibraryDeclaration, LibraryDefinitionContext, ParseProgram as _},
     environment::StackEnvironmentPtr,
     handle_type,
     value::{ConsCell, Value, ValuePtr},
@@ -170,29 +172,30 @@ impl Includer for NullIncluder {
     }
 }
 
-/// Entrypoint of execution.
-pub struct Interpreter {
-    arena: gc_arena::Arena<Rootable![Arena<'_>]>,
-    thread_knobs: SecondaryMap<ThreadKey, Arc<()>>,
-    compiler_knobs: SecondaryMap<CompilerKey, Arc<()>>,
-    interner: lasso::Rodeo,
-}
-
-impl Default for Interpreter {
-    fn default() -> Self {
-        Self {
-            arena: gc_arena::Arena::new(|mc| Arena {
-                null_value: Gc::new(mc, RefLock::new(Value::Cons(ConsCell::empty()))),
-                true_value: Gc::new(mc, RefLock::new(Value::Bool(true))),
-                false_value: Gc::new(mc, RefLock::new(Value::Bool(false))),
-                chunk_knobs: SecondaryMap::new(),
-                value_knobs: SecondaryMap::new(),
-                stash: Stash::new(),
-            }),
-            thread_knobs: SecondaryMap::new(),
-            compiler_knobs: SecondaryMap::new(),
-            interner: lasso::Rodeo::new(),
-        }
+/// A way to nicely register libraries into the compiler of an interpreter
+pub trait Registerable {
+    /// The name that the module itself want to use
+    fn name(interner: &mut lasso::Rodeo) -> LibraryName;
+    /// If Some, there is a native component of the library
+    fn native(&self) -> Option<Arc<dyn compiler::Module + Send + Sync + 'static>>;
+    /// If Some, there is a Scheme component of the library
+    ///
+    /// Returns (source filename, source code)
+    fn scheme(&self) -> Option<(&str, &str)>;
+    /// Libraries used in the interpretation of Scheme code of a library
+    fn scheme_native(
+        &self,
+        interner: &mut lasso::Rodeo,
+    ) -> Vec<(
+        LibraryName,
+        std::sync::Arc<dyn compiler::Module + Send + Sync + 'static>,
+    )>;
+    /// Libraries used in the interpretation of Scheme code that should be
+    /// registered before this one. Used to mark depenence on another module
+    /// (where [`Self::scheme_native`] is either self dependence or a private module)
+    fn scheme_dependency(&self, interner: &mut lasso::Rodeo) -> Vec<LibraryName> {
+        let _ = interner;
+        Vec::new()
     }
 }
 
@@ -215,6 +218,32 @@ impl<'gc> ValuePointers<'gc> {
             null_value: Gc::new(mc, RefLock::new(Value::Cons(ConsCell::empty()))),
             true_value: Gc::new(mc, RefLock::new(Value::Bool(true))),
             false_value: Gc::new(mc, RefLock::new(Value::Bool(false))),
+        }
+    }
+}
+
+/// Entrypoint of execution.
+pub struct Interpreter {
+    arena: gc_arena::Arena<Rootable![Arena<'_>]>,
+    thread_knobs: SecondaryMap<ThreadKey, Arc<()>>,
+    compiler_knobs: SecondaryMap<CompilerKey, Arc<()>>,
+    interner: lasso::Rodeo,
+}
+
+impl Default for Interpreter {
+    fn default() -> Self {
+        Self {
+            arena: gc_arena::Arena::new(|mc| Arena {
+                null_value: Gc::new(mc, RefLock::new(Value::Cons(ConsCell::empty()))),
+                true_value: Gc::new(mc, RefLock::new(Value::Bool(true))),
+                false_value: Gc::new(mc, RefLock::new(Value::Bool(false))),
+                chunk_knobs: SecondaryMap::new(),
+                value_knobs: SecondaryMap::new(),
+                stash: Stash::new(),
+            }),
+            thread_knobs: SecondaryMap::new(),
+            compiler_knobs: SecondaryMap::new(),
+            interner: lasso::Rodeo::new(),
         }
     }
 }
@@ -349,6 +378,97 @@ impl Interpreter {
             let chunk = (func)(mc, compiler, pointers, &mut self.interner)?;
             Ok(arena.create_chunk_handle(chunk))
         })
+    }
+
+    /// Register a module to a compiler under a certain name
+    pub fn register_module<'a, R: Registerable>(
+        &'a mut self,
+        handle: &CompilerHandle,
+        world: &mut World,
+        module: R,
+        rename: Option<LibraryName>,
+        library_def_fn: impl for<'gc> FnOnce(ValuePointers<'gc>) -> LibraryDefinitionContext<'a, 'gc>,
+    ) -> anyhow::Result<()> {
+        let library_name = rename.unwrap_or_else(|| R::name(&mut self.interner));
+        let maybe_native = module.native();
+        if let Some(native) = maybe_native {
+            // There is a native library component
+            world
+                .insert_arc(library_name.clone(), native)
+                .context(format!(
+                    "failed to register module {}",
+                    std::any::type_name::<R>()
+                ))?;
+        }
+
+        if let Some(source_data) = module.scheme() {
+            // There is a local scheme component
+            let world = {
+                let mut new_world = World::default();
+                for (name, module) in module.scheme_native(&mut self.interner) {
+                    new_world.insert_arc(name, module).context(format!(
+                        "failed to register module {}",
+                        std::any::type_name::<R>()
+                    ))?;
+                }
+                // Register dependencies (from the old world)
+                for name in module.scheme_dependency(&mut self.interner) {
+                    let module = world
+                        .library_arc(&name)
+                        .cloned()
+                        .ok_or(anyhow::anyhow!(
+                            "failed to find dependency ({})",
+                            name.to_string(&self.interner)
+                        ))
+                        .context(format!(
+                            "failed to register module {}",
+                            std::any::type_name::<R>()
+                        ))?;
+                    new_world.insert_arc(name, module).context(format!(
+                        "failed to register module {}",
+                        std::any::type_name::<R>()
+                    ))?;
+                }
+                new_world
+            };
+
+            self.arena
+                .mutate_root(|mc, arena| {
+                    let programs = source_data.parse_program(mc, &mut self.interner, false)?;
+                    let library_decls = programs
+                        .into_iter()
+                        .map(|p| LibraryDeclaration::convert(p, mc, &mut self.interner))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let value_pointers = arena.value_pointers();
+                    let compiler = arena
+                        .compiler_mut(handle)
+                        .ok_or(anyhow::anyhow!("invalid compiler handle"))?;
+                    let mut ecc = ExternalCompilerContext {
+                        world: &world,
+                        // For module source code, the includer should *always* be NullIncluder
+                        // so module source code *has* to be local, and can't include arbitrary
+                        // files.
+                        includer: &NullIncluder,
+                        interner: &mut self.interner,
+                    };
+                    let library_def = library_def_fn(value_pointers);
+                    compiler.define_library(
+                        mc,
+                        &library_name,
+                        &mut ecc,
+                        false,
+                        &library_def,
+                        library_decls,
+                    )?;
+                    Ok::<_, anyhow::Error>(())
+                })
+                .context(format!(
+                    "failed to register module {}",
+                    std::any::type_name::<R>()
+                ))?;
+        }
+
+        Ok(())
     }
 
     pub fn new_thread(&mut self, code: &ChunkHandle) -> ThreadHandle {

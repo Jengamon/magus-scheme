@@ -561,11 +561,19 @@ impl World {
         name: LibraryName,
         module: impl Module + Send + Sync + 'static,
     ) -> Result<(), LibraryNameExists> {
+        self.insert_arc(name, Arc::new(module))
+    }
+
+    pub fn insert_arc(
+        &mut self,
+        name: LibraryName,
+        module: Arc<dyn Module + Send + Sync + 'static>,
+    ) -> Result<(), LibraryNameExists> {
         if self.modules.contains_key(&name) {
             return Err(LibraryNameExists);
         }
 
-        self.modules.insert(name, Arc::new(module));
+        self.modules.insert(name, module);
         Ok(())
     }
 
@@ -575,6 +583,10 @@ impl World {
 
     pub fn library(&self, name: &LibraryName) -> Option<&(dyn Module + Send + Sync)> {
         self.modules.get(name).map(|m| m.as_ref())
+    }
+
+    pub fn library_arc(&self, name: &LibraryName) -> Option<&Arc<dyn Module + Send + Sync>> {
+        self.modules.get(name)
     }
 
     pub fn forget(

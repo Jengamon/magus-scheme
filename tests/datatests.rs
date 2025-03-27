@@ -38,12 +38,18 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
     )?;
     let includer = NullIncluder;
     let comp = interp.new_compiler();
-    stdlib::base::register_module(
-        &mut interp,
+    interp.register_module(
         &comp,
         &mut test_world,
-        Some(10_000),
-        std::iter::empty::<&str>(),
+        stdlib::base::Base {
+            additional_features: std::sync::Arc::new([]),
+        },
+        None,
+        |vp| LibraryDefinitionContext {
+            max_fuel: Some(10_000),
+            value_pointers: vp,
+            additional_features: None,
+        },
     )?;
     let file_name = format!("{path}.scm");
     let chunk =

@@ -5,14 +5,13 @@ use std::{collections::HashSet, sync::Arc};
 use gc_arena::{Gc, RefLock, unsize};
 
 use crate::{
-    CompilerHandle, Interpreter, LibraryName, World,
+    LibraryName,
     bytecode::{Bytecode, Chunk, ChunkPtr},
     compiler::{
-        ArcSyntax, Compiler, ExternalCompilerContext, LibraryDeclaration, LibraryDefinitionContext,
-        Module, ParseProgram, ProgramData, ProgramPtr, Syntax, SyntaxContext, SyntaxReturn,
+        ArcSyntax, Compiler, Module, ProgramData, ProgramPtr, Syntax, SyntaxContext, SyntaxReturn,
     },
     environment::StackEnvironmentPtr,
-    interpreter::NullIncluder,
+    interpreter::Registerable,
     library_name,
     runtime::{convert::IntoValue, lambda},
 };
@@ -338,59 +337,92 @@ impl Module for Base {
 
 const MODULE_SRC: &str = include_str!("scheme_base.scm");
 
-/// Registers this module (and it's Scheme implementations) under the name `(scheme base)`
-pub fn register_module(
-    interpreter: &mut Interpreter,
-    handle: &CompilerHandle,
-    world: &mut World,
-    max_fuel: Option<i32>,
-    additional_features: impl IntoIterator<Item = impl AsRef<str>>,
-) -> anyhow::Result<()> {
-    let additional_features = additional_features
-        .into_iter()
-        .map(|s| Arc::from(s.as_ref()))
-        .collect::<Arc<[_]>>();
-    let name = LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme base));
-    let base_module = Base {
-        additional_features: additional_features.clone(),
-    };
-    // Insert our module into the given world.
-    // TODO Allow for additional features to be passed in
-    world.insert(name.clone(), base_module.clone())?;
-    // This is the world used to compile the Scheme implementation of things.
-    let world = {
-        let mut world = World::default();
-        world.insert(name.clone(), base_module)?;
-        // We require "(magus impl) for (undefined) in the implementation of letrec!"
-        world.insert(
-            LibraryName::from_iter(library_name!(interpreter.interner_mut() => magus impl)),
-            super::magus_impl::MagusImpl,
-        )?;
-        world
-    };
-    interpreter.try_enter(|mc, arena, interner| {
-        let programs = ("scheme_base.scm", MODULE_SRC).parse_program(mc, interner, false)?;
-        let library_decls = programs
-            .into_iter()
-            .map(|p| LibraryDeclaration::convert(p, mc, interner))
-            .collect::<Result<Vec<_>, _>>()?;
-        let value_pointers = arena.value_pointers();
-        let compiler = arena
-            .compiler_mut(handle)
-            .ok_or(anyhow::anyhow!("invalid compiler handle"))?;
-        let mut ecc = ExternalCompilerContext {
-            world: &world,
-            includer: &NullIncluder,
-            interner,
-        };
-        let library_def = LibraryDefinitionContext {
-            max_fuel,
-            value_pointers,
-            additional_features: Some(&additional_features),
-        };
-        compiler.define_library(mc, &name, &mut ecc, false, &library_def, library_decls)?;
-        Ok::<_, anyhow::Error>(())
-    })?;
+impl Registerable for Base {
+    fn name(interner: &mut lasso::Rodeo) -> LibraryName {
+        LibraryName::from_iter(library_name!(interner => scheme base))
+    }
 
-    Ok(())
+    fn native(&self) -> Option<Arc<dyn crate::compiler::Module + Send + Sync + 'static>> {
+        Some(Arc::new(self.clone()))
+    }
+
+    fn scheme(&self) -> Option<(&str, &str)> {
+        Some(("scheme_base.scm", MODULE_SRC))
+    }
+
+    fn scheme_native(
+        &self,
+        interner: &mut lasso::Rodeo,
+    ) -> Vec<(
+        LibraryName,
+        Arc<dyn crate::compiler::Module + Send + Sync + 'static>,
+    )> {
+        vec![
+            (
+                LibraryName::from_iter(library_name!(interner => scheme base)),
+                Arc::new(self.clone()),
+            ),
+            (
+                LibraryName::from_iter(library_name!(interner => magus impl)),
+                Arc::new(super::magus_impl::MagusImpl),
+            ),
+        ]
+    }
 }
+
+// /// Registers this module (and it's Scheme implementations) under the name `(scheme base)`
+// pub fn register_module(
+//     interpreter: &mut Interpreter,
+//     handle: &CompilerHandle,
+//     world: &mut World,
+//     max_fuel: Option<i32>,
+//     additional_features: impl IntoIterator<Item = impl AsRef<str>>,
+// ) -> anyhow::Result<()> {
+//     let additional_features = additional_features
+//         .into_iter()
+//         .map(|s| Arc::from(s.as_ref()))
+//         .collect::<Arc<[_]>>();
+//     let name = LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme base));
+//     let base_module = Base {
+//         additional_features: additional_features.clone(),
+//     };
+//     // Insert our module into the given world.
+//     // TODO Allow for additional features to be passed in
+//     world.insert(name.clone(), base_module.clone())?;
+//     // This is the world used to compile the Scheme implementation of things.
+//     let world = {
+//         let mut world = World::default();
+//         world.insert(name.clone(), base_module)?;
+//         // We require "(magus impl) for (undefined) in the implementation of letrec!"
+//         world.insert(
+//             LibraryName::from_iter(library_name!(interpreter.interner_mut() => magus impl)),
+//             super::magus_impl::MagusImpl,
+//         )?;
+//         world
+//     };
+//     interpreter.try_enter(|mc, arena, interner| {
+//         let programs = ("scheme_base.scm", MODULE_SRC).parse_program(mc, interner, false)?;
+//         let library_decls = programs
+//             .into_iter()
+//             .map(|p| LibraryDeclaration::convert(p, mc, interner))
+//             .collect::<Result<Vec<_>, _>>()?;
+//         let value_pointers = arena.value_pointers();
+//         let compiler = arena
+//             .compiler_mut(handle)
+//             .ok_or(anyhow::anyhow!("invalid compiler handle"))?;
+//         let mut ecc = ExternalCompilerContext {
+//             world: &world,
+//             includer: &NullIncluder,
+//             interner,
+//         };
+//         let library_def = LibraryDefinitionContext {
+//             max_fuel,
+//             value_pointers,
+//             additional_features: Some(&additional_features),
+//         };
+//         compiler.define_library(mc, &name, &mut ecc, false, &library_def, library_decls)?;
+//         Ok::<_, anyhow::Error>(())
+//     })?;
+
+//     Ok(())
+// }

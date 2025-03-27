@@ -160,29 +160,3 @@ There sre 3 interaction points with Rust:
 I will/should work on documentation once `syntax-rules` works (and thus the Hard Parts: libraries,
 continuations, and Scheme macros all work) and some stable base to work on is created.
 
-## Notes
-
-- Rn, as displayed in `magus_repl`, registering modules is a bit ad-hoc and different for
-  the different kinds of modules (pure Scheme `(scheme cxr)`, pure Rust `(scheme lazy)`, and
-  a mixture `(scheme base)`). Provide a nice API so that registration looks more like:
-  ```rust
-  interpreter.register_module(
-    |interner| magus::library_name!(interner => scheme base),
-    Some(10_000),
-    magus::stdlib::base::Base {
-    // .. config ..
-    }
-  );
-  interpreter.register_module(
-    |interner| magus::library_name!(interner => scheme lazy),
-    Some(10_000),
-    magus::stdlib::lazy::Lazy
-  );
-  interpreter.register_module(
-    |interner| magus::library_name!(interner => scheme cxr),
-    Some(10_000), // max_fuel
-    magus::stdlib::cxr::Cxr
-  );
-  ```
-  so that there is some uniform interface to declare modules (and it would be an implementation detail
-  what kind of module it is).

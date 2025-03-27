@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use crate::{
+    LibraryName,
     compiler::Module,
+    interpreter::Registerable,
+    library_name,
     runtime::{convert::IntoValue, lambda},
 };
 
@@ -308,5 +311,30 @@ impl Module for Lazy {
             "promise?" => lambda!(IsPromise),
             _ => None,
         }
+    }
+}
+
+impl Registerable for Lazy {
+    fn name(interner: &mut lasso::Rodeo) -> crate::LibraryName {
+        LibraryName::from_iter(library_name!(interner => scheme lazy))
+    }
+
+    fn native(&self) -> Option<Arc<dyn crate::compiler::Module + Send + Sync + 'static>> {
+        // We are a ZST, so we can do this~
+        Some(Arc::new(Self))
+    }
+
+    fn scheme(&self) -> Option<(&str, &str)> {
+        None
+    }
+
+    fn scheme_native(
+        &self,
+        _interner: &mut lasso::Rodeo,
+    ) -> Vec<(
+        LibraryName,
+        std::sync::Arc<dyn crate::compiler::Module + Send + Sync + 'static>,
+    )> {
+        Vec::new()
     }
 }

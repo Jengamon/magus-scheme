@@ -161,6 +161,15 @@ fn compile(source: impl AsRef<str>) -> Result<Module, Vec<GeneralParserError>> {
     }
 }
 
+fn additional_features() -> std::sync::Arc<[std::sync::Arc<str>]> {
+    std::sync::Arc::from(
+        ["repl"]
+            .into_iter()
+            .map(std::sync::Arc::from)
+            .collect::<Vec<_>>(),
+    )
+}
+
 fn compile_to_chunk(
     case_insensitive: bool,
     module: &Module,
@@ -172,6 +181,7 @@ fn compile_to_chunk(
     // Run the code in through our compiler to get a chunk,
     // then execute that chunk on a new thread
     interpreter.compiler_context(compiler, |mc, compiler, value_pointers, interner| {
+        let additional_features = additional_features();
         let programs = ("repl.scm", module).parse_program(mc, interner, case_insensitive)?;
         let mut ecc = ExternalCompilerContext {
             includer,
@@ -181,7 +191,7 @@ fn compile_to_chunk(
         let library_def = LibraryDefinitionContext {
             max_fuel: None,
             value_pointers,
-            additional_features: None,
+            additional_features: Some(&additional_features),
         };
         Ok(compiler.compile(mc, &mut ecc, &library_def, programs)?)
     })
@@ -368,56 +378,50 @@ fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle)> {
     let mut interpreter = Interpreter::default();
     let mut world = World::default();
 
-    world
-        .insert(
-            LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme write)),
-            stdlib::write::Write,
-        )
-        .expect("failed to define scheme write module");
-    world
-        .insert(
-            LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme lazy)),
-            stdlib::lazy::Lazy,
-        )
-        .expect("failed to define scheme lazy module");
     let compiler = interpreter.new_compiler();
     // max_fuel = None is *inadvisable* in any form of production code, b/c it means that if an infinite loop is
     // defined and executed in a library, it will run forever.
     // Rather, pass in a large amount of fuel.
-    stdlib::base::register_module(
-        &mut interpreter,
+
+    // The only "annoying" part of this API (hopefully) is having to copy around the
+    // `additional_features` to every declaration, but this can demonstrate a simple way to
+    // do so (it has to be done b/c a compiler needs to know about additional features)
+    let additional_features = additional_features();
+    interpreter.register_module(
         &compiler,
         &mut world,
-        Some(10_000),
-        std::iter::empty::<&str>(),
-    )?;
-
-    // Register cxr source
-    // TODO Make this a method on interpreter? input LibraryName, str source, str source filename, max_fuel, compiler handle
-    let name = LibraryName::from_iter(library_name!(interpreter.interner_mut() => scheme cxr));
-    interpreter.try_enter(|mc, arena, interner| {
-        let programs =
-            ("scheme_cxr.scm", stdlib::cxr::MODULE_SRC).parse_program(mc, interner, false)?;
-        let library_decls = programs
-            .into_iter()
-            .map(|p| LibraryDeclaration::convert(p, mc, interner))
-            .collect::<Result<Vec<_>, _>>()?;
-        let value_pointers = arena.value_pointers();
-        let compiler = arena
-            .compiler_mut(&compiler)
-            .ok_or(anyhow::anyhow!("invalid compiler handle"))?;
-        let mut ecc = ExternalCompilerContext {
-            world: &world,
-            includer: &NullIncluder,
-            interner,
-        };
-        let library_def = LibraryDefinitionContext {
+        stdlib::base::Base {
+            additional_features: std::sync::Arc::clone(&additional_features),
+        },
+        None,
+        |vp| LibraryDefinitionContext {
             max_fuel: Some(10_000),
-            value_pointers,
-            additional_features: None,
-        };
-        compiler.define_library(mc, &name, &mut ecc, false, &library_def, library_decls)?;
-        Ok::<_, anyhow::Error>(())
+            value_pointers: vp,
+            additional_features: Some(&additional_features),
+        },
+    )?;
+    interpreter.register_module(&compiler, &mut world, stdlib::write::Write, None, |vp| {
+        LibraryDefinitionContext {
+            max_fuel: Some(10_000),
+            value_pointers: vp,
+            additional_features: Some(&additional_features),
+        }
+    })?;
+    interpreter.register_module(&compiler, &mut world, stdlib::lazy::Lazy, None, |vp| {
+        LibraryDefinitionContext {
+            max_fuel: Some(10_000),
+            value_pointers: vp,
+            additional_features: Some(&additional_features),
+        }
+    })?;
+    // This has to happen *after* registering (scheme base) otherwise it will fail b/c
+    // it declares a dependency on (scheme base)! (yay!)
+    interpreter.register_module(&compiler, &mut world, stdlib::cxr::Cxr, None, |vp| {
+        LibraryDefinitionContext {
+            max_fuel: Some(10_000),
+            value_pointers: vp,
+            additional_features: Some(&additional_features),
+        }
     })?;
 
     Ok((interpreter, world, compiler))

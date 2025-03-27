@@ -43,6 +43,11 @@ mod syntax {
             let promise_lambda =
                 compiler.hygenic(ctx, import_env, |ctx, compiler, import_env| {
                     compiler.define_parameters(ctx.interner, vec![], None)?;
+
+                    if compiler.is_definition(args[0]) {
+                        // Reject non-value delay
+                        anyhow::bail!("delay expects some value(s) to return")
+                    }
                     let code = compiler.compile_code(ctx, args[0])?.into_bytecode();
                     let mut labels = if let Some(source) = args[0].source {
                         [(0, source)].into_iter().collect()
@@ -106,6 +111,11 @@ mod syntax {
                 let promise_lambda =
                     compiler.hygenic(ctx, import_env, |ctx, compiler, import_env| {
                         compiler.define_parameters(ctx.interner, vec![], None)?;
+
+                        if compiler.is_definition(args[0]) {
+                            // Reject non-value delay
+                            anyhow::bail!("delay-force expects some value(s) to return")
+                        }
                         let force_lambda = ctx.add_native_lambda(unsize!(Gc::new(ctx,
                                 RefLock::new(procedures::Force)) => RefLock<dyn NativeLambda>));
                         let code = compiler.compile_code(ctx, args[0])?.into_bytecode();

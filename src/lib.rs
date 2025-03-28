@@ -12,6 +12,8 @@ mod num;
 pub mod runtime;
 pub mod stdlib;
 
+// TODO when stablizing, remove these re-exports, so that our public API
+// doesn't rely on the public API of all our dependencies
 pub use anyhow;
 pub use fxhash;
 pub use gc_arena;

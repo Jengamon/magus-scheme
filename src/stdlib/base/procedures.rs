@@ -4,7 +4,7 @@ pub use control::{Apply, CallCc, Features};
 pub use conversions::{Exact, Inexact, StringToNumber, StringToSymbol, SymbolToString};
 pub use equality::{IsEq, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
-pub use math::{Add, Divide, Gcd, Lcm, Multiply, Subtract};
+pub use math::{Add, Denominator, Divide, Gcd, Lcm, Multiply, Numerator, Subtract};
 pub use predicates::{IsExact, IsInexact, IsNull, IsPair, IsProcedure, IsString, IsSymbol};
 pub use structure::{CallWithValues, Cons, Values};
 
@@ -622,10 +622,91 @@ mod math {
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct Numerator;
+
+    impl NativeLambda for Numerator {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            use num::ToPrimitive;
+            let denom = match *args[0].borrow() {
+                Value::Number(n) => match &*n {
+                    Number::Integer(n) => {
+                        Value::Number(Gc::new(&ctx, Number::Integer(n.clone()))).into_ptr(&ctx)
+                    }
+                    Number::Rational(r) => {
+                        Value::Number(Gc::new(&ctx, Number::Integer(r.numer().clone())))
+                            .into_ptr(&ctx)
+                    }
+                },
+                Value::Inexact(i) => Value::Inexact(
+                    match Number::from_inexact(i)
+                        .ok_or(anyhow::anyhow!("numerator expects a rational input"))?
+                    {
+                        Number::Integer(n) => n.to_f64().ok_or(anyhow::anyhow!(
+                            "failed to convert numerator to inexact number"
+                        ))?,
+                        Number::Rational(r) => r.numer().to_f64().ok_or(anyhow::anyhow!(
+                            "failed to convert numerator to inexact number"
+                        ))?,
+                    },
+                )
+                .into_ptr(&ctx),
+                _ => Err(anyhow::anyhow!("numerator expects a rational input"))?,
+            };
+
+            Ok(LambdaReturn::Return(vec![denom]))
+        }
+    }
+
     /// Get the denominator of a rational number
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct Denominator;
+
+    impl NativeLambda for Denominator {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            use num::ToPrimitive;
+            let denom = match *args[0].borrow() {
+                Value::Number(n) => match &*n {
+                    Number::Integer(_) => {
+                        Value::Number(Gc::new(&ctx, Number::one())).into_ptr(&ctx)
+                    }
+                    Number::Rational(r) => {
+                        Value::Number(Gc::new(&ctx, Number::Integer(r.denom().clone())))
+                            .into_ptr(&ctx)
+                    }
+                },
+                Value::Inexact(i) => Value::Inexact(
+                    match Number::from_inexact(i)
+                        .ok_or(anyhow::anyhow!("denominator expects a rational input"))?
+                    {
+                        Number::Integer(_) => 1.,
+                        Number::Rational(r) => r.denom().to_f64().ok_or(anyhow::anyhow!(
+                            "failed to convert denominator to inexact number"
+                        ))?,
+                    },
+                )
+                .into_ptr(&ctx),
+                _ => Err(anyhow::anyhow!("denominator expects a rational input"))?,
+            };
+
+            Ok(LambdaReturn::Return(vec![denom]))
+        }
+    }
 
     /// Get the greatest common divisor of a set of numbers
     #[derive(Debug, Collect)]
@@ -647,7 +728,7 @@ mod math {
                 .any(|a| !matches!(*a.borrow(), Value::Number(_) | Value::Inexact(_)))
             {
                 Err(anyhow::anyhow!(
-                    "gcd does not support non-numerical arguments"
+                    "gcd does not support non-integer arguments"
                 ))?
             }
 
@@ -736,7 +817,7 @@ mod math {
                 .any(|a| !matches!(*a.borrow(), Value::Number(_) | Value::Inexact(_)))
             {
                 Err(anyhow::anyhow!(
-                    "lcm does not support non-numerical arguments"
+                    "lcm does not support non-integer arguments"
                 ))?
             }
 

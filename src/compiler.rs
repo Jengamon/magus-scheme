@@ -134,7 +134,7 @@ pub enum ProgramData<'gc> {
     // TODO Support exact rationals (b/c string->number supports them, and
     // not accepting these directly is *odd*)
     // (sign, numer, denom)
-    // Rational(bool, u64, u64),
+    Rational(bool, u64, u64),
     Inexact(f64),
     // TODO complex numbers
     String(#[collect(require_static)] lasso::Spur),
@@ -853,6 +853,8 @@ pub enum CompileError {
     DoubleImport(Box<[lasso::Spur]>),
     #[error("too many recursions at macro-expansion time")]
     TooRecursive,
+    #[error("ratio over 0 in source")]
+    RatioOverZero(Option<SourceData>),
 }
 
 #[derive(Debug, Clone)]
@@ -1638,6 +1640,13 @@ impl<'gc> Compiler<'gc> {
             ProgramData::Integer(i) => {
                 simple_constant!(*i => Number)
             }
+            ProgramData::Rational(sign, numer, denom) if *denom != 0 => {
+                let index = ctx.add_constant(Constant::Rational(*sign, *numer, *denom));
+                Ok(SyntaxReturn::Code(Box::from([Bytecode::PushConst {
+                    index,
+                }])))
+            }
+            ProgramData::Rational(_, _, _) => Err(CompileError::RatioOverZero(program.source)),
             ProgramData::Inexact(f) => {
                 simple_constant!(*f => Inexact)
             }

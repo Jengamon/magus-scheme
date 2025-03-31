@@ -206,6 +206,19 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
                             )
                         }));
                     }
+                    Some(SchemeNumber::Exact(ExactReal::Rational {
+                        numer,
+                        denom,
+                        is_neg,
+                    })) => {
+                        self.ptr = Some(Ok(Gc::new(
+                            self.mc,
+                            Program::new(
+                                ProgramData::Rational(is_neg, numer, denom),
+                                source_data!(self, number),
+                            ),
+                        )));
+                    }
                     Some(SchemeNumber::Exact(ExactReal::Inf { is_neg })) => {
                         // infinities are always inexact
                         self.ptr = Some(Ok(Gc::new(

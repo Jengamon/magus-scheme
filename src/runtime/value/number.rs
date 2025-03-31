@@ -28,16 +28,6 @@ pub enum Number {
     Rational(BigRational),
 }
 
-// TODO Implement num::Num on Number<'gc> (along with ops::Neg and num::Signed)
-// So that Number can simply be the internal type used for ComplexNumber
-
-// TODO We will want helpers out the wazoo to interact with
-// TODO Implement Add, Sub, Mul, Div, Rem (basically math operations)
-// (so complex gets Num for free ish)
-// We get comparisons for free (thanks Rust derive macros)
-// TODO Provide gcd and lcm between 2 numbers (as Scheme will want those)
-// num provides these functions for integers, and there is an analytic solution
-// for GCD and LCM of ratios (where integers are treated as their value over 1)
 // Ideally, we forget that the underlying type is not an i64, but is actually a BigInt
 // (which is *also* why we allocate the numbers in the GC, so that they can be as big as they
 // want, but remain copy)
@@ -54,6 +44,10 @@ impl Number {
 
     pub fn from_inexact(f: f64) -> Option<Self> {
         Some(Self::simplify(BigRational::from_float(f)?))
+    }
+
+    pub fn from_rational(r: BigRational) -> Self {
+        Self::simplify(r)
     }
 
     fn i64_to_bigint(i: i64) -> BigInt {

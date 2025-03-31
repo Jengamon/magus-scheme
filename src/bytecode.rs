@@ -10,28 +10,6 @@ use crate::{
     ValuePtr, environment::StackEnvironmentPtr, runtime::lambda::Lambda, value::PromisePtr,
 };
 
-/*
-compiled form is at its root primitive forms:
-<literal>
-<variable ref>
-<procedure (function/macro) call>
-<macro call>
-
---- below are "definitive forms" where the implementations
---- are *definitely* provided on the interpreter side natively (in Rust code)
-define
-lambda
-if
-set!
-
-then provide Rust-side impls for the rest of the standard library (and/or mix it with
-Scheme-impls)
-*/
-// NOTE For any code that references the environment, it also *must* have an
-// `import_env` member that specifies one of the import envs to fallback to
-// in case it isn't found in the current environment (None means to not fallback,
-// this is generally the case with Scheme code read from a file, before any imports....
-// you can't really do much in that kind of environment)
 #[derive(Debug, Clone, Copy)]
 pub enum Bytecode {
     /// Push the null cons to the stack
@@ -99,9 +77,6 @@ pub enum Bytecode {
     ///
     /// Used for `if` on the true branch
     Jump { jump: usize },
-    /// Force the top of the stack if it is a promise.
-    /// Otherwise, does nothing.
-    Force,
 
     /// Duplicate the reference to the value at the top of the stack
     Duplicate,
@@ -137,7 +112,6 @@ impl Bytecode {
             Self::Reference { .. } => 1,
             Self::Splice => 1,
             Self::Call { .. } => 4,
-            Self::Force => 4,
             Self::Define { .. } => 2,
             Self::SetBang { .. } => 2,
             Self::SetBangUpvalue { .. } => 2,
@@ -179,7 +153,6 @@ impl fmt::Display for Bytecode {
             Bytecode::SetBangUpvalue { index } => write!(f, "SETU {}", index),
             Bytecode::If { jump } => write!(f, "JMIF {jump}"),
             Bytecode::Jump { jump } => write!(f, "JUMP {jump}"),
-            Bytecode::Force => write!(f, "FORS"),
             Bytecode::Duplicate => write!(f, "DUPL"),
             Bytecode::Pop => write!(f, "SPOP"),
             Bytecode::Parameterize => write!(f, "PRMZ"),
@@ -196,6 +169,7 @@ pub enum Constant {
     Symbol(lasso::Spur),
     Char(char),
     Number(i64),
+    Rational(bool, u64, u64),
     // TODO Support exact rational numbers
     // (We can use BigRational directly here b/c Copy is not required as it is in Value)
     // (well it's more likely (due to how our frontend works) to support Rational64 instead)

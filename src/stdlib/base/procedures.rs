@@ -1477,56 +1477,56 @@ mod conversions {
 
             let input = string.borrow().clone();
             let mut lexer = SyntaxToken::lexer(&input);
-            // Try to find a possible number token (fail if the lexer fails)
-            while let Some(t) = lexer.next() {
-                if let Ok(SyntaxToken::Number(_)) = t {
-                    // go to the token, lex it as a number, then create the corrresponding number
-                    let num = read_number(&mut lexer, radix);
-                    if let Ok(num) = num {
-                        let res = match num {
-                            SchemeNumber::Exact(e) => match e {
-                                ExactReal::Inf { is_neg } => Some(if is_neg {
-                                    Value::Inexact(f64::NEG_INFINITY)
-                                } else {
-                                    Value::Inexact(f64::INFINITY)
-                                }),
-                                ExactReal::Nan { .. } => Some(Value::Inexact(f64::NAN)),
-                                ExactReal::Integer { value, is_neg } => {
-                                    Some(Value::Number(Gc::new(
-                                        &ctx,
-                                        Number::Integer(BigInt::new(
-                                            if is_neg { Sign::Minus } else { Sign::Plus },
-                                            vec![value as u32, (value >> 32) as u32],
-                                        )),
-                                    )))
-                                }
-                                ExactReal::Rational {
-                                    numer,
-                                    denom,
-                                    is_neg,
-                                } if !denom.is_zero() => Some(Value::Number(Gc::new(
-                                    &ctx,
-                                    Number::Rational(BigRational::new(
-                                        BigInt::new(
-                                            if is_neg { Sign::Minus } else { Sign::Plus },
-                                            vec![numer as u32, (numer >> 32) as u32],
-                                        ),
-                                        BigInt::new(
-                                            Sign::Plus,
-                                            vec![denom as u32, (denom >> 32) as u32],
-                                        ),
-                                    )),
-                                ))),
-                                ExactReal::Rational { .. } => None,
-                                // Exact decimals are not supported
-                                ExactReal::Decimal { .. } => None,
-                            },
-                            SchemeNumber::Inexact(i) => Some(Value::Inexact(i)),
-                            _ => None,
-                        };
-                        if let Some(res) = res {
-                            return Ok(LambdaReturn::Return(vec![res.into_ptr(&ctx)]));
-                        }
+            // Try to find a possible token (fail if the lexer fails)
+            while let Some(_) = lexer.next() {
+                // go to the token, lex it as a number, then create the corrresponding number
+                let num = read_number(&mut lexer, radix);
+                if !lexer.remainder().is_empty() {
+                    // We didn't complete the lex, error
+                    return Ok(LambdaReturn::Return(vec![ctx.thread_ctx.false_value]));
+                }
+                if let Ok(num) = num {
+                    let res = match num {
+                        SchemeNumber::Exact(e) => match e {
+                            ExactReal::Inf { is_neg } => Some(if is_neg {
+                                Value::Inexact(f64::NEG_INFINITY)
+                            } else {
+                                Value::Inexact(f64::INFINITY)
+                            }),
+                            ExactReal::Nan { .. } => Some(Value::Inexact(f64::NAN)),
+                            ExactReal::Integer { value, is_neg } => Some(Value::Number(Gc::new(
+                                &ctx,
+                                Number::Integer(BigInt::new(
+                                    if is_neg { Sign::Minus } else { Sign::Plus },
+                                    vec![value as u32, (value >> 32) as u32],
+                                )),
+                            ))),
+                            ExactReal::Rational {
+                                numer,
+                                denom,
+                                is_neg,
+                            } if !denom.is_zero() => Some(Value::Number(Gc::new(
+                                &ctx,
+                                Number::Rational(BigRational::new(
+                                    BigInt::new(
+                                        if is_neg { Sign::Minus } else { Sign::Plus },
+                                        vec![numer as u32, (numer >> 32) as u32],
+                                    ),
+                                    BigInt::new(
+                                        Sign::Plus,
+                                        vec![denom as u32, (denom >> 32) as u32],
+                                    ),
+                                )),
+                            ))),
+                            ExactReal::Rational { .. } => None,
+                            // Exact decimals are not supported
+                            ExactReal::Decimal { .. } => None,
+                        },
+                        SchemeNumber::Inexact(i) => Some(Value::Inexact(i)),
+                        _ => None,
+                    };
+                    if let Some(res) = res {
+                        return Ok(LambdaReturn::Return(vec![res.into_ptr(&ctx)]));
                     }
                 }
             }

@@ -1,0 +1,10 @@
+error: `ls` does not exist in environment
+
+Backtrace:
+ - <<synthesized>> <<code>>
+---
+---
+; should *fail*
+(import (only (scheme base) lambda))
+((lambda (ls) 0) 42)
+ls

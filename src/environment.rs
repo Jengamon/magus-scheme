@@ -127,6 +127,16 @@ pub enum GetError {
     TooFar,
 }
 
+impl<'gc, V: Collect<'gc> + Clone> Environment<'gc, V> {
+    pub fn deep_clone(&self, mc: &Mutation<'gc>) -> Self {
+        Self {
+            parent: self.parent,
+            inner: Gc::new(mc, RefLock::new(self.inner.borrow().clone())),
+            is_frozen: self.is_frozen,
+        }
+    }
+}
+
 impl<'gc, V: Collect<'gc>> Environment<'gc, V> {
     pub fn new(mc: &Mutation<'gc>, parent: Option<EnvironmentPtr<'gc, V>>) -> Self {
         Self {

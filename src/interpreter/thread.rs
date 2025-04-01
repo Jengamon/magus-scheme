@@ -578,6 +578,7 @@ impl<'gc> Thread<'gc> {
                 )
             } else {
                 Self::current_env(&self.frames)
+                    .map(|env| Gc::new(ctx, RefLock::new(env.borrow().deep_clone(ctx))))
                     .unwrap_or_else(|| Gc::new(ctx, RefLock::new(StackEnvironment::new(ctx, None))))
             },
         };

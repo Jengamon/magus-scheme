@@ -5,7 +5,9 @@ pub use conversions::{Exact, Inexact, StringToNumber, StringToSymbol, SymbolToSt
 pub use equality::{IsEq, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
 pub use math::{Add, Denominator, Divide, Gcd, Lcm, Multiply, Numerator, Subtract};
-pub use predicates::{IsExact, IsInexact, IsNull, IsPair, IsProcedure, IsString, IsSymbol};
+pub use predicates::{
+    IsEven, IsExact, IsInexact, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol,
+};
 pub use structure::{CallWithValues, Cons, Values};
 
 mod equality {
@@ -1097,6 +1099,7 @@ mod predicates {
     use crate::{
         Value,
         runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        value::Number,
     };
 
     #[derive(Debug, Collect)]
@@ -1245,6 +1248,72 @@ mod predicates {
             let val = matches!(*args[0].borrow(), Value::Lambda(_) | Value::Continuation(_));
 
             Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IsEven;
+
+    impl NativeLambda for IsEven {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let two = Number::from_integer(2).unwrap();
+            let ret = match *args[0].borrow() {
+                Value::Number(n) => &*n % &two == Number::ZERO,
+                Value::Inexact(f) if f.fract() == 0. => f % 2. == 0.,
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "even? expects an integer as its first argument"
+                    ))?;
+                }
+            };
+
+            Ok(LambdaReturn::Return(vec![if ret {
+                ctx.thread_ctx.true_value
+            } else {
+                ctx.thread_ctx.false_value
+            }]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IsOdd;
+
+    impl NativeLambda for IsOdd {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let two = Number::from_integer(2).unwrap();
+            let ret = match *args[0].borrow() {
+                Value::Number(n) => &*n % &two == Number::one(),
+                Value::Inexact(f) if f.fract() == 0. => f % 2. == 1.,
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "odd? expects an integer as its first argument"
+                    ))?;
+                }
+            };
+
+            Ok(LambdaReturn::Return(vec![if ret {
+                ctx.thread_ctx.true_value
+            } else {
+                ctx.thread_ctx.false_value
+            }]))
         }
     }
 }

@@ -22,10 +22,10 @@ pub use define::{Define, SetBang};
 pub use macros::{DefineSyntax, SyntaxRules};
 pub use procedures::{
     Add, Apply, Ascending, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr, Cons,
-    Denominator, Descending, Divide, Equal, Exact, Features, Gcd, Inexact, IsEq, IsEqv, IsExact,
-    IsInexact, IsNull, IsPair, IsProcedure, IsString, IsSymbol, Lcm, MonotonicAscending,
-    MonotonicDescending, Multiply, Numerator, StringToNumber, StringToSymbol, Subtract,
-    SymbolToString, Values,
+    Denominator, Descending, Divide, Equal, Exact, Features, Gcd, Inexact, IsEq, IsEqv, IsEven,
+    IsExact, IsInexact, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, Lcm,
+    MonotonicAscending, MonotonicDescending, Multiply, Numerator, StringToNumber, StringToSymbol,
+    Subtract, SymbolToString, Values,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -256,6 +256,8 @@ impl Module for Base {
             "call-with-values",
             "numerator",
             "denominator",
+            "even?",
+            "odd?",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -318,6 +320,8 @@ impl Module for Base {
             "call-with-values" => lambda!(CallWithValues),
             "numerator" => lambda!(Numerator),
             "denominator" => lambda!(Denominator),
+            "even?" => lambda!(IsEven),
+            "odd?" => lambda!(IsOdd),
             _ => None,
         }
     }

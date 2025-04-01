@@ -943,7 +943,7 @@ impl<'gc> Thread<'gc> {
                         }
                         Bytecode::FetchUpvalue { index } => {
                             // Get the *actual* index or error
-                            // dbg!((&self.upvalue_mapping, *upvalue_index));
+                            dbg!((&self.upvalue_mapping, frame.upvalue_index));
                             let Some(index) = self
                                 .upvalue_mapping
                                 .get(

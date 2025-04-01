@@ -176,25 +176,31 @@ fn compile_to_chunk(
     includer: &dyn Includer,
     interpreter: &mut Interpreter,
     compiler: &CompilerHandle,
+    thread: &ThreadHandle,
     world: &World,
 ) -> anyhow::Result<ChunkHandle> {
     // Run the code in through our compiler to get a chunk,
     // then execute that chunk on a new thread
-    interpreter.compiler_context(compiler, |mc, compiler, value_pointers, interner| {
-        let additional_features = additional_features();
-        let programs = ("repl.scm", module).parse_program(mc, interner, case_insensitive)?;
-        let mut ecc = ExternalCompilerContext {
-            includer,
-            world,
-            interner,
-        };
-        let library_def = LibraryDefinitionContext {
-            max_fuel: Some(1_000_000),
-            value_pointers,
-            additional_features: Some(&additional_features),
-        };
-        Ok(compiler.compile(mc, &mut ecc, &library_def, programs)?)
-    })
+    interpreter.compiler_context(
+        thread,
+        compiler,
+        |mc, compiler, value_pointers, thread, interner| {
+            let additional_features = additional_features();
+            let programs = ("repl.scm", module).parse_program(mc, interner, case_insensitive)?;
+            let mut ecc = ExternalCompilerContext {
+                includer,
+                world,
+                interner,
+            };
+            let library_def = LibraryDefinitionContext {
+                max_fuel: Some(1_000_000),
+                value_pointers,
+                additional_features: Some(&additional_features),
+                thread,
+            };
+            Ok(compiler.compile(mc, &mut ecc, &library_def, programs)?)
+        },
+    )
 }
 
 fn chunk_debug(interpreter: &mut Interpreter, chunk: &ChunkHandle) {
@@ -308,6 +314,7 @@ fn execute(
         includer,
         interpreter,
         compiler,
+        thread,
         world,
     );
 
@@ -374,11 +381,12 @@ fn execute(
     }
 }
 
-fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle)> {
+fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle, ThreadHandle)> {
     let mut interpreter = Interpreter::default();
     let mut world = World::default();
 
     let compiler = interpreter.new_compiler();
+    let thread = interpreter.new_empty_thread();
     // max_fuel = None is *inadvisable* in any form of production code, b/c it means that if an infinite loop is
     // defined and executed in a library, it will run forever.
     // Rather, pass in a large amount of fuel.
@@ -388,43 +396,63 @@ fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle)> {
     // do so (it has to be done b/c a compiler needs to know about additional features)
     let additional_features = additional_features();
     interpreter.register_module(
+        &thread,
         &compiler,
         &mut world,
         stdlib::base::Base {
             additional_features: std::sync::Arc::clone(&additional_features),
         },
         None,
-        |vp| LibraryDefinitionContext {
+        |thread, vp| LibraryDefinitionContext {
             max_fuel: Some(10_000),
             value_pointers: vp,
             additional_features: Some(&additional_features),
+            thread,
         },
     )?;
-    interpreter.register_module(&compiler, &mut world, stdlib::write::Write, None, |vp| {
-        LibraryDefinitionContext {
+    interpreter.register_module(
+        &thread,
+        &compiler,
+        &mut world,
+        stdlib::write::Write,
+        None,
+        |thread, vp| LibraryDefinitionContext {
             max_fuel: Some(10_000),
             value_pointers: vp,
             additional_features: Some(&additional_features),
-        }
-    })?;
-    interpreter.register_module(&compiler, &mut world, stdlib::lazy::Lazy, None, |vp| {
-        LibraryDefinitionContext {
+            thread,
+        },
+    )?;
+    interpreter.register_module(
+        &thread,
+        &compiler,
+        &mut world,
+        stdlib::lazy::Lazy,
+        None,
+        |thread, vp| LibraryDefinitionContext {
             max_fuel: Some(10_000),
             value_pointers: vp,
             additional_features: Some(&additional_features),
-        }
-    })?;
+            thread,
+        },
+    )?;
     // This has to happen *after* registering (scheme base) otherwise it will fail b/c
     // it declares a dependency on (scheme base)! (yay!)
-    interpreter.register_module(&compiler, &mut world, stdlib::cxr::Cxr, None, |vp| {
-        LibraryDefinitionContext {
+    interpreter.register_module(
+        &thread,
+        &compiler,
+        &mut world,
+        stdlib::cxr::Cxr,
+        None,
+        |thread, vp| LibraryDefinitionContext {
             max_fuel: Some(10_000),
             value_pointers: vp,
             additional_features: Some(&additional_features),
-        }
-    })?;
+            thread,
+        },
+    )?;
 
-    Ok((interpreter, world, compiler))
+    Ok((interpreter, world, compiler, thread))
 }
 
 fn compile_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> anyhow::Result<()> {
@@ -433,13 +461,14 @@ fn compile_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> an
 
     match compile(&source) {
         Ok(module) => {
-            let (mut interpreter, world, compiler) = repl_stuff()?;
+            let (mut interpreter, world, compiler, thread) = repl_stuff()?;
             let chunk = compile_to_chunk(
                 case_insensitive,
                 &module,
                 &PwdIncluder,
                 &mut interpreter,
                 &compiler,
+                &thread,
                 &world,
             );
             match chunk {
@@ -478,8 +507,7 @@ fn execute_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> an
 
     match compile(&source) {
         Ok(module) => {
-            let (mut interpreter, world, compiler) = repl_stuff()?;
-            let thread = interpreter.new_empty_thread();
+            let (mut interpreter, world, compiler, thread) = repl_stuff()?;
             execute(
                 source,
                 case_insensitive,
@@ -524,8 +552,7 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
     println!("Type `#q` or `#quit` to exit. Type `#help` for more commands.");
 
     // compiler setup
-    let (mut interpreter, world, compiler) = repl_stuff()?;
-    let thread = interpreter.new_empty_thread();
+    let (mut interpreter, world, compiler, thread) = repl_stuff()?;
     // import (scheme base)
     interpreter.enter(|mc, arena, interner| {
         let Some(compiler) = arena.compiler_mut(&compiler) else {

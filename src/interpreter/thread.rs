@@ -245,30 +245,30 @@ impl Default for Thread<'_> {
 
 // Public-facing API
 impl<'gc> Thread<'gc> {
-    pub fn new(mc: &Mutation<'gc>, chunk: ChunkPtr<'gc>) -> Self {
-        Self {
-            frames: vec![ThreadFrame {
-                execution: Execution::Bytecode {
-                    chunk,
-                    pc: 0,
-                    arity: Arity::Exact(0),
-                    fallback: chunk.fallback,
-                },
-                env: Gc::new(
-                    mc,
-                    RefLock::new(StackEnvironment::new(mc, Some(chunk.import_env))),
-                ),
-                upvalue_index: None,
-                args: Box::from([]),
-                handler: None,
-                dynamic_wind: None,
-                exception: None,
-                bottom: 0,
-            }],
-            upvalues: Vec::with_capacity(chunk.upvalues),
-            ..Self::new_empty()
-        }
-    }
+    // pub fn new(mc: &Mutation<'gc>, chunk: ChunkPtr<'gc>) -> Self {
+    //     Self {
+    //         frames: vec![ThreadFrame {
+    //             execution: Execution::Bytecode {
+    //                 chunk,
+    //                 pc: 0,
+    //                 arity: Arity::Exact(0),
+    //                 fallback: chunk.fallback,
+    //             },
+    //             env: Gc::new(
+    //                 mc,
+    //                 RefLock::new(StackEnvironment::new(mc, Some(chunk.import_env))),
+    //             ),
+    //             upvalue_index: None,
+    //             args: Box::from([]),
+    //             handler: None,
+    //             dynamic_wind: None,
+    //             exception: None,
+    //             bottom: 0,
+    //         }],
+    //         upvalues: Vec::with_capacity(chunk.upvalues),
+    //         ..Self::new_empty()
+    //     }
+    // }
 
     pub fn new_empty() -> Self {
         Self {
@@ -943,7 +943,7 @@ impl<'gc> Thread<'gc> {
                         }
                         Bytecode::FetchUpvalue { index } => {
                             // Get the *actual* index or error
-                            dbg!((&self.upvalue_mapping, frame.upvalue_index));
+                            // dbg!((&self.upvalue_mapping, frame.upvalue_index));
                             let Some(index) = self
                                 .upvalue_mapping
                                 .get(
@@ -1514,7 +1514,8 @@ mod tests {
                 Default::default(),
             );
 
-            let thread = Gc::new(mc, RefLock::new(Thread::new(mc, chunk)));
+            let thread = Gc::new(mc, RefLock::new(Thread::default()));
+            thread.borrow_mut(mc).include(mc, chunk, None, false);
             // thread
             //     .borrow_mut(mc)
             //     .env()

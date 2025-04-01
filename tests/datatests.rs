@@ -3,7 +3,7 @@ use magus::{
     ExternalCompilerContext, Fuel, Value,
     compiler::{Compiler, LibraryDefinitionContext, LibraryName, ParseProgram, World},
     general_parser::general_parse,
-    interpreter::{Interpreter, NullIncluder, ValuePointers},
+    interpreter::{Interpreter, NullIncluder, ValuePointers, thread::Thread},
     lexer::Token,
     library_name, stdlib,
 };
@@ -38,22 +38,27 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
     )?;
     let includer = NullIncluder;
     let comp = interp.new_compiler();
+    let thread = interp.new_empty_thread();
     interp.register_module(
+        &thread,
         &comp,
         &mut test_world,
         stdlib::base::Base {
             additional_features: std::sync::Arc::new([]),
         },
         None,
-        |vp| LibraryDefinitionContext {
+        |thread, vp| LibraryDefinitionContext {
             max_fuel: Some(10_000),
             value_pointers: vp,
             additional_features: None,
+            thread,
         },
     )?;
     let file_name = format!("{path}.scm");
-    let chunk =
-        interp.compiler_context::<anyhow::Error>(&comp, |mc, comp, value_pointers, interner| {
+    let chunk = interp.compiler_context::<anyhow::Error>(
+        &thread,
+        &comp,
+        |mc, comp, value_pointers, thread, interner| {
             let programs =
                 (file_name.as_str(), data.source()).parse_program(mc, interner, false)?;
             let mut ecc = ExternalCompilerContext {
@@ -65,11 +70,20 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
                 max_fuel: None,
                 value_pointers,
                 additional_features: None,
+                thread,
             };
             Ok(comp.compile(mc, &mut ecc, &library_def, programs)?)
-        })?;
+        },
+    )?;
     let mut fuel = Fuel::with(1_000_000);
-    let thread = interp.new_thread(&chunk);
+    // let thread = interp.new_thread(&chunk);
+    interp.run(&thread, |ctx, arena, _| {
+        // TODO no Option
+        let chunk = arena.get_chunk(&chunk).expect("freed chunk");
+        ctx.thread
+            .borrow_mut(&ctx)
+            .include(&ctx, chunk, None, false);
+    });
     // Run thread until out-of-fuel or finished
     let mut is_finished = false;
     while fuel.remaining() > 0 && !is_finished {
@@ -226,10 +240,12 @@ fn compile_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()
             interner: &mut interner,
         };
         let value_pointers = ValuePointers::fake(mc);
+        let thread = gc_arena::Gc::new(mc, gc_arena::RefLock::new(Thread::new_empty()));
         let library_def = LibraryDefinitionContext {
             max_fuel: None,
             value_pointers,
             additional_features: None,
+            thread,
         };
         match compiler.compile(mc, &mut ecc, &library_def, programs) {
             Ok(chunk) => {

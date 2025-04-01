@@ -5,6 +5,7 @@ use std::{ops::Deref, sync::Arc};
 use anyhow::Context as _;
 use gc_arena::{Collect, Gc, Mutation, RefLock, Rootable};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
+use thread::ThreadPtr;
 
 use crate::{
     ExternalCompilerContext, LibraryName, World, bytecode,
@@ -98,6 +99,9 @@ impl<'gc> Arena<'gc> {
         }
     }
 
+    // TODO These functions should return the thing, not an Option
+    // a failure to find means that somehow a handle outlived the existence of the thing,
+    // and thats not very nice
     pub fn get_chunk(&self, handle: &ChunkHandle) -> Option<bytecode::ChunkPtr<'gc>> {
         self.stash.chunks.get(handle.key).copied()
     }
@@ -121,6 +125,14 @@ impl<'gc> Arena<'gc> {
         handle: &CompilerHandle,
     ) -> Option<&mut compiler::Compiler<'gc>> {
         self.stash.compilers.get_mut(handle.key)
+    }
+
+    pub fn thread(&self, handle: &ThreadHandle) -> ThreadPtr<'gc> {
+        self.stash
+            .threads
+            .get(handle.key)
+            .copied()
+            .expect("handle exists to freed thread")
     }
 }
 
@@ -359,11 +371,13 @@ impl Interpreter {
 
     pub fn compiler_context<E>(
         &mut self,
+        thread: &ThreadHandle,
         handle: &CompilerHandle,
         func: impl for<'a> FnOnce(
             &Mutation<'a>,
             &mut compiler::Compiler<'a>,
             ValuePointers<'a>,
+            ThreadPtr<'a>,
             &mut lasso::Rodeo,
         ) -> Result<bytecode::ChunkPtr<'a>, E>,
     ) -> Result<ChunkHandle, E> {
@@ -375,7 +389,13 @@ impl Interpreter {
                 .compilers
                 .get_mut(handle.key)
                 .expect("compiler was dropped when a handle still exists");
-            let chunk = (func)(mc, compiler, pointers, &mut self.interner)?;
+            let thread = arena
+                .stash
+                .threads
+                .get(thread.key)
+                .copied()
+                .expect("handle to freed thread");
+            let chunk = (func)(mc, compiler, pointers, thread, &mut self.interner)?;
             Ok(arena.create_chunk_handle(chunk))
         })
     }
@@ -383,11 +403,15 @@ impl Interpreter {
     /// Register a module to a compiler under a certain name
     pub fn register_module<'a, R: Registerable>(
         &'a mut self,
+        thread: &ThreadHandle,
         handle: &CompilerHandle,
         world: &mut World,
         module: R,
         rename: Option<LibraryName>,
-        library_def_fn: impl for<'gc> FnOnce(ValuePointers<'gc>) -> LibraryDefinitionContext<'a, 'gc>,
+        library_def_fn: impl for<'gc> FnOnce(
+            ThreadPtr<'gc>,
+            ValuePointers<'gc>,
+        ) -> LibraryDefinitionContext<'a, 'gc>,
     ) -> anyhow::Result<()> {
         let library_name = rename.unwrap_or_else(|| R::name(&mut self.interner));
         let maybe_native = module.native();
@@ -440,6 +464,12 @@ impl Interpreter {
                         .map(|p| LibraryDeclaration::convert(p, mc, &mut self.interner))
                         .collect::<Result<Vec<_>, _>>()?;
                     let value_pointers = arena.value_pointers();
+                    let thread = arena
+                        .stash
+                        .threads
+                        .get(thread.key)
+                        .copied()
+                        .expect("handle to freed thread");
                     let compiler = arena
                         .compiler_mut(handle)
                         .ok_or(anyhow::anyhow!("invalid compiler handle"))?;
@@ -451,7 +481,7 @@ impl Interpreter {
                         includer: &NullIncluder,
                         interner: &mut self.interner,
                     };
-                    let library_def = library_def_fn(value_pointers);
+                    let library_def = library_def_fn(thread, value_pointers);
                     compiler.define_library(
                         mc,
                         &library_name,
@@ -469,24 +499,6 @@ impl Interpreter {
         }
 
         Ok(())
-    }
-
-    pub fn new_thread(&mut self, code: &ChunkHandle) -> ThreadHandle {
-        let knob = Arc::new(());
-        self.arena.mutate_root(|mc, arena| {
-            let chunk = arena
-                .stash
-                .chunks
-                .get(code.key)
-                .expect("chunk was deallocated");
-            let new_thread = thread::Thread::new(mc, *chunk);
-            let key = arena
-                .stash
-                .threads
-                .insert(Gc::new(mc, RefLock::new(new_thread)));
-            self.thread_knobs.insert(key, knob.clone());
-            ThreadHandle { key, _knob: knob }
-        })
     }
 
     pub fn new_empty_thread(&mut self) -> ThreadHandle {

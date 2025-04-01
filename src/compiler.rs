@@ -15,7 +15,7 @@ use crate::{
     Fuel, Value, ValuePtr,
     bytecode::{Bytecode, Chunk, ChunkPtr, Constant, ImportFallbackMap, SourceData},
     environment::{Environment, StackEnvironment, StackEnvironmentPtr},
-    interpreter::{Includer, ValuePointers, thread::Thread},
+    interpreter::{Includer, ValuePointers, thread::ThreadPtr},
     runtime::lambda::{CompiledLambda, CompiledLambdaPtr, Lambda, NativeLambdaPtr},
     value::PromisePtr,
 };
@@ -1435,6 +1435,12 @@ pub struct LibraryDefinitionContext<'a, 'gc> {
     pub value_pointers: ValuePointers<'gc>,
     /// Any additional features to be supported by `(cond-expand)`
     pub additional_features: Option<&'a [Arc<str>]>,
+
+    // TODO ... what if we require a Thread<'gc> here????
+    // and is has to be the thread that the code for this compiler will be
+    // run on (so that upvalues are preserved between compiler imports
+    // and main code????)
+    pub thread: ThreadPtr<'gc>,
 }
 
 impl<'gc> Compiler<'gc> {
@@ -2305,7 +2311,8 @@ impl<'gc> Compiler<'gc> {
                 .compile_no_import(mc, ecc, code.iter().copied())
                 .map_err(Box::new)?;
 
-            let thread = Gc::new(mc, RefLock::new(Thread::new(mc, chunk)));
+            let thread = library_def.thread;
+            thread.borrow_mut(mc).include(mc, chunk, None, false);
             let vp = library_def.value_pointers;
             let ctx = crate::interpreter::Context {
                 mc,
@@ -2337,6 +2344,8 @@ impl<'gc> Compiler<'gc> {
                     e.display(ecc.interner, []).to_string().as_str(),
                 )))
             } else {
+                // reset thread before continuing
+                thread.borrow_mut(mc).reset();
                 Ok(())
             }
         }

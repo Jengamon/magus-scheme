@@ -2681,6 +2681,7 @@ impl<'gc> Compiler<'gc> {
         self.environments[self.env_ptr]
     }
 
+    /// Create a new environment (with the given pointer as its parent)
     pub fn new_environment(
         &mut self,
         mc: &Mutation<'gc>,
@@ -2791,10 +2792,20 @@ impl<'gc> Compiler<'gc> {
         import_env: StackEnvironmentPtr<'gc>,
         f: impl FnOnce(&mut SyntaxContext<'_, 'gc>, &mut Compiler<'gc>, StackEnvironmentPtr<'gc>) -> T,
     ) -> T {
-        let checkpoint = self.checkpoint();
         let new_env = self.new_environment(ctx, import_env);
+        self.hygenic_with_env(ctx, Some(new_env), f)
+    }
+
+    /// Helper for a hygenic context in a given environment
+    pub fn hygenic_with_env<T>(
+        &mut self,
+        ctx: &mut SyntaxContext<'_, 'gc>,
+        env_spec: Option<EnvironmentSpec>,
+        f: impl FnOnce(&mut SyntaxContext<'_, 'gc>, &mut Compiler<'gc>, StackEnvironmentPtr<'gc>) -> T,
+    ) -> T {
+        let checkpoint = self.checkpoint();
         let old_env = self.current_environment();
-        self.environment(Some(new_env));
+        self.environment(env_spec);
         let ret = (f)(ctx, self, self._current_env());
         self.environment(old_env);
         self.restore_checkpoint(checkpoint);

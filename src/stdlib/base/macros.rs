@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use fxhash::FxHashMap;
-use gc_arena::{Collect, Gc, Mutation, RefLock, unsize};
+use gc_arena::{Collect, Gc, Mutation, unsize};
 
 use crate::{
     Syntax, SyntaxContext, SyntaxReturn,

@@ -1,0 +1,5 @@
+---
+3
+---
+(import (only (scheme base) with-exception-handler lambda /))
+(with-exception-handler (lambda (_) 3) (lambda () (/ 1 0)))

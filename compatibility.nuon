@@ -238,7 +238,7 @@
     [ "base", "", vector-set!, false, "", "" ],
     [ "base", "", vector?, false, "", "" ],
     [ "base", "", when, false, "", "" ],
-    [ "base", "", with-exception-handler, false, "", "" ],
+    [ "base", "procedure", with-exception-handler, partial, "install an exception handler for the dynamic extent of a thunk", "continuable vs non-continuable exceptions untested" ],
     [ "base", "", write-bytevector, false, "", "" ],
     [ "base", "", write-char, false, "", "" ],
     [ "base", "", write-string, false, "", "" ],

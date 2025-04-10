@@ -69,6 +69,13 @@ pub enum LambdaReturn<'gc> {
         args: Vec<ValuePtr<'gc>>,
         dynamic_wind: DynamicWind<'gc>,
     },
+    /// Call a given lambda as an exception handler, and push the values it returns onto the stack
+    CallHandler {
+        lambda: Lambda<'gc>,
+        exception: SchemeErrorPtr<'gc>,
+        args: Vec<ValuePtr<'gc>>,
+        dynamic_wind: DynamicWind<'gc>,
+    },
     /// Call a given lambda, as a return value
     ///
     /// `[call-end]`
@@ -80,14 +87,6 @@ pub enum LambdaReturn<'gc> {
     // TODO Parameter, that takes a parameter object, and pushes its current value to stack
     // (must call, b/c parameter objects can have a converter function associated with them, which processes the input value)
     // (NOTE Parameters are only allowed to return exactly 1 ValuePtr (which can be more than 1 value))
-    /// Set an exception handler for this frame
-    ///
-    /// If an error arises on a frame:
-    /// - if a bytecode frame, the frame is popped unless a handler has been set, where execution takes and calls
-    ///   the handler
-    /// - if a native frame, the error run path is checked, then if the error is propagated (or a new error is
-    ///   raised), the handler is checked if any (and the rest handles like a bytecode frame)
-    SetExceptionHandler(Lambda<'gc>),
 }
 
 // Since Collect is not dyn-compatible, we create a "Collectable" trait implement

@@ -329,7 +329,7 @@ fn execute(
                         unreachable!()
                     };
                     let mut thread = thread.borrow_mut(&ctx);
-                    thread.include(ctx.mc, chunk, None, true);
+                    thread.include(ctx.mc, chunk, true);
                     // TODO Make an actual way to do this properly, and not so shenangian-y
                     // Shenanigans to share an environment
                     let Some(frame_env) = thread.env() else {

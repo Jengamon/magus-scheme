@@ -19,6 +19,7 @@ use crate::{
 pub use boolean::{And, Or};
 pub use conditionals::If;
 pub use define::{Define, SetBang};
+pub use exception::WithExceptionHandler;
 pub use macros::{DefineSyntax, SyntaxRules};
 pub use procedures::{
     Add, Apply, Ascending, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr, Cons,
@@ -34,6 +35,7 @@ use super::Formals;
 mod boolean;
 mod conditionals;
 mod define;
+mod exception;
 mod macros;
 mod procedures;
 mod quote;
@@ -258,6 +260,7 @@ impl Module for Base {
             "denominator",
             "even?",
             "odd?",
+            "with-exception-handler",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -322,6 +325,7 @@ impl Module for Base {
             "denominator" => lambda!(Denominator),
             "even?" => lambda!(IsEven),
             "odd?" => lambda!(IsOdd),
+            "with-exception-handler" => lambda!(WithExceptionHandler),
             _ => None,
         }
     }

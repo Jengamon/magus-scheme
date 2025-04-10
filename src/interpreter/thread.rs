@@ -109,7 +109,7 @@ pub enum ExecutionKind {
 pub struct ThreadFrame<'gc> {
     execution: Execution<'gc>,
     // error handler
-    handler: Option<Lambda<'gc>>,
+    // handler: Option<Lambda<'gc>>,
     // dynamic-wind before and after
     dynamic_wind: DynamicWind<'gc>,
     args: Box<[ValuePtr<'gc>]>,
@@ -137,12 +137,16 @@ impl<'gc> ThreadFrame<'gc> {
         env.freeze();
         Gc::new(mc, RefLock::new(env))
     }
+
+    pub fn exception(&self) -> Option<SchemeErrorPtr<'gc>> {
+        self.exception
+    }
 }
 
 impl PartialEq for ThreadFrame<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.execution == other.execution
-            && self.handler == other.handler
+            // && self.handler == other.handler
             && self.dynamic_wind == other.dynamic_wind
             && self.args == other.args
             && (matches!((self.exception, other.exception), (Some(se), Some(oe)) if Gc::ptr_eq(se, oe))
@@ -287,7 +291,7 @@ impl<'gc> Thread<'gc> {
         &mut self,
         ctx: &Context<'_, 'gc>,
         lambda: Lambda<'gc>,
-        error_handler: Option<Lambda<'gc>>,
+        // error_handler: Option<Lambda<'gc>>,
         args: &[ValuePtr<'gc>],
     ) -> Result<(), LambdaException> {
         // Push args to stack
@@ -296,7 +300,7 @@ impl<'gc> Thread<'gc> {
         }
         self.call_lambda(ctx, lambda, args.len(), false)?;
         // Install error handler (if any)
-        self.frames.last_mut().unwrap().handler = error_handler;
+        // self.frames.last_mut().unwrap().handler = error_handler;
         Ok(())
     }
 
@@ -313,7 +317,7 @@ impl<'gc> Thread<'gc> {
         &mut self,
         mc: &Mutation<'gc>,
         chunk: ChunkPtr<'gc>,
-        error_handler: Option<Lambda<'gc>>,
+        // error_handler: Option<Lambda<'gc>>,
         tail: bool,
     ) {
         let execution = Execution::Bytecode {
@@ -340,7 +344,7 @@ impl<'gc> Thread<'gc> {
             ),
             upvalue_index: None,
             args: Box::new([]),
-            handler: error_handler,
+            // handler: error_handler,
             dynamic_wind: None,
             exception: None,
             bottom: self.stack.len(),
@@ -449,8 +453,8 @@ impl<'gc> Thread<'gc> {
         // handle exception frame interaction with non-continuable errors
         if let Some(err) = frame.exception {
             if !err.error_type.is_continuable() {
-                let index = self.error_handler_frame_index().unwrap();
-                self.frames.drain(index..);
+                // let index = self.error_handler_frame_index().unwrap();
+                // self.frames.drain(index..);
                 self.error = Some(Gc::new(
                     ctx,
                     SchemeError {
@@ -565,7 +569,7 @@ impl<'gc> Thread<'gc> {
             // Ignore voids at the top of the stack when determining the bottom of a frame
             bottom: self.stack.len(),
             execution,
-            handler: None,
+            // handler: None,
             upvalue_index: upvalue_index.or(prev_upvalue),
             dynamic_wind: None,
             args: Box::from(args.as_slice()),
@@ -723,13 +727,13 @@ impl<'gc> Thread<'gc> {
             .filter(|&fallback| !matches!(*fallback.borrow(), Value::Undefined))
     }
 
-    fn error_handler(&self) -> Option<Lambda<'gc>> {
-        self.frames.iter().rev().find_map(|f| f.handler)
-    }
+    // fn error_handler(&self) -> Option<Lambda<'gc>> {
+    //     self.frames.iter().rev().find_map(|f| f.handler)
+    // }
 
-    fn error_handler_frame_index(&self) -> Option<usize> {
-        self.frames.iter().rposition(|f| f.handler.is_some())
-    }
+    // fn error_handler_frame_index(&self) -> Option<usize> {
+    //     self.frames.iter().rposition(|f| f.handler.is_some())
+    // }
 
     // The amount of fuel a native call costs
     const NATIVE_COST: i32 = 4;
@@ -767,30 +771,30 @@ impl<'gc> Thread<'gc> {
 
             // eprintln!("FRAMEC: {}", self.frames.len());
 
-            if let Some(err) = self.error {
-                // Find an error handler and set it up to run (if not handling one)
-                if self.frames.last().unwrap().exception.is_none() {
-                    if let Some(handler) = self.error_handler() {
-                        if let Err(_err) = self.call_lambda(&ctx, handler, 1, true) {
-                            // not a valid handler, so *take* it
-                            let index = self.error_handler_frame_index().unwrap();
-                            self.frames[index].handler.take();
-                            make_error!(SchemeErrorType::HandlerFailed(Gc::new(
-                                &ctx,
-                                err.error_type.clone()
-                            )));
-                            continue;
-                        }
-                        // mark frame as exception
-                        self.frames.last_mut().unwrap().exception = self.error.take();
-                        continue;
-                    } else {
-                        // execution ends with this error
-                        self.frames.drain(..);
-                        return;
-                    }
-                }
-            }
+            // if let Some(err) = self.error {
+            //     // Find an error handler and set it up to run (if not handling one)
+            //     if self.frames.last().unwrap().exception.is_none() {
+            //         if let Some(handler) = self.error_handler() {
+            //             if let Err(_err) = self.call_lambda(&ctx, handler, 1, true) {
+            //                 // not a valid handler, so *take* it
+            //                 let index = self.error_handler_frame_index().unwrap();
+            //                 self.frames[index].handler.take();
+            //                 make_error!(SchemeErrorType::HandlerFailed(Gc::new(
+            //                     &ctx,
+            //                     err.error_type.clone()
+            //                 )));
+            //                 continue;
+            //             }
+            //             // mark frame as exception
+            //             self.frames.last_mut().unwrap().exception = self.error.take();
+            //             continue;
+            //         } else {
+            //             // execution ends with this error
+            //             self.frames.drain(..);
+            //             return;
+            //         }
+            //     }
+            // }
 
             let current_env = Self::current_env(&self.frames);
             let Some(frame) = self.frames.last_mut() else {
@@ -803,6 +807,11 @@ impl<'gc> Thread<'gc> {
                 Execution::Bytecode {
                     chunk, pc, arity, ..
                 } => {
+                    // If error is set, kill this frame (bytecode shouldn't run if actively erroring)
+                    if self.error.is_some() {
+                        self.handle_frame_end(&ctx, true);
+                        continue;
+                    }
                     // If framepointer is oob, then that means execution of this frame is finished
                     if chunk.code.len() <= *pc {
                         self.handle_frame_end(&ctx, true);
@@ -1287,6 +1296,14 @@ impl<'gc> Thread<'gc> {
                         unreachable!()
                     };
                     let args = frame.args.as_ref();
+                    // reset stack if the frame is erroring, but doesn't have an exception set
+                    if self.error.is_some()
+                        && frame.exception.is_none()
+                        && frame.bottom < self.stack.len()
+                    {
+                        self.stack.drain(frame.bottom..);
+                    }
+                    let error = self.error.take().or(frame.exception);
                     let lctx = NativeLambdaContext {
                         self_ptr: native,
                         thread_ctx: ctx,
@@ -1303,7 +1320,8 @@ impl<'gc> Thread<'gc> {
                         frames: &self.frames,
                         thread_ref: self,
                     };
-                    let res = if let Some(err) = self.error {
+
+                    let res = if let Some(err) = error {
                         // Let native code interfere with errors
                         native.borrow_mut(lctx.thread_ctx.mc).error(lctx, args, err)
                     } else {
@@ -1390,6 +1408,38 @@ impl<'gc> Thread<'gc> {
                             // Set dynamic wind
                             self.frames.last_mut().unwrap().dynamic_wind = dynamic_wind;
                         }
+                        Ok(LambdaReturn::CallHandler {
+                            lambda,
+                            exception,
+                            args,
+                            dynamic_wind,
+                        }) => {
+                            // if there is already an error, use that as the exception instead??
+                            // hard error? idek
+                            if self.error.is_some() {
+                                todo!("handle 2 different errors...")
+                            }
+                            frame.exception = Some(exception);
+                            let args_len = args.len();
+                            self.stack.extend(args);
+                            // label the lambda
+                            let lambda = if lambda.needs_label() {
+                                lambda.label(
+                                    &ctx,
+                                    frame.upvalue_index.unwrap_or_else(|| {
+                                        Self::allocate_upvalue_index(&mut self.next_upvalue_index)
+                                    }),
+                                )
+                            } else {
+                                lambda
+                            };
+                            if let Err(err) = self.call_lambda(&ctx, lambda, args_len, false) {
+                                make_error!(SchemeErrorType::LambdaException(err));
+                                continue;
+                            };
+                            // Set dynamic wind
+                            self.frames.last_mut().unwrap().dynamic_wind = dynamic_wind;
+                        }
                         Ok(LambdaReturn::TailCall {
                             lambda,
                             args,
@@ -1416,9 +1466,9 @@ impl<'gc> Thread<'gc> {
                             self.frames.last_mut().unwrap().dynamic_wind = dynamic_wind;
                             // self.handle_frame_end(&ctx, true);
                         }
-                        Ok(LambdaReturn::SetExceptionHandler(handler)) => {
-                            frame.handler = Some(handler);
-                        }
+                        // Ok(LambdaReturn::SetExceptionHandler(handler)) => {
+                        //     frame.handler = Some(handler);
+                        // }
                         Err(e) => {
                             // TODO Add current error to new error irritants if present
                             match e {
@@ -1516,7 +1566,7 @@ mod tests {
             );
 
             let thread = Gc::new(mc, RefLock::new(Thread::default()));
-            thread.borrow_mut(mc).include(mc, chunk, None, false);
+            thread.borrow_mut(mc).include(mc, chunk, false);
             // thread
             //     .borrow_mut(mc)
             //     .env()

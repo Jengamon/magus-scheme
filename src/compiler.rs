@@ -2312,7 +2312,7 @@ impl<'gc> Compiler<'gc> {
                 .map_err(Box::new)?;
 
             let thread = library_def.thread;
-            thread.borrow_mut(mc).include(mc, chunk, None, false);
+            thread.borrow_mut(mc).include(mc, chunk, false);
             let vp = library_def.value_pointers;
             let ctx = crate::interpreter::Context {
                 mc,

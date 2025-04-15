@@ -113,7 +113,7 @@
     [ "base", "", integer?, false, "", "" ],
     [ "base", "syntax", lambda, true, "defines a new procedure", "" ],
     [ "base", "procedure", lcm, true, "get the least common multiple of inputs", "" ],
-    [ "base", "", length, false, "", "" ],
+    [ "base", "procedure", length, true, "get the length of a list", "implemented in Scheme" ],
     [ "base", "", let, false, "", "" ],
     [ "base", "", let*, false, "", "" ],
     [ "base", "", let*-values, false, "", "" ],

@@ -162,7 +162,6 @@ mod control {
                     loop {
                         // push car, and set cons to tail *or* break on non-list cdr
                         // break on null cdr
-                        args.push(current.car.unwrap_or(ctx.thread_ctx.null_value));
                         match current.cdr.map(|v| *v.borrow()) {
                             Some(Value::Cons(_))
                                 if Gc::ptr_eq(current.cdr.unwrap(), ctx.thread_ctx.null_value) =>
@@ -170,6 +169,7 @@ mod control {
                                 break;
                             }
                             Some(Value::Cons(c)) => {
+                                args.push(current.car.unwrap_or(ctx.thread_ctx.null_value));
                                 current = c;
                             }
                             Some(_) => {

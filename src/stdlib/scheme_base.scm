@@ -7,7 +7,7 @@
 ; are in this module
 (import (magus impl))
 (export list not map memq memv abs square boolean? boolean=?
-    zero? positive? negative?)
+    zero? positive? negative? length)
 ; Sketch functions (to be removed once implemented properly)
 (export assq assv)
 (begin
@@ -15,6 +15,12 @@
   (define (not x) (if x #f #t))
   (define (abs n) (if (< n 0) (- n) n))
   (define (square n) (* n n))
+  (define (length xs)
+    (define (length-iter a l)
+      (if (null? a)
+          l
+          (length-iter (cdr a) (+ l 1))))
+    (length-iter xs 0))
   ; this impl should work bc = keeps numbers exact as long as the input is exact
   ; and we use exact to force the input to be exact
   (define (zero? n)

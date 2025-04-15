@@ -62,7 +62,7 @@
     [ "base", "", close-port, false, "", "" ],
     [ "base", "", complex?, false, "", "" ],
     [ "base", "", cond, false, "", "" ],
-    [ "base", "", cond-expand, false, "", "" ],
+    [ "base", "syntax", cond-expand, true, "conditionally expand code", "" ],
     [ "base", "procedure", cons, true, "make a pair with the specified car and cdr fields", "" ],
     [ "base", "", current-error-port, false, "", "" ],
     [ "base", "", current-input-port, false, "", "" ],

@@ -8,7 +8,8 @@ use crate::{
     LibraryName,
     bytecode::{Bytecode, Chunk, ChunkPtr},
     compiler::{
-        ArcSyntax, Compiler, Module, ProgramData, ProgramPtr, Syntax, SyntaxContext, SyntaxReturn,
+        ArcSyntax, Compiler, FeatureRequirement, Module, ProgramData, ProgramPtr, Syntax,
+        SyntaxContext, SyntaxReturn,
     },
     environment::StackEnvironmentPtr,
     interpreter::Registerable,
@@ -187,7 +188,115 @@ impl Syntax for Lambda {
 }
 
 #[derive(Debug)]
-pub struct CondExpand;
+pub struct CondExpand {
+    additional_features: Arc<[Arc<str>]>,
+}
+
+impl CondExpand {
+    #[expect(clippy::type_complexity)]
+    fn parse<'gc>(
+        ctx: &mut SyntaxContext<'_, 'gc>,
+        args: &[ProgramPtr<'gc>],
+        else_sym: lasso::Spur,
+    ) -> anyhow::Result<(
+        Vec<(FeatureRequirement, Vec<ProgramPtr<'gc>>)>,
+        Vec<ProgramPtr<'gc>>,
+    )> {
+        let mut branches = vec![];
+        let mut else_branch = vec![];
+        let mut last_non_else_index = None;
+        for (idx, p) in args.iter().enumerate() {
+            if let ProgramData::List { head, body } = &p.data {
+                if let Some(s) = head.into_symbol(ctx.interner) {
+                    if s == else_sym {
+                        // This is the else decl, add to else stuff, then break (so that this *has* to be the last one)
+                        let decls = body.clone();
+                        else_branch.extend(decls);
+                        break;
+                    }
+                }
+                // The head this the requirement, the body the declarationss
+                last_non_else_index = Some(idx);
+                let head = FeatureRequirement::convert(
+                    head.into_program(ctx.mc, ctx.interner, p.source),
+                    ctx.interner,
+                )?;
+                let decls = body.clone();
+                branches.push((head, decls));
+            } else {
+                // not a valid cond-expand decl
+                anyhow::bail!("cond-expand is not well-formed");
+            }
+        }
+
+        if (last_non_else_index.is_none() && !branches.is_empty())
+            || last_non_else_index
+                .is_some_and(|lb| ![args.len(), args.len().saturating_sub(1)].contains(&(lb + 1)))
+        {
+            // else branch is not the last branch
+            anyhow::bail!("cond-expand else must be the last branch")
+        } else {
+            Ok((branches, else_branch))
+        }
+    }
+}
+
+impl Syntax for CondExpand {
+    fn evaluate<'gc>(
+        &self,
+        ctx: &mut SyntaxContext<'_, 'gc>,
+        compiler: &mut Compiler<'gc>,
+        _import_env: StackEnvironmentPtr<'gc>,
+        args: &[ProgramPtr<'gc>],
+    ) -> anyhow::Result<SyntaxReturn<'gc>> {
+        // // A cond-expand consists of at least 1 clause of form (FeatureRequirement <programs>...)
+        // // followed by up to one (else <programs>...)
+        let else_sym = ctx.interner.get_or_intern_static("else");
+
+        let (branches, else_branch) = Self::parse(ctx, args, else_sym)?;
+
+        let features = Compiler::features(self.additional_features.as_ref(), ctx.interner);
+        let mut branch_satisfied = false;
+        let mut programs_to_execute = vec![];
+        for (req, cond_programs) in branches.into_iter() {
+            if req.is_satisfied(compiler, ctx.world, &features) {
+                branch_satisfied = true;
+                programs_to_execute = cond_programs;
+                // Ignore the remaining clauses
+                break;
+            }
+        }
+        if !branch_satisfied && !else_branch.is_empty() {
+            // expand else branch
+            programs_to_execute = else_branch;
+        }
+
+        let mut code = vec![];
+        for program in programs_to_execute {
+            code.extend(compiler.compile_code(ctx, program)?.into_bytecode());
+        }
+
+        Ok(SyntaxReturn::Code(code.into_boxed_slice()))
+    }
+
+    fn is_container<'gc>(
+        &self,
+        ptr: ProgramPtr<'gc>,
+        _compiler: &Compiler<'gc>,
+    ) -> Vec<ProgramPtr<'gc>> {
+        let mut programs_to_check = vec![];
+        if let ProgramData::List { body, .. } = &ptr.data {
+            for p in body.iter().copied() {
+                if let ProgramData::List { body, .. } = &p.data {
+                    // might be valid, so add the "body" elements to check list
+                    programs_to_check.extend(body);
+                }
+            }
+        }
+
+        programs_to_check
+    }
+}
 
 #[derive(Debug)]
 pub struct Include;
@@ -261,6 +370,7 @@ impl Module for Base {
             "even?",
             "odd?",
             "with-exception-handler",
+            "cond-expand",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -343,6 +453,9 @@ impl Module for Base {
             "syntax-rules" => Some(Arc::new(SyntaxRules)),
             "and" => Some(Arc::new(And)),
             "or" => Some(Arc::new(Or)),
+            "cond-expand" => Some(Arc::new(CondExpand {
+                additional_features: Arc::clone(&self.additional_features),
+            })),
             _ => None,
         }
     }

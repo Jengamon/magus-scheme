@@ -27,7 +27,7 @@ pub const FEATURES: &[&str] = &[
     "exact-closed",
     "ieee-float",
     "full-unicode",
-    // "ratios", // not yet
+    "ratios",
 ];
 /// Calculate the feature identifier for \<name-version>
 pub fn name_version_feature() -> Box<str> {

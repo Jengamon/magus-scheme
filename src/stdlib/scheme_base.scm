@@ -6,10 +6,12 @@
 ; that getting the name before it's defined is...undefined. But any runtime tricks
 ; are in this module
 (import (magus impl))
-(export list not map memq memv abs square boolean? boolean=?
+(export list not memq memv abs square boolean? boolean=?
     zero? positive? negative? length)
 ; Sketch functions (to be removed once implemented properly)
-(export assq assv)
+; `map` is here b/c it has to be able to support multiple lists which is
+; easier in Rust (with the goal of the method) than in Scheme (imo)
+(export assq assv map)
 (begin
   (define (list . in) in)
   (define (not x) (if x #f #t))

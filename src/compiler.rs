@@ -805,6 +805,8 @@ pub struct Compiler<'gc> {
     labeled_labels: FxHashSet<usize>,
     /// requested labels
     label_ref_labels: FxHashSet<usize>,
+    /// label data
+    label_values: FxHashMap<usize, ProgramPtr<'gc>>,
 
     // cache for native modules
     native_cache: FxHashMap<LibraryName, FxHashMap<Static<lasso::Spur>, NativeItem<'gc>>>,
@@ -1464,6 +1466,7 @@ impl<'gc> Compiler<'gc> {
             environments: vec![Gc::new(mc, RefLock::new(Environment::new(mc, None)))],
             labeled_labels: FxHashSet::default(),
             label_ref_labels: FxHashSet::default(),
+            label_values: FxHashMap::default(),
             env_ptr: 0,
             stash: Stash::default(),
             native_cache: FxHashMap::default(),
@@ -1479,6 +1482,11 @@ impl<'gc> Compiler<'gc> {
     /// Add labels to `labeled` set
     pub fn add_labeled(&mut self, labeled: impl IntoIterator<Item = usize>) {
         self.labeled_labels.extend(labeled);
+    }
+
+    /// Add label data
+    pub fn label_value(&mut self, label: usize) -> Option<ProgramPtr<'gc>> {
+        self.label_values.get(&label).copied()
     }
 
     /// Convenience function for cleaning up unused transformers
@@ -1499,6 +1507,35 @@ impl<'gc> Compiler<'gc> {
                 .map(|i| interner.get_or_intern(i)),
         );
         features
+    }
+
+    fn add_label_values_from_program(&mut self, ptr: ProgramPtr<'gc>) {
+        match &ptr.data {
+            ProgramData::Labeled { label, item } => {
+                self.label_values.insert(*label, *item);
+                self.add_label_values_from_program(*item);
+            }
+            ProgramData::List { head, body } => {
+                if let ListHead::Program(p) = head {
+                    self.add_label_values_from_program(*p);
+                }
+                for program in body {
+                    self.add_label_values_from_program(*program);
+                }
+            }
+            ProgramData::DottedList { pre_dot, dot } => {
+                for program in pre_dot {
+                    self.add_label_values_from_program(*program);
+                }
+                self.add_label_values_from_program(*dot);
+            }
+            ProgramData::Vector(vec) => {
+                for program in vec {
+                    self.add_label_values_from_program(*program);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Compile an list of programs into a [`Chunk`] (not allowing any imports)
@@ -1532,6 +1569,8 @@ impl<'gc> Compiler<'gc> {
         let mut code = vec![];
         let mut labels = FxHashMap::default();
         for program in programs {
+            self.add_label_values_from_program(program);
+
             if let Some(source) = program.source {
                 labels.insert(code.len(), source);
             }
@@ -1552,6 +1591,7 @@ impl<'gc> Compiler<'gc> {
 
             self.label_ref_labels.clear();
             self.labeled_labels.clear();
+            self.label_values.clear();
         }
 
         // when we create our chunk, our import env is *always* the initial default environment

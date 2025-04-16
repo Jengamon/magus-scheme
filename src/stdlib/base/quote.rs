@@ -10,6 +10,7 @@ use crate::{
 // and the label check becomes: requested - labeled (difference)
 fn quote_program<'gc>(
     ptr: ProgramPtr<'gc>,
+    compiler: &mut Compiler<'gc>,
     ctx: &mut SyntaxContext<'_, 'gc>,
     labels: &mut HashSet<usize>,
     requested_labels: &mut HashSet<usize>,
@@ -45,7 +46,7 @@ fn quote_program<'gc>(
         }
         ProgramData::Labeled { label, item } => {
             labels.insert(*label);
-            let mut code = quote_program(*item, ctx, labels, requested_labels)?;
+            let mut code = quote_program(*item, compiler, ctx, labels, requested_labels)?;
 
             code.push(Bytecode::FillHole { id: *label });
             code.push(Bytecode::MakeHole { id: *label });
@@ -53,13 +54,18 @@ fn quote_program<'gc>(
         }
         ProgramData::LabelRef(label) => {
             requested_labels.insert(*label);
-            vec![Bytecode::MakeHole { id: *label }]
+            if let Some(val) = compiler.label_value(*label) {
+                quote_program(val, compiler, ctx, labels, requested_labels)?
+            } else {
+                // This code will fail anyways with a "undefined label" failure
+                vec![]
+            }
         }
         ProgramData::Vector(v) => {
             let mut data = vec![];
             let length = v.len();
             for it in v.iter() {
-                data.extend(quote_program(*it, ctx, labels, requested_labels)?);
+                data.extend(quote_program(*it, compiler, ctx, labels, requested_labels)?);
             }
             data.push(Bytecode::MakeVector { length });
             data
@@ -69,7 +75,7 @@ fn quote_program<'gc>(
             let mut data = vec![Bytecode::PushNull];
             let body_chunks = body
                 .iter()
-                .map(|it| quote_program(*it, ctx, labels, requested_labels))
+                .map(|it| quote_program(*it, compiler, ctx, labels, requested_labels))
                 .collect::<Vec<_>>();
             for it in body_chunks.into_iter().rev() {
                 data.extend(it?);
@@ -77,7 +83,7 @@ fn quote_program<'gc>(
             }
             match head {
                 ListHead::Program(p) => {
-                    data.extend(quote_program(*p, ctx, labels, requested_labels)?);
+                    data.extend(quote_program(*p, compiler, ctx, labels, requested_labels)?);
                 }
                 ListHead::Import => {
                     let import = ctx.interner.get_or_intern_static("import");
@@ -99,9 +105,9 @@ fn quote_program<'gc>(
             debug_assert!(!pre_dot.is_empty());
             let body_chunks = pre_dot
                 .iter()
-                .map(|it| quote_program(*it, ctx, labels, requested_labels))
+                .map(|it| quote_program(*it, compiler, ctx, labels, requested_labels))
                 .collect::<Vec<_>>();
-            let mut data = quote_program(*dot, ctx, labels, requested_labels)?;
+            let mut data = quote_program(*dot, compiler, ctx, labels, requested_labels)?;
             for it in body_chunks.into_iter().rev() {
                 data.extend(it?);
                 data.push(Bytecode::MakePair);
@@ -130,7 +136,7 @@ impl Syntax for Quote {
         let (labeled, requested) = compiler.label_data();
         let mut labels = HashSet::from_iter(labeled.clone());
         let mut requested_labels = HashSet::from_iter(requested.clone());
-        let code = quote_program(args[0], ctx, &mut labels, &mut requested_labels)?;
+        let code = quote_program(args[0], compiler, ctx, &mut labels, &mut requested_labels)?;
         // Error if there are any undefined labels
         let undefined_labels = requested_labels.difference(&labels).collect::<HashSet<_>>();
         if !undefined_labels.is_empty() {
@@ -349,8 +355,8 @@ fn quasiquote_program<'gc>(
         }
         // ditto on passthrough
         ProgramData::Labeled { label, item } => {
+            labels.insert(*label);
             if *level > 0 {
-                labels.insert(*label);
                 let mut code =
                     quasiquote_program(*item, compiler, ctx, labels, requested_labels, level)?;
 
@@ -362,8 +368,21 @@ fn quasiquote_program<'gc>(
                 evaluate!()
             }
         }
+        ProgramData::LabelRef(label) => {
+            requested_labels.insert(*label);
+            if *level > 0 {
+                if let Some(val) = compiler.label_value(*label) {
+                    quote_program(val, compiler, ctx, labels, requested_labels)?
+                } else {
+                    // This code will fail anyways with a "undefined label" failure
+                    vec![]
+                }
+            } else {
+                evaluate!()
+            }
+        }
         // handle constant data (data that cannot contain data affected by quasiquote)
-        _ => quote_program(ptr, ctx, labels, requested_labels)?,
+        _ => quote_program(ptr, compiler, ctx, labels, requested_labels)?,
     })
 }
 

@@ -279,6 +279,21 @@ impl Syntax for CondExpand {
         Ok(SyntaxReturn::Code(code.into_boxed_slice()))
     }
 
+    // trick: consider empty cond-expand as a definition
+    fn is_definition<'gc>(&self, ptr: ProgramPtr<'gc>, _compiler: &Compiler<'gc>) -> bool {
+        let mut programs_to_check = vec![];
+        if let ProgramData::List { body, .. } = &ptr.data {
+            for p in body.iter().copied() {
+                if let ProgramData::List { body, .. } = &p.data {
+                    // might be valid, so add the "body" elements to check list
+                    programs_to_check.extend(body.iter().copied());
+                }
+            }
+        }
+
+        programs_to_check.is_empty()
+    }
+
     fn is_container<'gc>(
         &self,
         ptr: ProgramPtr<'gc>,

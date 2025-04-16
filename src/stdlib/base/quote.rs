@@ -372,7 +372,7 @@ fn quasiquote_program<'gc>(
             requested_labels.insert(*label);
             if *level > 0 {
                 if let Some(val) = compiler.label_value(*label) {
-                    quote_program(val, compiler, ctx, labels, requested_labels)?
+                    quasiquote_program(val, compiler, ctx, labels, requested_labels, level)?
                 } else {
                     // This code will fail anyways with a "undefined label" failure
                     vec![]

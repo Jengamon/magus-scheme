@@ -801,6 +801,11 @@ pub struct Compiler<'gc> {
     // which environment to use
     env_ptr: usize,
 
+    /// defined labels
+    labeled_labels: FxHashSet<usize>,
+    /// requested labels
+    label_ref_labels: FxHashSet<usize>,
+
     // cache for native modules
     native_cache: FxHashMap<LibraryName, FxHashMap<Static<lasso::Spur>, NativeItem<'gc>>>,
 
@@ -829,10 +834,11 @@ pub enum Arg {
 
 #[derive(thiserror::Error, Debug)]
 pub enum CompileError {
-    #[error("a label was encountered in code")]
-    Labeled(Option<SourceData>),
-    #[error("a label ref was encountered in code")]
-    LabelRef(Option<SourceData>),
+    #[error("undefined labels: {labels:?}")]
+    UndefinedLabels {
+        location: Option<SourceData>,
+        labels: FxHashSet<usize>,
+    },
     #[error("an empty list was encountered in code")]
     EmptyList(Option<SourceData>),
     #[error("a dotted list was encountered in code")]
@@ -1456,6 +1462,8 @@ impl<'gc> Compiler<'gc> {
             checkpoints: Default::default(),
             // The very first environment pointer is always the default environment
             environments: vec![Gc::new(mc, RefLock::new(Environment::new(mc, None)))],
+            labeled_labels: FxHashSet::default(),
+            label_ref_labels: FxHashSet::default(),
             env_ptr: 0,
             stash: Stash::default(),
             native_cache: FxHashMap::default(),
@@ -1518,6 +1526,22 @@ impl<'gc> Compiler<'gc> {
                 labels.insert(code.len(), source);
             }
             code.extend(self.compile_code(&mut context, program)?.into_bytecode());
+            // Clear datum labels (between top-level datum!)
+            let undefined_labels = self
+                .label_ref_labels
+                .difference(&self.labeled_labels)
+                .copied()
+                .collect::<FxHashSet<_>>();
+            if !undefined_labels.is_empty() {
+                // Error where there are undefined labels
+                return Err(CompileError::UndefinedLabels {
+                    location: program.source,
+                    labels: undefined_labels,
+                });
+            }
+
+            self.label_ref_labels.clear();
+            self.labeled_labels.clear();
         }
 
         // when we create our chunk, our import env is *always* the initial default environment
@@ -1767,8 +1791,27 @@ impl<'gc> Compiler<'gc> {
                 code.push(Bytecode::MakeVector { length });
                 Ok(SyntaxReturn::Code(code.into()))
             }
-            ProgramData::Labeled { .. } => Err(CompileError::Labeled(program.source)),
-            ProgramData::LabelRef(_) => Err(CompileError::LabelRef(program.source)),
+            // TODO these are valid in code, so handle them.
+            // They are self-evaluating (code eval is same as quote eval... ish)
+            ProgramData::Labeled { label, item } => {
+                self.labeled_labels.insert(*label);
+                Ok(SyntaxReturn::Code(
+                    self.compile_code(ctx, *item)?
+                        .into_bytecode()
+                        .into_iter()
+                        .chain([
+                            Bytecode::FillHole { id: *label },
+                            Bytecode::MakeHole { id: *label },
+                        ])
+                        .collect(),
+                ))
+            }
+            ProgramData::LabelRef(label) => {
+                self.label_ref_labels.insert(*label);
+                Ok(SyntaxReturn::Code(Box::from([Bytecode::MakeHole {
+                    id: *label,
+                }])))
+            }
             ProgramData::EmptyList => Err(CompileError::EmptyList(program.source)),
             ProgramData::List { head, body } => {
                 // At this point, import and define-library don't have a special meaning anymore, so just interpret them as

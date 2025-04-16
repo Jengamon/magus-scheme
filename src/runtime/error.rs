@@ -69,8 +69,6 @@ pub enum SchemeErrorType<'gc> {
         #[collect(require_static)]
         LambdaException,
     ),
-    #[error("hole {0} was not defined")]
-    UndefinedHole(usize),
     #[error("instruction expected more values: {0:?}")]
     NoValue(#[collect(require_static)] Bytecode),
     #[error("{inst} expected a {expected:?}, but found a {kind:?}")]

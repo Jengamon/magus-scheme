@@ -270,6 +270,50 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
                 }
             }
 
+            fn visit_labeled(&mut self, labeled: &crate::LabeledDatum) {
+                let Some(label) = labeled.label() else {
+                    self.ptr = Some(Err(GAstProgramError::Unparseable(
+                        labeled.syntax().text_range(),
+                    )));
+                    return;
+                };
+
+                let Some(datum) = labeled.datum().next() else {
+                    self.ptr = Some(Err(GAstProgramError::Unparseable(
+                        labeled.syntax().text_range(),
+                    )));
+                    return;
+                };
+
+                self.visit_datum(&datum);
+                self.ptr = match self.ptr.take() {
+                    Some(Ok(p)) => Some(Ok(Gc::new(
+                        self.mc,
+                        Program::new(
+                            ProgramData::Labeled { label, item: p },
+                            source_data!(self, labeled),
+                        ),
+                    ))),
+                    _ => Some(Err(GAstProgramError::Unparseable(
+                        labeled.syntax().text_range(),
+                    ))),
+                };
+            }
+
+            fn visit_label_ref(&mut self, label_ref: &crate::LabelRef) {
+                let Some(label) = label_ref.trigger() else {
+                    self.ptr = Some(Err(GAstProgramError::Unparseable(
+                        label_ref.syntax().text_range(),
+                    )));
+                    return;
+                };
+
+                self.ptr = Some(Ok(Gc::new(
+                    self.mc,
+                    Program::new(ProgramData::LabelRef(label), source_data!(self, label_ref)),
+                )))
+            }
+
             fn visit_symbol(&mut self, symbol: &crate::Symbol) {
                 let Some(symbol_str) = symbol.identifier(self.case_insensitive) else {
                     self.ptr = Some(Err(GAstProgramError::Unparseable(

@@ -6,10 +6,13 @@ use crate::{
     environment::StackEnvironmentPtr,
 };
 
+// TODO Introduce a separate label set for "requested labels"
+// and the label check becomes: requested - labeled (difference)
 fn quote_program<'gc>(
     ptr: ProgramPtr<'gc>,
     ctx: &mut SyntaxContext<'_, 'gc>,
     labels: &mut HashSet<usize>,
+    requested_labels: &mut HashSet<usize>,
 ) -> anyhow::Result<Vec<Bytecode>> {
     macro_rules! constant_eval {
         ($e:expr => $f:ident) => {
@@ -42,23 +45,21 @@ fn quote_program<'gc>(
         }
         ProgramData::Labeled { label, item } => {
             labels.insert(*label);
-            let mut code = quote_program(*item, ctx, labels)?;
+            let mut code = quote_program(*item, ctx, labels, requested_labels)?;
 
             code.push(Bytecode::Duplicate);
             code.push(Bytecode::FillHole { id: *label });
             code
         }
         ProgramData::LabelRef(label) => {
-            if !labels.contains(label) {
-                return Err(anyhow::anyhow!("undefined label reference {label}"));
-            }
+            requested_labels.insert(*label);
             vec![Bytecode::MakeHole { id: *label }]
         }
         ProgramData::Vector(v) => {
             let mut data = vec![];
             let length = v.len();
             for it in v.iter() {
-                data.extend(quote_program(*it, ctx, labels)?);
+                data.extend(quote_program(*it, ctx, labels, requested_labels)?);
             }
             data.push(Bytecode::MakeVector { length });
             data
@@ -68,7 +69,7 @@ fn quote_program<'gc>(
             let mut data = vec![Bytecode::PushNull];
             let body_chunks = body
                 .iter()
-                .map(|it| quote_program(*it, ctx, labels))
+                .map(|it| quote_program(*it, ctx, labels, requested_labels))
                 .collect::<Vec<_>>();
             for it in body_chunks.into_iter().rev() {
                 data.extend(it?);
@@ -76,7 +77,7 @@ fn quote_program<'gc>(
             }
             match head {
                 ListHead::Program(p) => {
-                    data.extend(quote_program(*p, ctx, labels)?);
+                    data.extend(quote_program(*p, ctx, labels, requested_labels)?);
                 }
                 ListHead::Import => {
                     let import = ctx.interner.get_or_intern_static("import");
@@ -98,9 +99,9 @@ fn quote_program<'gc>(
             debug_assert!(!pre_dot.is_empty());
             let body_chunks = pre_dot
                 .iter()
-                .map(|it| quote_program(*it, ctx, labels))
+                .map(|it| quote_program(*it, ctx, labels, requested_labels))
                 .collect::<Vec<_>>();
-            let mut data = quote_program(*dot, ctx, labels)?;
+            let mut data = quote_program(*dot, ctx, labels, requested_labels)?;
             for it in body_chunks.into_iter().rev() {
                 data.extend(it?);
                 data.push(Bytecode::MakePair);
@@ -127,7 +128,13 @@ impl Syntax for Quote {
 
         // Used for evaluating labeled datum
         let mut labels = HashSet::default();
-        let code = quote_program(args[0], ctx, &mut labels)?;
+        let mut requested_labels = HashSet::default();
+        let code = quote_program(args[0], ctx, &mut labels, &mut requested_labels)?;
+        // Error if there are any undefined labels
+        let undefined_labels = requested_labels.difference(&labels).collect::<HashSet<_>>();
+        if !undefined_labels.is_empty() {
+            anyhow::bail!("undefined labels: {undefined_labels:?}")
+        }
         Ok(SyntaxReturn::Code(code.into_boxed_slice()))
     }
 }
@@ -140,6 +147,7 @@ fn quasiquote_program<'gc>(
     compiler: &mut Compiler<'gc>,
     ctx: &mut SyntaxContext<'_, 'gc>,
     labels: &mut HashSet<usize>,
+    requested_labels: &mut HashSet<usize>,
     level: &mut usize,
 ) -> anyhow::Result<Vec<Bytecode>> {
     macro_rules! evaluate {
@@ -171,7 +179,8 @@ fn quasiquote_program<'gc>(
         {
             *level += 1;
             let res = if *level > 0 {
-                let res = quasiquote_program(body[0], compiler, ctx, labels, level)?;
+                let res =
+                    quasiquote_program(body[0], compiler, ctx, labels, requested_labels, level)?;
                 [Bytecode::PushNull]
                     .into_iter()
                     .chain(res)
@@ -184,7 +193,7 @@ fn quasiquote_program<'gc>(
                     ])
                     .collect()
             } else {
-                quasiquote_program(body[0], compiler, ctx, labels, level)?
+                quasiquote_program(body[0], compiler, ctx, labels, requested_labels, level)?
             };
             *level -= 1;
             res
@@ -196,7 +205,8 @@ fn quasiquote_program<'gc>(
         {
             *level -= 1;
             let res = if *level > 0 {
-                let res = quasiquote_program(body[0], compiler, ctx, labels, level)?;
+                let res =
+                    quasiquote_program(body[0], compiler, ctx, labels, requested_labels, level)?;
                 [Bytecode::PushNull]
                     .into_iter()
                     .chain(res)
@@ -209,7 +219,7 @@ fn quasiquote_program<'gc>(
                     ])
                     .collect()
             } else {
-                quasiquote_program(body[0], compiler, ctx, labels, level)?
+                quasiquote_program(body[0], compiler, ctx, labels, requested_labels, level)?
             };
             *level += 1;
             res
@@ -221,7 +231,8 @@ fn quasiquote_program<'gc>(
         {
             *level -= 1;
             let res = if *level > 0 {
-                let res = quasiquote_program(body[0], compiler, ctx, labels, level)?;
+                let res =
+                    quasiquote_program(body[0], compiler, ctx, labels, requested_labels, level)?;
                 [Bytecode::PushNull]
                     .into_iter()
                     .chain(res)
@@ -234,7 +245,8 @@ fn quasiquote_program<'gc>(
                     ])
                     .collect()
             } else {
-                let mut res = quasiquote_program(body[0], compiler, ctx, labels, level)?;
+                let mut res =
+                    quasiquote_program(body[0], compiler, ctx, labels, requested_labels, level)?;
                 res.push(Bytecode::Splice);
                 res
             };
@@ -247,7 +259,9 @@ fn quasiquote_program<'gc>(
                 let mut data = vec![Bytecode::PushNull];
                 let body_chunks = body
                     .iter()
-                    .map(|it| quasiquote_program(*it, compiler, ctx, labels, level))
+                    .map(|it| {
+                        quasiquote_program(*it, compiler, ctx, labels, requested_labels, level)
+                    })
                     .collect::<Vec<_>>();
                 for it in body_chunks.into_iter().rev() {
                     let mut code = it?;
@@ -258,7 +272,14 @@ fn quasiquote_program<'gc>(
                 }
                 match head {
                     ListHead::Program(p) => {
-                        data.extend(quasiquote_program(*p, compiler, ctx, labels, level)?);
+                        data.extend(quasiquote_program(
+                            *p,
+                            compiler,
+                            ctx,
+                            labels,
+                            requested_labels,
+                            level,
+                        )?);
                     }
                     ListHead::Import => {
                         let import = ctx.interner.get_or_intern_static("import");
@@ -286,9 +307,12 @@ fn quasiquote_program<'gc>(
                 debug_assert!(!pre_dot.is_empty());
                 let body_chunks = pre_dot
                     .iter()
-                    .map(|it| quasiquote_program(*it, compiler, ctx, labels, level))
+                    .map(|it| {
+                        quasiquote_program(*it, compiler, ctx, labels, requested_labels, level)
+                    })
                     .collect::<Vec<_>>();
-                let mut data = quasiquote_program(*dot, compiler, ctx, labels, level)?;
+                let mut data =
+                    quasiquote_program(*dot, compiler, ctx, labels, requested_labels, level)?;
                 for it in body_chunks.into_iter().rev() {
                     data.extend(it?);
                     data.push(Bytecode::MakePair);
@@ -305,7 +329,14 @@ fn quasiquote_program<'gc>(
                 let mut data = vec![];
                 let length = v.len();
                 for it in v.iter() {
-                    data.extend(quasiquote_program(*it, compiler, ctx, labels, level)?);
+                    data.extend(quasiquote_program(
+                        *it,
+                        compiler,
+                        ctx,
+                        labels,
+                        requested_labels,
+                        level,
+                    )?);
                 }
                 data.push(Bytecode::MakeVector { length });
                 data
@@ -318,7 +349,8 @@ fn quasiquote_program<'gc>(
         ProgramData::Labeled { label, item } => {
             if *level > 0 {
                 labels.insert(*label);
-                let mut code = quasiquote_program(*item, compiler, ctx, labels, level)?;
+                let mut code =
+                    quasiquote_program(*item, compiler, ctx, labels, requested_labels, level)?;
 
                 code.push(Bytecode::Duplicate);
                 code.push(Bytecode::FillHole { id: *label });
@@ -329,7 +361,7 @@ fn quasiquote_program<'gc>(
             }
         }
         // handle constant data (data that cannot contain data affected by quasiquote)
-        _ => quote_program(ptr, ctx, labels)?,
+        _ => quote_program(ptr, ctx, labels, requested_labels)?,
     })
 }
 
@@ -347,10 +379,23 @@ impl Syntax for Quasiquote {
 
         // Used for labeled datum
         let mut labels = HashSet::default();
+        let mut requested_labels = HashSet::default();
         let mut level = 1;
-        let code: Vec<_> = quasiquote_program(args[0], compiler, ctx, &mut labels, &mut level)?;
+        let code: Vec<_> = quasiquote_program(
+            args[0],
+            compiler,
+            ctx,
+            &mut labels,
+            &mut requested_labels,
+            &mut level,
+        )?;
         // when quasiquote is finished, we should be at the level we started at if we implemented it correctly
         debug_assert!(level == 1);
+        // Error if there are any undefined labels
+        let undefined_labels = requested_labels.difference(&labels).collect::<HashSet<_>>();
+        if !undefined_labels.is_empty() {
+            anyhow::bail!("undefined labels: {undefined_labels:?}")
+        }
         Ok(SyntaxReturn::Code(code.into_boxed_slice()))
     }
 }

@@ -242,13 +242,6 @@ impl<'gc> Value<'gc> {
             resolver,
         }
     }
-
-    // pub fn as_symbol(&self) -> Option<Symbol> {
-    //     match self {
-    //         Self::Symbol(sym) => Some(*sym),
-    //         _ => None,
-    //     }
-    // }
 }
 
 enum ConsInner<'a, 'gc> {
@@ -268,8 +261,10 @@ struct CircularPrinter<'a, 'gc, K: lasso::Resolver> {
 impl<K: lasso::Resolver> fmt::Display for CircularPrinter<'_, '_, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // recurse into the value, keeping track of encountered cons cells
-        // so that we don't recurse into them
-        todo!()
+        // so that we don't recurse into them (labeling them as we encounter them)
+        // then we should print the values as labeled.
+        // todo!()
+        write!(f, "(TODO SELF-RECURSIVE)")
     }
 }
 
@@ -594,6 +589,10 @@ impl<'gc> Vector<'gc> {
     fn is_circular_impl(&self, self_ptr: ValuePtr<'gc>, stack: &mut Vec<ValuePtr<'gc>>) -> bool {
         stack.push(self_ptr);
         for val in self.vec.iter().copied() {
+            if stack.contains(&val) {
+                return true;
+            }
+
             match *val.borrow() {
                 Value::Cons(cell) => {
                     if cell.is_circular_impl(val, stack) {
@@ -745,6 +744,10 @@ impl<'gc> ConsCell<'gc> {
     fn is_circular_impl(&self, self_ptr: ValuePtr<'gc>, stack: &mut Vec<ValuePtr<'gc>>) -> bool {
         stack.push(self_ptr);
         if let Some(val) = self.car {
+            if stack.contains(&val) {
+                return true;
+            }
+
             match *val.borrow() {
                 Value::Cons(cell) => {
                     if cell.is_circular_impl(val, stack) {
@@ -760,6 +763,10 @@ impl<'gc> ConsCell<'gc> {
             }
         }
         if let Some(val) = self.cdr {
+            if stack.contains(&val) {
+                return true;
+            }
+
             match *val.borrow() {
                 Value::Cons(cell) => {
                     if cell.is_circular_impl(val, stack) {

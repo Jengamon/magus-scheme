@@ -1,0 +1,7 @@
+---
+(3 3 3)
+(list 3 3 3)
+---
+(import (only (scheme base) values quote list))
+(values (list #0# #0=3 #0#)
+		'(list #0# #0=3 #0#))

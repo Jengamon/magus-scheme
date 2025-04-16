@@ -117,8 +117,6 @@ pub struct ThreadFrame<'gc> {
     env: StackEnvironmentPtr<'gc>,
     upvalue_index: Option<usize>,
     bottom: usize,
-    // TODO add a "promise slot" that when a frame is exiting, will fill the promise with the value it is
-    // exiting the frame with.
 }
 
 impl ThreadFrame<'_> {
@@ -1066,11 +1064,11 @@ impl<'gc> Thread<'gc> {
 
                             if let Some(hole_ptr) = self.holes.get(&id) {
                                 *hole_ptr.borrow_mut(&ctx) = *value.borrow();
-                                self.holes.remove(&id);
-                                advance_to_next_inst!();
                             } else {
-                                make_error!(SchemeErrorType::UndefinedHole(id));
+                                // If the hole doesn't exist, make it
+                                self.holes.insert(id, value);
                             }
+                            advance_to_next_inst!();
                         }
                         Bytecode::Duplicate => {
                             let Some(value) = self.stack.pop() else {

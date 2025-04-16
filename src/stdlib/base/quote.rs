@@ -118,7 +118,7 @@ impl Syntax for Quote {
     fn evaluate<'gc>(
         &self,
         ctx: &mut SyntaxContext<'_, 'gc>,
-        _compiler: &mut Compiler<'gc>,
+        compiler: &mut Compiler<'gc>,
         _import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
     ) -> anyhow::Result<SyntaxReturn<'gc>> {
@@ -127,14 +127,16 @@ impl Syntax for Quote {
         }
 
         // Used for evaluating labeled datum
-        let mut labels = HashSet::default();
-        let mut requested_labels = HashSet::default();
+        let (labeled, requested) = compiler.label_data();
+        let mut labels = HashSet::from_iter(labeled.clone());
+        let mut requested_labels = HashSet::from_iter(requested.clone());
         let code = quote_program(args[0], ctx, &mut labels, &mut requested_labels)?;
         // Error if there are any undefined labels
         let undefined_labels = requested_labels.difference(&labels).collect::<HashSet<_>>();
         if !undefined_labels.is_empty() {
             anyhow::bail!("undefined labels: {undefined_labels:?}")
         }
+        compiler.add_labeled(labels);
         Ok(SyntaxReturn::Code(code.into_boxed_slice()))
     }
 }
@@ -378,8 +380,9 @@ impl Syntax for Quasiquote {
         }
 
         // Used for labeled datum
-        let mut labels = HashSet::default();
-        let mut requested_labels = HashSet::default();
+        let (labeled, requested) = compiler.label_data();
+        let mut labels = HashSet::from_iter(labeled.clone());
+        let mut requested_labels = HashSet::from_iter(requested.clone());
         let mut level = 1;
         let code: Vec<_> = quasiquote_program(
             args[0],
@@ -396,6 +399,7 @@ impl Syntax for Quasiquote {
         if !undefined_labels.is_empty() {
             anyhow::bail!("undefined labels: {undefined_labels:?}")
         }
+        compiler.add_labeled(labels);
         Ok(SyntaxReturn::Code(code.into_boxed_slice()))
     }
 }

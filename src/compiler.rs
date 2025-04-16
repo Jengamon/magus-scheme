@@ -1471,6 +1471,16 @@ impl<'gc> Compiler<'gc> {
         }
     }
 
+    /// Access label data (`labeled`, `requested`)
+    pub fn label_data(&self) -> (&FxHashSet<usize>, &FxHashSet<usize>) {
+        (&self.labeled_labels, &self.label_ref_labels)
+    }
+
+    /// Add labels to `labeled` set
+    pub fn add_labeled(&mut self, labeled: impl IntoIterator<Item = usize>) {
+        self.labeled_labels.extend(labeled);
+    }
+
     /// Convenience function for cleaning up unused transformers
     pub fn cleanup(&mut self) {
         self.stash.cleanup();

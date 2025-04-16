@@ -1,0 +1,6 @@
+---
+#t
+---
+; make sure labels are the same pointer
+(import (only (scheme base) eq? car quote))
+(eq? #0# (car '(#0=1)))

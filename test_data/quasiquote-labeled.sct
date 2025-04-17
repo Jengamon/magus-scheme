@@ -1,0 +1,6 @@
+---
+#(3 2 1 2 2 1 2 3)
+---
+; ihm
+(import (only (scheme base) quasiquote quote))
+`#(3 ,@#0='(2 1 2) ,@#0# 3)

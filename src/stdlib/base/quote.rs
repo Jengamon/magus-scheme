@@ -62,6 +62,8 @@ fn quote_program<'gc>(
             }
         }
         ProgramData::Vector(v) => {
+            // TODO Hoist labels here so that labels (and label refs) only need reference the created hole)
+            // so that `test_data/quasiquote-labeled.sct` passes
             let mut data = vec![Bytecode::PushNull];
             let v_chunks = v
                 .iter()
@@ -76,6 +78,8 @@ fn quote_program<'gc>(
         }
         ProgramData::EmptyList => vec![Bytecode::PushNull],
         ProgramData::List { head, body } => {
+            // TODO Hoist labels here so that labels (and label refs) only need reference the created hole)
+            // so that `test_data/quasiquote-labeled.sct` passes
             let mut data = vec![Bytecode::PushNull];
             let body_chunks = body
                 .iter()
@@ -107,6 +111,8 @@ fn quote_program<'gc>(
         }
         ProgramData::DottedList { pre_dot, dot } => {
             debug_assert!(!pre_dot.is_empty());
+            // TODO Hoist labels here so that labels (and label refs) only need reference the created hole)
+            // so that `test_data/quasiquote-labeled.sct` passes
             let body_chunks = pre_dot
                 .iter()
                 .map(|it| quote_program(*it, compiler, ctx, labels, requested_labels))
@@ -314,6 +320,8 @@ fn quasiquote_program<'gc>(
         // evaluate the list if level == 0, otherwise, quote the list (done here so that level is passed through)
         ProgramData::List { head, body } => {
             if *level > 0 {
+                // TODO Hoist labels here so that labels (and label refs) only need reference the created hole)
+                // so that `test_data/quasiquote-labeled.sct` passes
                 let mut data = vec![Bytecode::PushNull];
                 let body_chunks = body
                     .iter()
@@ -361,7 +369,9 @@ fn quasiquote_program<'gc>(
                         });
                     }
                 };
-                data.push(Bytecode::MakePair);
+                if data.last().is_some_and(|c| !matches!(c, Bytecode::Splice)) {
+                    data.push(Bytecode::MakePair);
+                }
                 data
             } else {
                 // evaluate the list
@@ -371,6 +381,8 @@ fn quasiquote_program<'gc>(
         // If level == 0 here, will most likely result in an error, but yeah...
         ProgramData::DottedList { pre_dot, dot } => {
             if *level > 0 {
+                // TODO Hoist labels here so that labels (and label refs) only need reference the created hole)
+                // so that `test_data/quasiquote-labeled.sct` passes
                 debug_assert!(!pre_dot.is_empty());
                 let body_chunks = pre_dot
                     .iter()
@@ -401,6 +413,8 @@ fn quasiquote_program<'gc>(
         // ditto on passthrough
         ProgramData::Vector(v) => {
             if *level > 0 {
+                // TODO Hoist labels here so that labels (and label refs) only need reference the created hole)
+                // so that `test_data/quasiquote-labeled.sct` passes
                 let mut data = vec![Bytecode::PushNull];
                 let v_chunks = v
                     .iter()

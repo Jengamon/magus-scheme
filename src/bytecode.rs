@@ -38,6 +38,8 @@ pub enum Bytecode {
     /// Make a vector (popping from stack), using the amount specified as the number of
     /// items
     MakeVector { length: usize },
+    /// Convert a list to a vector
+    ListToVector,
     /// Look up the symbol in the stack environment, and push the result to
     /// stack (if not found or not a symbol, errors)
     Reference { symbol: lasso::Spur },
@@ -109,6 +111,7 @@ impl Bytecode {
             Self::MakeHole { .. } => 1,
             Self::FillHole { .. } => 1,
             Self::MakeVector { .. } => 1,
+            Self::ListToVector => 1,
             Self::Reference { .. } => 1,
             Self::Splice => 1,
             Self::Call { .. } => 4,
@@ -143,6 +146,7 @@ impl fmt::Display for Bytecode {
             Bytecode::FetchRest => write!(f, "REST"),
             Bytecode::MakePair => write!(f, "PAIR"),
             Bytecode::MakeVector { length } => write!(f, "VECT {length}"),
+            Bytecode::ListToVector => write!(f, "LTVC"),
             Bytecode::Reference { symbol } => write!(f, "REFR {}", symbol.into_inner()),
             Bytecode::Call { args } => write!(f, "CALL {args}"),
             Bytecode::Splice => write!(f, "SPLI"),

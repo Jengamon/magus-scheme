@@ -1,0 +1,5 @@
+---
+#(3 2 1 2 3)
+---
+(import (only (scheme base) quasiquote list))
+`#(3 ,@(list 2 1 2) 3)

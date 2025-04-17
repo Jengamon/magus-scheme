@@ -62,12 +62,16 @@ fn quote_program<'gc>(
             }
         }
         ProgramData::Vector(v) => {
-            let mut data = vec![];
-            let length = v.len();
-            for it in v.iter() {
-                data.extend(quote_program(*it, compiler, ctx, labels, requested_labels)?);
+            let mut data = vec![Bytecode::PushNull];
+            let v_chunks = v
+                .iter()
+                .map(|it| quote_program(*it, compiler, ctx, labels, requested_labels))
+                .collect::<Vec<_>>();
+            for it in v_chunks.into_iter().rev() {
+                data.extend(it?);
+                data.push(Bytecode::MakePair);
             }
-            data.push(Bytecode::MakeVector { length });
+            data.push(Bytecode::ListToVector);
             data
         }
         ProgramData::EmptyList => vec![Bytecode::PushNull],
@@ -397,20 +401,29 @@ fn quasiquote_program<'gc>(
         // ditto on passthrough
         ProgramData::Vector(v) => {
             if *level > 0 {
-                let mut data = vec![];
-                let length = v.len();
-                for it in v.iter() {
-                    data.extend(quasiquote_program(
-                        *it,
-                        compiler,
-                        ctx,
-                        labels,
-                        requested_labels,
-                        level,
-                        true,
-                    )?);
+                let mut data = vec![Bytecode::PushNull];
+                let v_chunks = v
+                    .iter()
+                    .map(|it| {
+                        quasiquote_program(
+                            *it,
+                            compiler,
+                            ctx,
+                            labels,
+                            requested_labels,
+                            level,
+                            true,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                for it in v_chunks.into_iter().rev() {
+                    let mut it = it?;
+                    if it.last().is_some_and(|c| !matches!(c, Bytecode::Splice)) {
+                        it.push(Bytecode::MakePair);
+                    }
+                    data.extend(it);
                 }
-                data.push(Bytecode::MakeVector { length });
+                data.push(Bytecode::ListToVector);
                 data
             } else {
                 // evaluate the list

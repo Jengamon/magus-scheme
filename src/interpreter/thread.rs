@@ -817,7 +817,7 @@ impl<'gc> Thread<'gc> {
                     }
                     macro_rules! advance_to_next_inst {
                         () => {
-                            *pc += 1;
+                            *pc += 1
                         };
                         ($frame:expr) => {
                             if let Some(Execution::Bytecode { pc, .. }) =
@@ -1041,6 +1041,32 @@ impl<'gc> Thread<'gc> {
                                 .into_ptr(&ctx);
                             self.stack.push(vector);
                             advance_to_next_inst!();
+                        }
+                        Bytecode::ListToVector => {
+                            let Some(value) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+
+                            let Value::Cons(list) = *value.borrow() else {
+                                make_error!(SchemeErrorType::WrongValue {
+                                    inst: "list-to-vector",
+                                    expected: ValueType::Cons,
+                                    kind: (*value.borrow()).value_type()
+                                });
+                                continue;
+                            };
+
+                            if let Some(vals) = list.list_values(value, ctx.null_value) {
+                                self.stack.push(
+                                    value::Vector::new(im_rc::Vector::from_iter(vals))
+                                        .into_value(&ctx)
+                                        .into_ptr(&ctx),
+                                );
+                                advance_to_next_inst!()
+                            } else {
+                                make_error!(SchemeErrorType::ExpectedList("list-to-vector"));
+                            }
                         }
                         Bytecode::MakeHole { id } => {
                             // make a hole (or refer to one in existence)

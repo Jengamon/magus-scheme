@@ -137,12 +137,8 @@ impl Syntax for Quote {
         let mut labels = HashSet::from_iter(labeled.clone());
         let mut requested_labels = HashSet::from_iter(requested.clone());
         let code = quote_program(args[0], compiler, ctx, &mut labels, &mut requested_labels)?;
-        // Error if there are any undefined labels
-        let undefined_labels = requested_labels.difference(&labels).collect::<HashSet<_>>();
-        if !undefined_labels.is_empty() {
-            anyhow::bail!("undefined labels: {undefined_labels:?}")
-        }
         compiler.add_labeled(labels);
+        compiler.add_label_refs(requested_labels);
         Ok(SyntaxReturn::Code(code.into_boxed_slice()))
     }
 }
@@ -413,12 +409,8 @@ impl Syntax for Quasiquote {
         )?;
         // when quasiquote is finished, we should be at the level we started at if we implemented it correctly
         debug_assert!(level == 1);
-        // Error if there are any undefined labels
-        let undefined_labels = requested_labels.difference(&labels).collect::<HashSet<_>>();
-        if !undefined_labels.is_empty() {
-            anyhow::bail!("undefined labels: {undefined_labels:?}")
-        }
         compiler.add_labeled(labels);
+        compiler.add_label_refs(requested_labels);
         Ok(SyntaxReturn::Code(code.into_boxed_slice()))
     }
 }

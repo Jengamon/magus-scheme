@@ -1484,6 +1484,11 @@ impl<'gc> Compiler<'gc> {
         self.labeled_labels.extend(labeled);
     }
 
+    /// Add labels to `requested` set
+    pub fn add_label_refs(&mut self, label_refs: impl IntoIterator<Item = usize>) {
+        self.label_ref_labels.extend(label_refs);
+    }
+
     /// Add label data
     pub fn label_value(&mut self, label: usize) -> Option<ProgramPtr<'gc>> {
         self.label_values.get(&label).copied()

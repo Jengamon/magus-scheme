@@ -1,0 +1,7 @@
+---
+(1 2 3)
+(unquote-splicing (list 1 2 3))
+(l 1 2 3)
+---
+(import (only (scheme base) values list quasiquote))
+(values #0=(list 1 2 3) `,@#0# `(l ,@#0#))

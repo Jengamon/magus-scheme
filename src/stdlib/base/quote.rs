@@ -153,6 +153,7 @@ fn quasiquote_program<'gc>(
     labels: &mut HashSet<usize>,
     requested_labels: &mut HashSet<usize>,
     level: &mut usize,
+    in_list: bool,
 ) -> anyhow::Result<Vec<Bytecode>> {
     macro_rules! evaluate {
         () => {
@@ -183,8 +184,15 @@ fn quasiquote_program<'gc>(
         {
             *level += 1;
             let res = if *level > 0 {
-                let res =
-                    quasiquote_program(body[0], compiler, ctx, labels, requested_labels, level)?;
+                let res = quasiquote_program(
+                    body[0],
+                    compiler,
+                    ctx,
+                    labels,
+                    requested_labels,
+                    level,
+                    in_list,
+                )?;
                 [Bytecode::PushNull]
                     .into_iter()
                     .chain(res)
@@ -197,7 +205,15 @@ fn quasiquote_program<'gc>(
                     ])
                     .collect()
             } else {
-                quasiquote_program(body[0], compiler, ctx, labels, requested_labels, level)?
+                quasiquote_program(
+                    body[0],
+                    compiler,
+                    ctx,
+                    labels,
+                    requested_labels,
+                    level,
+                    in_list,
+                )?
             };
             *level -= 1;
             res
@@ -209,8 +225,15 @@ fn quasiquote_program<'gc>(
         {
             *level -= 1;
             let res = if *level > 0 {
-                let res =
-                    quasiquote_program(body[0], compiler, ctx, labels, requested_labels, level)?;
+                let res = quasiquote_program(
+                    body[0],
+                    compiler,
+                    ctx,
+                    labels,
+                    requested_labels,
+                    level,
+                    in_list,
+                )?;
                 [Bytecode::PushNull]
                     .into_iter()
                     .chain(res)
@@ -223,7 +246,15 @@ fn quasiquote_program<'gc>(
                     ])
                     .collect()
             } else {
-                quasiquote_program(body[0], compiler, ctx, labels, requested_labels, level)?
+                quasiquote_program(
+                    body[0],
+                    compiler,
+                    ctx,
+                    labels,
+                    requested_labels,
+                    level,
+                    in_list,
+                )?
             };
             *level += 1;
             res
@@ -234,9 +265,19 @@ fn quasiquote_program<'gc>(
                 && body.len() == 1 =>
         {
             *level -= 1;
+            if !in_list {
+                *level += 1;
+            }
             let res = if *level > 0 {
-                let res =
-                    quasiquote_program(body[0], compiler, ctx, labels, requested_labels, level)?;
+                let res = quasiquote_program(
+                    body[0],
+                    compiler,
+                    ctx,
+                    labels,
+                    requested_labels,
+                    level,
+                    in_list,
+                )?;
                 [Bytecode::PushNull]
                     .into_iter()
                     .chain(res)
@@ -249,12 +290,21 @@ fn quasiquote_program<'gc>(
                     ])
                     .collect()
             } else {
-                let mut res =
-                    quasiquote_program(body[0], compiler, ctx, labels, requested_labels, level)?;
+                let mut res = quasiquote_program(
+                    body[0],
+                    compiler,
+                    ctx,
+                    labels,
+                    requested_labels,
+                    level,
+                    in_list,
+                )?;
                 res.push(Bytecode::Splice);
                 res
             };
-            *level += 1;
+            if in_list {
+                *level += 1;
+            }
             res
         }
         // evaluate the list if level == 0, otherwise, quote the list (done here so that level is passed through)
@@ -264,7 +314,15 @@ fn quasiquote_program<'gc>(
                 let body_chunks = body
                     .iter()
                     .map(|it| {
-                        quasiquote_program(*it, compiler, ctx, labels, requested_labels, level)
+                        quasiquote_program(
+                            *it,
+                            compiler,
+                            ctx,
+                            labels,
+                            requested_labels,
+                            level,
+                            true,
+                        )
                     })
                     .collect::<Vec<_>>();
                 for it in body_chunks.into_iter().rev() {
@@ -283,6 +341,7 @@ fn quasiquote_program<'gc>(
                             labels,
                             requested_labels,
                             level,
+                            true,
                         )?);
                     }
                     ListHead::Import => {
@@ -312,11 +371,19 @@ fn quasiquote_program<'gc>(
                 let body_chunks = pre_dot
                     .iter()
                     .map(|it| {
-                        quasiquote_program(*it, compiler, ctx, labels, requested_labels, level)
+                        quasiquote_program(
+                            *it,
+                            compiler,
+                            ctx,
+                            labels,
+                            requested_labels,
+                            level,
+                            true,
+                        )
                     })
                     .collect::<Vec<_>>();
                 let mut data =
-                    quasiquote_program(*dot, compiler, ctx, labels, requested_labels, level)?;
+                    quasiquote_program(*dot, compiler, ctx, labels, requested_labels, level, true)?;
                 for it in body_chunks.into_iter().rev() {
                     data.extend(it?);
                     data.push(Bytecode::MakePair);
@@ -340,6 +407,7 @@ fn quasiquote_program<'gc>(
                         labels,
                         requested_labels,
                         level,
+                        true,
                     )?);
                 }
                 data.push(Bytecode::MakeVector { length });
@@ -353,8 +421,15 @@ fn quasiquote_program<'gc>(
         ProgramData::Labeled { label, item } => {
             labels.insert(*label);
             if *level > 0 {
-                let mut code =
-                    quasiquote_program(*item, compiler, ctx, labels, requested_labels, level)?;
+                let mut code = quasiquote_program(
+                    *item,
+                    compiler,
+                    ctx,
+                    labels,
+                    requested_labels,
+                    level,
+                    in_list,
+                )?;
 
                 code.push(Bytecode::FillHole { id: *label });
                 code.push(Bytecode::MakeHole { id: *label });
@@ -368,7 +443,15 @@ fn quasiquote_program<'gc>(
             requested_labels.insert(*label);
             if *level > 0 {
                 if let Some(val) = compiler.label_value(*label) {
-                    quasiquote_program(val, compiler, ctx, labels, requested_labels, level)?
+                    quasiquote_program(
+                        val,
+                        compiler,
+                        ctx,
+                        labels,
+                        requested_labels,
+                        level,
+                        in_list,
+                    )?
                 } else {
                     // This code will fail anyways with a "undefined label" failure
                     vec![]
@@ -406,6 +489,7 @@ impl Syntax for Quasiquote {
             &mut labels,
             &mut requested_labels,
             &mut level,
+            false,
         )?;
         // when quasiquote is finished, we should be at the level we started at if we implemented it correctly
         debug_assert!(level == 1);

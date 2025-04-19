@@ -485,11 +485,14 @@ fn quasiquote_program<'gc>(
                 }
             } else if let Some(program) = compiler.label_value(*label) {
                 // get the value of a label (provided by the compiler)
-                compiler
+                let mut code: Vec<_> = compiler
                     .compile_code(ctx, program)?
                     .into_bytecode()
                     .into_iter()
-                    .collect()
+                    .collect();
+                code.push(Bytecode::FillHole { id: *label });
+                code.push(Bytecode::MakeHole { id: *label });
+                code
             } else {
                 evaluate!()
             }

@@ -1586,6 +1586,9 @@ impl<'gc> Compiler<'gc> {
         let mut code = vec![];
         let mut labels = FxHashMap::default();
         for program in programs {
+            self.label_ref_labels.clear();
+            self.labeled_labels.clear();
+            self.label_values.clear();
             self.add_label_values_from_program(program)?;
 
             if let Some(source) = program.source {
@@ -1605,10 +1608,6 @@ impl<'gc> Compiler<'gc> {
                     labels: undefined_labels,
                 });
             }
-
-            self.label_ref_labels.clear();
-            self.labeled_labels.clear();
-            self.label_values.clear();
         }
 
         // when we create our chunk, our import env is *always* the initial default environment

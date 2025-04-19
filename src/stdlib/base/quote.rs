@@ -483,6 +483,13 @@ fn quasiquote_program<'gc>(
                     // This code will fail anyways with a "undefined label" failure
                     vec![]
                 }
+            } else if let Some(program) = compiler.label_value(*label) {
+                // get the value of a label (provided by the compiler)
+                compiler
+                    .compile_code(ctx, program)?
+                    .into_bytecode()
+                    .into_iter()
+                    .collect()
             } else {
                 evaluate!()
             }

@@ -841,6 +841,11 @@ pub enum CompileError {
         location: Option<SourceData>,
         labels: FxHashSet<usize>,
     },
+    #[error("duplicate label: {label}")]
+    DuplicateLabel {
+        location: Option<SourceData>,
+        label: usize,
+    },
     #[error("an empty list was encountered in code")]
     EmptyList(Option<SourceData>),
     #[error("a dotted list was encountered in code")]
@@ -1514,33 +1519,40 @@ impl<'gc> Compiler<'gc> {
         features
     }
 
-    fn add_label_values_from_program(&mut self, ptr: ProgramPtr<'gc>) {
+    fn add_label_values_from_program(&mut self, ptr: ProgramPtr<'gc>) -> Result<(), CompileError> {
         match &ptr.data {
             ProgramData::Labeled { label, item } => {
+                if self.label_values.contains_key(label) {
+                    return Err(CompileError::DuplicateLabel {
+                        location: ptr.source,
+                        label: *label,
+                    });
+                }
                 self.label_values.insert(*label, *item);
-                self.add_label_values_from_program(*item);
+                self.add_label_values_from_program(*item)?;
             }
             ProgramData::List { head, body } => {
                 if let ListHead::Program(p) = head {
-                    self.add_label_values_from_program(*p);
+                    self.add_label_values_from_program(*p)?;
                 }
                 for program in body {
-                    self.add_label_values_from_program(*program);
+                    self.add_label_values_from_program(*program)?;
                 }
             }
             ProgramData::DottedList { pre_dot, dot } => {
                 for program in pre_dot {
-                    self.add_label_values_from_program(*program);
+                    self.add_label_values_from_program(*program)?;
                 }
-                self.add_label_values_from_program(*dot);
+                self.add_label_values_from_program(*dot)?;
             }
             ProgramData::Vector(vec) => {
                 for program in vec {
-                    self.add_label_values_from_program(*program);
+                    self.add_label_values_from_program(*program)?;
                 }
             }
             _ => {}
         }
+        Ok(())
     }
 
     /// Compile an list of programs into a [`Chunk`] (not allowing any imports)
@@ -1574,7 +1586,7 @@ impl<'gc> Compiler<'gc> {
         let mut code = vec![];
         let mut labels = FxHashMap::default();
         for program in programs {
-            self.add_label_values_from_program(program);
+            self.add_label_values_from_program(program)?;
 
             if let Some(source) = program.source {
                 labels.insert(code.len(), source);

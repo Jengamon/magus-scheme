@@ -218,6 +218,9 @@ fn compile_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()
         Err(anyhow::anyhow!("no expectation").context(DatatestError(Box::from(path))))?;
     }
 
+    // Right now, we are limitied to only using the parts of modules defined in Rust for these
+    // tests. TODO Port to use interpreter and thus the module import scheme of interpreter
+
     let mut interner = lasso::Rodeo::new();
     let mut test_world = World::default();
     // TODO Convert to use Interpreter to get easy `register_module`

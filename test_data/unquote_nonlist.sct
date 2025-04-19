@@ -1,0 +1,6 @@
+---
+(1 12 2 21)
+(1 2)
+---
+(import (only (scheme base) quasiquote cons values))
+(values `(1 ,@(cons 12 (cons 2 1)) 21) `(1 ,@3 2))

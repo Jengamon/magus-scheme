@@ -1057,16 +1057,13 @@ impl<'gc> Thread<'gc> {
                                 continue;
                             };
 
-                            if let Some(vals) = list.list_values(value, ctx.null_value) {
-                                self.stack.push(
-                                    value::Vector::new(im_rc::Vector::from_iter(vals))
-                                        .into_value(&ctx)
-                                        .into_ptr(&ctx),
-                                );
-                                advance_to_next_inst!()
-                            } else {
-                                make_error!(SchemeErrorType::ExpectedList("list-to-vector"));
-                            }
+                            let vals = list.list_values(value, ctx.null_value);
+                            self.stack.push(
+                                value::Vector::new(im_rc::Vector::from_iter(vals))
+                                    .into_value(&ctx)
+                                    .into_ptr(&ctx),
+                            );
+                            advance_to_next_inst!()
                         }
                         Bytecode::MakeHole { id } => {
                             // make a hole (or refer to one in existence)
@@ -1193,30 +1190,19 @@ impl<'gc> Thread<'gc> {
                                 continue;
                             };
                             let Value::Cons(list) = *list_value.borrow() else {
-                                make_error!(SchemeErrorType::WrongValue {
-                                    inst: "splice",
-                                    expected: ValueType::Cons,
-                                    kind: (*list_value.borrow()).value_type()
-                                });
+                                self.stack.push(value);
+                                advance_to_next_inst!();
                                 continue;
                             };
 
-                            let Some(mut values): Option<Vec<_>> = list
+                            let mut values: Vec<_> = list
                                 .list_values(list_value, ctx.null_value)
-                                .map(|v| v.into_iter().collect())
-                            else {
-                                make_error!(SchemeErrorType::ExpectedList("splice"));
-                                continue;
-                            };
+                                .into_iter()
+                                .collect();
                             let value_list = match *value.borrow() {
                                 Value::Cons(_) if Gc::ptr_eq(value, ctx.null_value) => vec![],
                                 Value::Cons(c) => {
-                                    if let Some(v) = c.list_values(value, ctx.null_value) {
-                                        v.into_iter().collect()
-                                    } else {
-                                        make_error!(SchemeErrorType::ExpectedList("splice"));
-                                        continue;
-                                    }
+                                    c.list_values(value, ctx.null_value).into_iter().collect()
                                 }
                                 _ => vec![value],
                             };

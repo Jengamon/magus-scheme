@@ -823,26 +823,30 @@ impl<'gc> ConsCell<'gc> {
         &self,
         self_ptr: ValuePtr<'gc>,
         null_ptr: ValuePtr<'gc>,
-    ) -> Option<impl IntoIterator<Item = ValuePtr<'gc>> + use<'gc>> {
+    ) -> impl IntoIterator<Item = ValuePtr<'gc>> + use<'gc> {
         if !self.is_list(self_ptr, null_ptr) {
-            return None;
+            return if let Some(car) = self.car {
+                vec![car]
+            } else {
+                vec![]
+            };
         }
 
         if Gc::ptr_eq(self_ptr, null_ptr) {
-            Some(vec![])
+            vec![]
         } else {
             let car = self.car.unwrap_or(null_ptr);
             let cdr = if let Some(v) = self.cdr {
                 match *v.borrow() {
-                    _ if Gc::ptr_eq(v, null_ptr) => Some(vec![]),
+                    _ if Gc::ptr_eq(v, null_ptr) => vec![],
                     Value::Cons(c) => c.list_values(v, null_ptr),
-                    _ => None,
+                    _ => vec![],
                 }
             } else {
-                Some(vec![])
+                vec![]
             };
 
-            Some(std::iter::once(car).chain(cdr?).collect::<Vec<_>>())
+            std::iter::once(car).chain(cdr).collect::<Vec<_>>()
         }
     }
 

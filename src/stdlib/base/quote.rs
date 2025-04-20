@@ -62,18 +62,16 @@ fn quote_program<'gc>(
             }
         }
         ProgramData::Vector(v) => {
-            // TODO Hoist labels here so that labels (and label refs) only need reference the created hole)
-            // so that `test_data/quasiquote-labeled.sct` passes
-            let mut data = vec![Bytecode::PushNull];
             let v_chunks = v
                 .iter()
                 .map(|it| quote_program(*it, compiler, ctx, labels, requested_labels))
                 .collect::<Vec<_>>();
-            for it in v_chunks.into_iter().rev() {
-                data.extend(it?);
-                data.push(Bytecode::MakePair);
-            }
-            data.push(Bytecode::ListToVector);
+            let length = v_chunks.len();
+            let mut data = v_chunks
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()?
+                .concat();
+            data.push(Bytecode::MakeVector { length });
             data
         }
         ProgramData::EmptyList => vec![Bytecode::PushNull],

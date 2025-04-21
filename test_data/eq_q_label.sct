@@ -2,5 +2,7 @@
 #t
 ---
 ; make sure labels are the same pointer
-(import (only (scheme base) eq? car quote))
-(eq? #0# (car '(#0=1)))
+(import (only (scheme base) eq? car quote cons))
+(eq? #0# (car (cons #0=1 '())))
+; don't quote b/c that refers to some constant used to write "3",
+; not the value "3" itself.

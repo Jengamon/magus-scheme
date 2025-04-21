@@ -46,11 +46,8 @@ fn quote_program<'gc>(
         }
         ProgramData::Labeled { label, item } => {
             labels.insert(*label);
-            let mut code = quote_program(*item, compiler, ctx, labels, requested_labels)?;
 
-            code.push(Bytecode::FillHole { id: *label });
-            code.push(Bytecode::MakeHole { id: *label });
-            code
+            quote_program(*item, compiler, ctx, labels, requested_labels)?
         }
         ProgramData::LabelRef(label) => {
             requested_labels.insert(*label);
@@ -446,7 +443,7 @@ fn quasiquote_program<'gc>(
         ProgramData::Labeled { label, item } => {
             labels.insert(*label);
             if *level > 0 {
-                let mut code = quasiquote_program(
+                quasiquote_program(
                     *item,
                     compiler,
                     ctx,
@@ -454,11 +451,7 @@ fn quasiquote_program<'gc>(
                     requested_labels,
                     level,
                     in_list,
-                )?;
-
-                code.push(Bytecode::FillHole { id: *label });
-                code.push(Bytecode::MakeHole { id: *label });
-                code
+                )?
             } else {
                 // evaluate the list
                 evaluate!()

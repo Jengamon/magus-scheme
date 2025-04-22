@@ -4,7 +4,9 @@ pub use control::{Apply, CallCc, Features};
 pub use conversions::{Exact, Inexact, StringToNumber, StringToSymbol, SymbolToString};
 pub use equality::{IsEq, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
-pub use math::{Add, Denominator, Divide, Gcd, Lcm, Multiply, Numerator, Subtract};
+pub use math::{
+    Add, Denominator, Divide, ExactIntegerSqrt, Gcd, Lcm, Multiply, Numerator, Subtract,
+};
 pub use predicates::{
     IsEven, IsExact, IsInexact, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol,
 };
@@ -383,6 +385,47 @@ mod math {
     use either::Either;
     use gc_arena::{Collect, Gc};
     use num::{BigInt, FromPrimitive, Zero};
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct ExactIntegerSqrt;
+
+    impl NativeLambda for ExactIntegerSqrt {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run<'gc>(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            // Does *not* need complex support as it *only* supports integers
+            let Value::Number(n) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "exact-integer-sqrt expects an integer as its argument"
+                ))?;
+            };
+
+            let (num, root) = match &*n {
+                n @ Number::Integer(i) if n.is_positive() || n.is_zero() => {
+                    (i.clone(), num::integer::sqrt(i.clone()))
+                }
+                Number::Integer(_) => Err(anyhow::anyhow!(
+                    "exact-integer-sqrt expects a positive integer as its argument"
+                ))?,
+                _ => Err(anyhow::anyhow!(
+                    "exact-integer-sqrt expects an integer as its argument"
+                ))?,
+            };
+            let remainder = num - &root * &root;
+
+            Ok(LambdaReturn::Return(vec![
+                Value::Number(Gc::new(&ctx, Number::Integer(root))).into_ptr(&ctx),
+                Value::Number(Gc::new(&ctx, Number::Integer(remainder))).into_ptr(&ctx),
+            ]))
+        }
+    }
 
     #[derive(Debug, Collect)]
     #[collect(require_static)]

@@ -24,8 +24,8 @@ pub use exception::WithExceptionHandler;
 pub use macros::{DefineSyntax, SyntaxRules};
 pub use procedures::{
     Add, Apply, Ascending, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr, Cons,
-    Denominator, Descending, Divide, Equal, Exact, Features, Gcd, Inexact, IsEq, IsEqv, IsEven,
-    IsExact, IsInexact, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, Lcm,
+    Denominator, Descending, Divide, Equal, Exact, ExactIntegerSqrt, Features, Gcd, Inexact, IsEq,
+    IsEqv, IsEven, IsExact, IsInexact, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, Lcm,
     MonotonicAscending, MonotonicDescending, Multiply, Numerator, StringToNumber, StringToSymbol,
     Subtract, SymbolToString, Values,
 };
@@ -386,6 +386,7 @@ impl Module for Base {
             "odd?",
             "with-exception-handler",
             "cond-expand",
+            "exact-integer-sqrt",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -451,6 +452,7 @@ impl Module for Base {
             "even?" => lambda!(IsEven),
             "odd?" => lambda!(IsOdd),
             "with-exception-handler" => lambda!(WithExceptionHandler),
+            "exact-integer-sqrt" => lambda!(ExactIntegerSqrt),
             _ => None,
         }
     }

@@ -150,10 +150,6 @@ mod control {
 
             // The last argument is a list that we have to unwrap
             let args_append = match args.last().map(|a| (a, *a.borrow())) {
-                // the proc was the only argument
-                Some((_, Value::Lambda(_))) => {
-                    vec![]
-                }
                 Some((sptr, Value::Cons(cons)))
                     if cons.is_list(*sptr, ctx.thread_ctx.null_value) =>
                 {

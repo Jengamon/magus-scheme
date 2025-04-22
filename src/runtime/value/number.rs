@@ -157,6 +157,44 @@ impl Number {
         }
     }
 
+    pub fn is_positive(&self) -> bool {
+        match self {
+            Self::Integer(i) => i.sign() == Sign::Plus,
+            Self::Rational(r) => {
+                let nsign = r.numer().sign();
+                let dsign = r.denom().sign();
+                // the signs being the same means we represent a positive number!
+                // (-3/-2) ~ (3/2)
+                if nsign != Sign::NoSign {
+                    nsign == dsign
+                } else {
+                    // numerator is 0, so only check the denominator sign
+                    // which cannot also be 0
+                    dsign == Sign::Plus
+                }
+            }
+        }
+    }
+
+    pub fn is_negative(&self) -> bool {
+        match self {
+            Self::Integer(i) => i.sign() == Sign::Minus,
+            Self::Rational(r) => {
+                let nsign = r.numer().sign();
+                let dsign = r.denom().sign();
+                // the signs being different means we represent a negative number!
+                // (-3/2) ~ (3/-2)
+                if nsign != Sign::NoSign {
+                    nsign != dsign
+                } else {
+                    // numerator is 0, so only check the denominator sign
+                    // which cannot also be 0
+                    dsign == Sign::Minus
+                }
+            }
+        }
+    }
+
     // TODO For Scheme `expt` we want support for complex numbers
     // (so that even roots of negative numbers can be caluclated), and we
     // use the `BigRational::pow for BigInt` and simplify the rational.

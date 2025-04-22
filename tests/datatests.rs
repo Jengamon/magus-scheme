@@ -36,6 +36,10 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
         LibraryName::from_iter(library_name!(interp.interner_mut() => scheme lazy)),
         stdlib::lazy::Lazy,
     )?;
+    test_world.insert(
+        LibraryName::from_iter(library_name!(interp.interner_mut() => scheme inexact)),
+        stdlib::inexact::Inexact,
+    )?;
     let includer = NullIncluder;
     let comp = interp.new_compiler();
     let thread = interp.new_empty_thread();

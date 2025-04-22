@@ -436,6 +436,19 @@ fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle, ThreadHan
             thread,
         },
     )?;
+    interpreter.register_module(
+        &thread,
+        &compiler,
+        &mut world,
+        stdlib::inexact::Inexact,
+        None,
+        |thread, vp| LibraryDefinitionContext {
+            max_fuel: Some(10_000),
+            value_pointers: vp,
+            additional_features: Some(&additional_features),
+            thread,
+        },
+    )?;
     // This has to happen *after* registering (scheme base) otherwise it will fail b/c
     // it declares a dependency on (scheme base)! (yay!)
     interpreter.register_module(

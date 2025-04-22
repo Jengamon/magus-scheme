@@ -1,0 +1,16 @@
+---
+#t
+#t
+#t
+#t
+#t
+---
+(import (only (scheme base) define values square if exact - + * / abs <=))
+(import (scheme inexact))
+(define pi (* 4 (atan 1)))
+(define (= a b) (if (<= (abs (- a b)) 1e10) #t #f))
+(values (= (exact (+ (square (sin 42)) (square (cos 42)))) 1)
+        (= (* (+ (asin 1) (acos 1)) 2) pi)
+        (= (tan 30) (/ (sin 30) (cos 30)))
+        (= (tan (atan 1)) 1)
+        (= (exact (sqrt 4)) 2))

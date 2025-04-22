@@ -272,7 +272,7 @@ mod comparison {
     // These predicates are required to be transitive.
 
     // Helper datatypes and functions
-    // TODO Go from Number to ComplexNumber eventually
+    // TODO Add Complex, InexactComplex support
     type Num<'gc> = Either<NumberPtr<'gc>, f64>;
     fn convert(p: ValuePtr<'_>) -> Result<Num, anyhow::Error> {
         Ok(match *p.borrow() {
@@ -374,6 +374,7 @@ mod comparison {
 }
 
 mod math {
+    // TODO Add Complex, InexactComplex support
     use crate::{
         Value,
         runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
@@ -1164,6 +1165,7 @@ mod predicates {
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            // TODO add Complex
             let val = matches!(*args[0].borrow(), Value::Number(_));
 
             Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
@@ -1184,6 +1186,7 @@ mod predicates {
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            // TODO add InexactComplex
             let val = matches!(*args[0].borrow(), Value::Inexact(_));
 
             Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))

@@ -156,6 +156,10 @@ impl Number {
             )),
         }
     }
+
+    // TODO For Scheme `expt` we want support for complex numbers
+    // (so that even roots of negative numbers can be caluclated), and we
+    // use the `BigRational::pow for BigInt` and simplify the rational.
 }
 
 impl From<BigInt> for Number {

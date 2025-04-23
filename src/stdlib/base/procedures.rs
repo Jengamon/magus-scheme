@@ -153,34 +153,9 @@ mod control {
                 Some((sptr, Value::Cons(cons)))
                     if cons.is_list(*sptr, ctx.thread_ctx.null_value) =>
                 {
-                    // we unwrap the cons (since it is non-cyclical)
-                    let mut args = vec![];
-                    let mut current = cons;
-
-                    loop {
-                        // push car, and set cons to tail *or* break on non-list cdr
-                        // break on null cdr
-                        match current.cdr.map(|v| *v.borrow()) {
-                            Some(Value::Cons(_))
-                                if Gc::ptr_eq(current.cdr.unwrap(), ctx.thread_ctx.null_value) =>
-                            {
-                                break;
-                            }
-                            Some(Value::Cons(c)) => {
-                                args.push(current.car.unwrap_or(ctx.thread_ctx.null_value));
-                                current = c;
-                            }
-                            Some(_) => {
-                                unreachable!("must be a valid list")
-                            }
-                            None => {
-                                // None is null_value lite
-                                break;
-                            }
-                        }
-                    }
-
-                    args
+                    cons.list_values(*sptr, ctx.thread_ctx.null_value)
+                        .into_iter()
+                        .collect()
                 }
                 // Non-list cons and other values are just treated as the last argument
                 Some((ptr, _)) => {

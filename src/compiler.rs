@@ -2350,7 +2350,12 @@ impl<'gc> Compiler<'gc> {
 
     /// Does this compiler have access to a library with the given name
     pub fn has_library(&self, name: &LibraryName, world: &World) -> bool {
-        self.local_world.modules.contains_key(name) || world.has_library(name)
+        self.has_local_library(name) || world.has_library(name)
+    }
+
+    /// Does this compiler have access to a library defined in its local world with the given name
+    pub fn has_local_library(&self, name: &LibraryName) -> bool {
+        self.local_world.modules.contains_key(name)
     }
 
     /// Generate full features list

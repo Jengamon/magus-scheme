@@ -426,6 +426,7 @@ impl Interpreter {
         }
 
         if let Some(source_data) = module.scheme() {
+            let mut dependencies = module.scheme_dependency(&mut self.interner);
             // There is a local scheme component
             let world = {
                 let mut new_world = World::default();
@@ -436,22 +437,14 @@ impl Interpreter {
                     ))?;
                 }
                 // Register dependencies (from the old world)
-                for name in module.scheme_dependency(&mut self.interner) {
-                    let module = world
-                        .library_arc(&name)
-                        .cloned()
-                        .ok_or(anyhow::anyhow!(
-                            "failed to find dependency ({})",
-                            name.to_string(&self.interner)
-                        ))
-                        .context(format!(
+                for name in dependencies.clone().into_iter() {
+                    if let Some(module) = world.library_arc(&name).cloned() {
+                        new_world.insert_arc(name.clone(), module).context(format!(
                             "failed to register module {}",
                             std::any::type_name::<R>()
                         ))?;
-                    new_world.insert_arc(name, module).context(format!(
-                        "failed to register module {}",
-                        std::any::type_name::<R>()
-                    ))?;
+                        dependencies.retain(|a| a != &name);
+                    }
                 }
                 new_world
             };
@@ -473,6 +466,15 @@ impl Interpreter {
                     let compiler = arena
                         .compiler_mut(handle)
                         .ok_or(anyhow::anyhow!("invalid compiler handle"))?;
+                    // For any remaining dependency, it *has* to exist on the compiler's local_world
+                    for name in dependencies {
+                        if !compiler.has_local_library(&name) {
+                            return Err(anyhow::anyhow!(
+                                "failed to find dependency {}",
+                                name.to_string(&self.interner)
+                            ));
+                        }
+                    }
                     let mut ecc = ExternalCompilerContext {
                         world: &world,
                         // For module source code, the includer should *always* be NullIncluder

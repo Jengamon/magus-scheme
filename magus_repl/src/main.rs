@@ -464,6 +464,20 @@ fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle, ThreadHan
             thread,
         },
     )?;
+    // after (scheme base) and (scheme cxr)!
+    interpreter.register_module(
+        &thread,
+        &compiler,
+        &mut world,
+        stdlib::srfi::list::Srfi1,
+        None,
+        |thread, vp| LibraryDefinitionContext {
+            max_fuel: Some(10_000),
+            value_pointers: vp,
+            additional_features: Some(&additional_features),
+            thread,
+        },
+    )?;
 
     Ok((interpreter, world, compiler, thread))
 }

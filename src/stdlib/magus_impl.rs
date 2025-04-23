@@ -34,13 +34,32 @@ mod procedures {
             Ok(LambdaReturn::Return(vec![Value::Undefined.into_ptr(&ctx)]))
         }
     }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Void;
+
+    impl<'gc> NativeLambda<'gc> for Void {
+        fn arity(&self) -> Arity {
+            Arity::Exact(0)
+        }
+
+        fn run(
+            &mut self,
+            ctx: crate::runtime::lambda::NativeLambdaContext<'_, 'gc>,
+            _args: &[crate::ValuePtr<'gc>],
+        ) -> Result<crate::runtime::lambda::LambdaReturn<'gc>, crate::runtime::lambda::LambdaError>
+        {
+            Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]))
+        }
+    }
 }
 
 pub struct MagusImpl;
 
 impl Module for MagusImpl {
     fn all_symbols(&self, interner: &mut lasso::Rodeo) -> std::collections::HashSet<lasso::Spur> {
-        ["undefined"]
+        ["undefined", "void"]
             .into_iter()
             .map(|s| interner.get_or_intern_static(s))
             .collect()
@@ -64,6 +83,7 @@ impl Module for MagusImpl {
         }
         match symbol {
             "undefined" => lambda!(procedures::Undefined),
+            "void" => lambda!(procedures::Void),
             _ => None,
         }
     }

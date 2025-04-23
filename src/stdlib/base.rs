@@ -387,6 +387,7 @@ impl Module for Base {
             "with-exception-handler",
             "cond-expand",
             "exact-integer-sqrt",
+            "map",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -453,6 +454,7 @@ impl Module for Base {
             "odd?" => lambda!(IsOdd),
             "with-exception-handler" => lambda!(WithExceptionHandler),
             "exact-integer-sqrt" => lambda!(ExactIntegerSqrt),
+            "map" => lambda!(Map::default()),
             _ => None,
         }
     }

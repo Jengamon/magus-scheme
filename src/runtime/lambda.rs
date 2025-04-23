@@ -2,7 +2,6 @@
 
 use core::fmt;
 use gc_arena::{Collect, Gc, Mutation, RefLock};
-use std::ops::Deref;
 
 use crate::{
     Fuel, ValuePtr,
@@ -173,7 +172,7 @@ pub trait NativeLambda<'gc>: std::fmt::Debug + Collectable {
         None
     }
 }
-pub type NativeLambdaPtr<'gc> = Gc<'gc, RefLock<dyn NativeLambda<'gc>>>;
+pub type NativeLambdaPtr<'gc> = Gc<'gc, RefLock<dyn NativeLambda<'gc> + 'gc>>;
 pub type LambdaResult<'gc> = Result<LambdaReturn<'gc>, LambdaError>;
 
 /// A compiled lambda is a wrapper around a [`ChunkPtr`] with additional information about arity

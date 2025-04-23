@@ -1142,10 +1142,10 @@ mod list {
         }
     }
 
-    #[derive(Debug, Collect)]
+    #[derive(Debug, Collect, Default)]
     #[collect(no_drop)]
     pub struct Map<'gc> {
-        state: MapState<'gc>,
+        state: Option<MapState<'gc>>,
     }
 
     #[derive(Collect, Debug, Clone)]
@@ -1171,6 +1171,7 @@ mod list {
         max: usize,
         lists: Vec<Vec<ValuePtr<'gc>>>,
         proc: Procedure<'gc>,
+        results: Vec<ValuePtr<'gc>>,
     }
 
     impl<'gc> NativeLambda<'gc> for Map<'gc> {
@@ -1204,7 +1205,7 @@ mod list {
                             "map expects a proper list for the rest of its arguments"
                         )),
                         _ => Err(anyhow::anyhow!(
-                            "map expects a list for the rest of its arguments"
+                            "map expects lists for the rest of its arguments"
                         )),
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -1227,7 +1228,7 @@ mod list {
                     })
                     .collect();
 
-                let max = lists.iter().map(|l| l.len()).max().unwrap_or_default();
+                let max = lists.iter().map(|l| l.len()).min().unwrap_or_default();
 
                 if max == 0 {
                     // If the longest list is the empty list, then we know the result is an empty list!
@@ -1243,9 +1244,10 @@ mod list {
                     max,
                     lists,
                     proc: proc.into(),
+                    results: vec![],
                 };
 
-                self.state = state;
+                self.state = Some(state);
 
                 match proc {
                     Either::Left(lambda) => Ok(LambdaReturn::Call {
@@ -1260,12 +1262,58 @@ mod list {
                 }
             } else {
                 // Resume where we left off
-                todo!()
+                let Some(MapState {
+                    index,
+                    max,
+                    lists,
+                    proc,
+                    mut results,
+                }) = self.state.take()
+                else {
+                    // if the stack is *not* empty, we should have some state
+                    unreachable!()
+                };
+
+                let result = ctx.stack.last().copied().unwrap();
+                results.push(result);
+
+                if index == max {
+                    Ok(LambdaReturn::Return(vec![ConsCell::from_iter(
+                        &ctx,
+                        ctx.thread_ctx.null_value,
+                        results,
+                    )]))
+                } else {
+                    // Still more results to evaluate
+                    let values: Vec<_> = lists.iter().map(|l| l[index]).collect();
+                    self.state = Some(MapState {
+                        index: index + 1,
+                        max,
+                        lists,
+                        proc: proc.clone(),
+                        results,
+                    });
+
+                    match proc {
+                        Procedure::Lambda(lambda) => Ok(LambdaReturn::Call {
+                            lambda,
+                            args: values,
+                            dynamic_wind: None,
+                        }),
+                        Procedure::Continuation(cont) => {
+                            Ok(LambdaReturn::Continue { cont, args: values })
+                        }
+                    }
+                }
             }
         }
 
         fn continuation(&self, mc: &gc_arena::Mutation<'gc>) -> Option<NativeLambdaPtr<'gc>> {
-            Some(todo!())
+            Some(unsize! [
+                Gc::new(mc, RefLock::new(Self {
+                    state: self.state.clone()
+                })) => RefLock<dyn NativeLambda<'gc> + 'gc>
+            ])
         }
     }
 }

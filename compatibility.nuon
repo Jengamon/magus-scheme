@@ -135,7 +135,7 @@
     [ "base", "", make-parameter, false, "", "" ],
     [ "base", "", make-string, false, "", "" ],
     [ "base", "", make-vector, false, "", "" ],
-    [ "base", "procedure", map, partial, "applies a function to each member of a list, returning it as a new list", "implemented in Scheme, doesn't support > 1 list" ],
+    [ "base", "procedure", map, true, "applies a function to each member of a list, returning it as a new list", "" ],
     [ "base", "", max, false, "", "" ],
     [ "base", "", member, false, "", "" ],
     [ "base", "procedure", memq, true, "find first sublist where (eq? (car))", "implemented in Scheme" ],

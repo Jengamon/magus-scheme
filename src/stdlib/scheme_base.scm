@@ -9,9 +9,7 @@
 (export list not memq memv abs square boolean? boolean=?
     zero? positive? negative? length)
 ; Sketch functions (to be removed once implemented properly)
-; `map` is here b/c it has to be able to support multiple lists which is
-; easier in Rust (with the goal of the method) than in Scheme (imo)
-(export assq assv map)
+(export assq assv)
 (begin
   (define (list . in) in)
   (define (not x) (if x #f #t))
@@ -49,10 +47,6 @@
         (boolean=-iter (car lst) (cdr lst))
         ; rn we just use #f, but it *should* error (maybe??)
         (if (null? lst) #t #f)))
-  (define (map f xs)
-    (if (null? (cdr xs))
-        (cons (f (car xs)) '())
-        (cons (f (car xs)) (map f (cdr xs)))))
   (define (memq x lst)
       (define (memq-iter a lst)
           (if (null? lst)

@@ -582,7 +582,13 @@ mod math {
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
             if args.len() == 1 {
                 let value = match *args[0].borrow() {
-                    Value::Number(num) => Value::Number(Gc::new(&ctx, num.recip())),
+                    Value::Number(num) => {
+                        if num.is_zero() {
+                            return Err(anyhow::anyhow!("cannot divide by 0"))?;
+                        }
+
+                        Value::Number(Gc::new(&ctx, num.recip()))
+                    }
                     Value::Inexact(flt) => Value::Inexact(flt.recip()),
                     _ => Err(anyhow::anyhow!(
                         "cannot reciprocate something that is not a number"

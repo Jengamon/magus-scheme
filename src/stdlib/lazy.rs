@@ -186,12 +186,12 @@ mod procedures {
     #[collect(require_static)]
     pub struct IsPromise;
 
-    impl NativeLambda for IsPromise {
+    impl<'gc> NativeLambda<'gc> for IsPromise {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -210,12 +210,12 @@ mod procedures {
     #[collect(require_static)]
     pub struct Force;
 
-    impl NativeLambda for Force {
+    impl<'gc> NativeLambda<'gc> for Force {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -253,12 +253,12 @@ mod procedures {
     #[collect(require_static)]
     pub struct MakePromise;
 
-    impl NativeLambda for MakePromise {
+    impl<'gc> NativeLambda<'gc> for MakePromise {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],

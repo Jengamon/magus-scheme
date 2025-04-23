@@ -19,12 +19,12 @@ mod procedures {
     #[collect(require_static)]
     pub struct DisplayLam;
 
-    impl NativeLambda for DisplayLam {
+    impl<'gc> NativeLambda<'gc> for DisplayLam {
         fn arity(&self) -> Arity {
             Arity::AtLeast(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             _ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
@@ -40,12 +40,12 @@ mod procedures {
     #[collect(require_static)]
     pub struct WriteLam;
 
-    impl NativeLambda for WriteLam {
+    impl<'gc> NativeLambda<'gc> for WriteLam {
         fn arity(&self) -> Arity {
             Arity::AtLeast(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],

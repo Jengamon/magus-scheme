@@ -20,12 +20,12 @@ mod procedures {
     #[collect(require_static)]
     pub struct Undefined;
 
-    impl NativeLambda for Undefined {
+    impl<'gc> NativeLambda<'gc> for Undefined {
         fn arity(&self) -> Arity {
             Arity::Exact(0)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: crate::runtime::lambda::NativeLambdaContext<'_, 'gc>,
             _args: &[crate::ValuePtr<'gc>],

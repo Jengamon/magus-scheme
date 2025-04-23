@@ -193,14 +193,8 @@ Chunk {
                         FetchArg {
                             index: 0,
                         },
-                        Define {
-                            symbol: Spur(9),
-                        },
-                        Reference {
-                            symbol: Spur(9),
-                        },
-                        Reference {
-                            symbol: Spur(9),
+                        FetchArg {
+                            index: 0,
                         },
                         Reference {
                             symbol: Spur(8),
@@ -210,7 +204,7 @@ Chunk {
                         },
                     ],
                     labels: {
-                        2: SourceData {
+                        0: SourceData {
                             source_id: Spur(3),
                             range: (
                                 69,
@@ -420,14 +414,8 @@ Chunk {
                                         FetchArg {
                                             index: 0,
                                         },
-                                        Define {
-                                            symbol: Spur(9),
-                                        },
-                                        Reference {
-                                            symbol: Spur(9),
-                                        },
-                                        Reference {
-                                            symbol: Spur(9),
+                                        FetchArg {
+                                            index: 0,
                                         },
                                         Reference {
                                             symbol: Spur(8),
@@ -437,7 +425,7 @@ Chunk {
                                         },
                                     ],
                                     labels: {
-                                        2: SourceData {
+                                        0: SourceData {
                                             source_id: Spur(3),
                                             range: (
                                                 69,
@@ -479,28 +467,16 @@ Chunk {
                         FetchArg {
                             index: 0,
                         },
-                        Define {
-                            symbol: Spur(9),
+                        FetchArg {
+                            index: 0,
+                        },
+                        FetchArg {
+                            index: 0,
+                        },
+                        FetchArg {
+                            index: 0,
                         },
                         FetchRest,
-                        Define {
-                            symbol: Spur(10),
-                        },
-                        Reference {
-                            symbol: Spur(9),
-                        },
-                        Reference {
-                            symbol: Spur(9),
-                        },
-                        Reference {
-                            symbol: Spur(9),
-                        },
-                        Reference {
-                            symbol: Spur(9),
-                        },
-                        Reference {
-                            symbol: Spur(10),
-                        },
                         Reference {
                             symbol: Spur(8),
                         },
@@ -509,7 +485,7 @@ Chunk {
                         },
                     ],
                     labels: {
-                        4: SourceData {
+                        0: SourceData {
                             source_id: Spur(3),
                             range: (
                                 97,
@@ -719,14 +695,8 @@ Chunk {
                                         FetchArg {
                                             index: 0,
                                         },
-                                        Define {
-                                            symbol: Spur(9),
-                                        },
-                                        Reference {
-                                            symbol: Spur(9),
-                                        },
-                                        Reference {
-                                            symbol: Spur(9),
+                                        FetchArg {
+                                            index: 0,
                                         },
                                         Reference {
                                             symbol: Spur(8),
@@ -736,7 +706,7 @@ Chunk {
                                         },
                                     ],
                                     labels: {
-                                        2: SourceData {
+                                        0: SourceData {
                                             source_id: Spur(3),
                                             range: (
                                                 69,
@@ -946,14 +916,8 @@ Chunk {
                                                         FetchArg {
                                                             index: 0,
                                                         },
-                                                        Define {
-                                                            symbol: Spur(9),
-                                                        },
-                                                        Reference {
-                                                            symbol: Spur(9),
-                                                        },
-                                                        Reference {
-                                                            symbol: Spur(9),
+                                                        FetchArg {
+                                                            index: 0,
                                                         },
                                                         Reference {
                                                             symbol: Spur(8),
@@ -963,7 +927,7 @@ Chunk {
                                                         },
                                                     ],
                                                     labels: {
-                                                        2: SourceData {
+                                                        0: SourceData {
                                                             source_id: Spur(3),
                                                             range: (
                                                                 69,
@@ -1005,28 +969,16 @@ Chunk {
                                         FetchArg {
                                             index: 0,
                                         },
-                                        Define {
-                                            symbol: Spur(9),
+                                        FetchArg {
+                                            index: 0,
+                                        },
+                                        FetchArg {
+                                            index: 0,
+                                        },
+                                        FetchArg {
+                                            index: 0,
                                         },
                                         FetchRest,
-                                        Define {
-                                            symbol: Spur(10),
-                                        },
-                                        Reference {
-                                            symbol: Spur(9),
-                                        },
-                                        Reference {
-                                            symbol: Spur(9),
-                                        },
-                                        Reference {
-                                            symbol: Spur(9),
-                                        },
-                                        Reference {
-                                            symbol: Spur(9),
-                                        },
-                                        Reference {
-                                            symbol: Spur(10),
-                                        },
                                         Reference {
                                             symbol: Spur(8),
                                         },
@@ -1035,7 +987,7 @@ Chunk {
                                         },
                                     ],
                                     labels: {
-                                        4: SourceData {
+                                        0: SourceData {
                                             source_id: Spur(3),
                                             range: (
                                                 97,
@@ -1074,35 +1026,17 @@ Chunk {
                         },
                     ),
                     code: [
+                        Reference {
+                            symbol: Spur(14),
+                        },
                         FetchArg {
                             index: 0,
-                        },
-                        Define {
-                            symbol: Spur(9),
                         },
                         FetchArg {
                             index: 1,
                         },
-                        Define {
-                            symbol: Spur(11),
-                        },
                         FetchArg {
                             index: 2,
-                        },
-                        Define {
-                            symbol: Spur(12),
-                        },
-                        Reference {
-                            symbol: Spur(14),
-                        },
-                        Reference {
-                            symbol: Spur(9),
-                        },
-                        Reference {
-                            symbol: Spur(11),
-                        },
-                        Reference {
-                            symbol: Spur(12),
                         },
                         Reference {
                             symbol: Spur(8),
@@ -1121,14 +1055,14 @@ Chunk {
                         },
                     ],
                     labels: {
-                        6: SourceData {
+                        0: SourceData {
                             source_id: Spur(3),
                             range: (
                                 131,
                                 151,
                             ),
                         },
-                        14: SourceData {
+                        8: SourceData {
                             source_id: Spur(3),
                             range: (
                                 152,

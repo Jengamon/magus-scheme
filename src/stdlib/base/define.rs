@@ -173,6 +173,8 @@ impl Syntax for SetBang {
                         unreachable!("[ICE] invalid argument scope");
                     };
 
+                    argument_scope.request_name(name);
+
                     if let Ok(Some(upv)) = argument_scope.is_upvalue(name) {
                         upv
                     } else {
@@ -186,6 +188,8 @@ impl Syntax for SetBang {
                         unreachable!("[ICE] invalid argument scope");
                     };
 
+                    argument_scope.request_name(name);
+
                     if let Ok(Some(upv)) = argument_scope.is_upvalue(name) {
                         upv
                     } else {
@@ -197,6 +201,7 @@ impl Syntax for SetBang {
                 _ => {
                     // But treat as defining something (so that upvalues are treated like define, and change the object)
                     compiler.define_variable(name);
+                    compiler.argument_scope_mut(0).unwrap().request_name(name);
 
                     // Treat as normal ref
                     return Ok(SyntaxReturn::Code(

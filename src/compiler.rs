@@ -634,6 +634,7 @@ type VariableDef = fxhash::FxHashSet<lasso::Spur>;
 pub struct Scope {
     args: Rc<[lasso::Spur]>,
     rest: Option<lasso::Spur>,
+    requested_names: FxHashSet<lasso::Spur>,
 
     upvalues: Rc<RefCell<fxhash::FxHashMap<Option<usize>, usize>>>,
     variables_defined: Rc<RefCell<fxhash::FxHashMap<lasso::Spur, Option<usize>>>>,
@@ -663,6 +664,10 @@ impl Scope {
         } else {
             Err(Undefined)
         }
+    }
+
+    pub fn request_name(&mut self, name: lasso::Spur) {
+        self.requested_names.insert(name);
     }
 }
 
@@ -1838,9 +1843,33 @@ impl<'gc> Compiler<'gc> {
                     }
                 }
 
-                Ok(SyntaxReturn::Code(Box::from([Bytecode::Reference {
-                    symbol: *spur,
-                }])))
+                match self.is_argument(*spur) {
+                    Some(Arg::Index { index, scope: 0 })
+                        if !self
+                            .argument_scope(0)
+                            .unwrap()
+                            .variables_defined
+                            .borrow()
+                            .contains_key(spur) =>
+                    {
+                        Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchArg {
+                            index,
+                        }])))
+                    }
+                    Some(Arg::Rest { scope: 0 })
+                        if !self
+                            .argument_scope(0)
+                            .unwrap()
+                            .variables_defined
+                            .borrow()
+                            .contains_key(spur) =>
+                    {
+                        Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchRest])))
+                    }
+                    _ => Ok(SyntaxReturn::Code(Box::from([Bytecode::Reference {
+                        symbol: *spur,
+                    }]))),
+                }
             }
             ProgramData::Bool(b) => Ok(SyntaxReturn::Code(Box::from([Bytecode::PushBool {
                 bool: *b,
@@ -2820,8 +2849,11 @@ impl<'gc> Compiler<'gc> {
                             Bytecode::SetUpvalue { index: *upv },
                             Bytecode::Define { symbol },
                         ]
-                    } else {
+                    } else if argument_scope.requested_names.contains(&symbol) {
                         vec![Bytecode::FetchArg { index }, Bytecode::Define { symbol }]
+                    } else {
+                        // vec![Bytecode::FetchArg { index }, Bytecode::Define { symbol }]
+                        vec![]
                     }
                 })
                 .chain(
@@ -2834,8 +2866,11 @@ impl<'gc> Compiler<'gc> {
                                     Bytecode::SetUpvalue { index: *upv },
                                     Bytecode::Define { symbol },
                                 ]
-                            } else {
+                            } else if argument_scope.requested_names.contains(&symbol) {
                                 vec![Bytecode::FetchRest, Bytecode::Define { symbol }]
+                            } else {
+                                // vec![Bytecode::FetchRest, Bytecode::Define { symbol }]
+                                vec![]
                             }
                         })
                         .unwrap_or_default(),

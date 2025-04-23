@@ -39,12 +39,12 @@ impl WithExceptionHandler {
     }
 }
 
-impl NativeLambda for WithExceptionHandler {
+impl<'gc> NativeLambda<'gc> for WithExceptionHandler {
     fn arity(&self) -> Arity {
         Arity::Exact(2)
     }
 
-    fn run<'gc>(
+    fn run(
         &mut self,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[ValuePtr<'gc>],
@@ -62,7 +62,7 @@ impl NativeLambda for WithExceptionHandler {
         }
     }
 
-    fn error<'gc>(
+    fn error(
         &mut self,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[ValuePtr<'gc>],

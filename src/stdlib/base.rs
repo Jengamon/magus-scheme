@@ -26,8 +26,8 @@ pub use procedures::{
     Add, Apply, Ascending, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr, Cons,
     Denominator, Descending, Divide, Equal, Exact, ExactIntegerSqrt, Features, Gcd, Inexact, IsEq,
     IsEqv, IsEven, IsExact, IsInexact, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, Lcm,
-    MonotonicAscending, MonotonicDescending, Multiply, Numerator, StringToNumber, StringToSymbol,
-    Subtract, SymbolToString, Values,
+    Map, MonotonicAscending, MonotonicDescending, Multiply, Numerator, StringToNumber,
+    StringToSymbol, Subtract, SymbolToString, Values,
 };
 pub use quote::{Quasiquote, Quote};
 

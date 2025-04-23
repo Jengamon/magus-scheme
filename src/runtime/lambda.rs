@@ -2,6 +2,7 @@
 
 use core::fmt;
 use gc_arena::{Collect, Gc, Mutation, RefLock};
+use std::ops::Deref;
 
 use crate::{
     Fuel, ValuePtr,
@@ -119,7 +120,7 @@ impl<'gc> NativeLambdaContext<'_, 'gc> {
     ///
     /// To prevent a double borrow, check the equality of lambda with the self pointer.
     /// If they refer to the same [`NativeLambda`], use the borrow to retrieve the lambda instead.
-    pub fn get_arity(&self, native: &impl NativeLambda, lambda: Lambda<'gc>) -> Arity {
+    pub fn get_arity(&self, native: &impl NativeLambda<'gc>, lambda: Lambda<'gc>) -> Arity {
         if lambda == self.self_ptr {
             native.arity()
         } else {
@@ -141,18 +142,18 @@ impl<'gc> std::ops::Deref for NativeLambdaContext<'_, 'gc> {
 /// - implementations are defined by a [`World`] and are thus shared across all scripts
 ///   that use that `World`, depending on how that `World` defines them
 #[expect(private_bounds)]
-pub trait NativeLambda: std::fmt::Debug + Collectable {
+pub trait NativeLambda<'gc>: std::fmt::Debug + Collectable {
     /// What is the arity of this lambda?
     fn arity(&self) -> Arity;
 
     /// Run in normal mode
-    fn run<'gc>(
+    fn run(
         &mut self,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError>;
     /// Run when there is an error present
-    fn error<'gc>(
+    fn error(
         &mut self,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[ValuePtr<'gc>],
@@ -167,12 +168,12 @@ pub trait NativeLambda: std::fmt::Debug + Collectable {
     ///
     /// `None` signifies that this lambda can simply have its pointer
     /// copied as a continuation (it does not mutate `self`)
-    fn continuation<'gc>(&self, mc: &Mutation<'gc>) -> Option<NativeLambdaPtr<'gc>> {
+    fn continuation(&self, mc: &Mutation<'gc>) -> Option<NativeLambdaPtr<'gc>> {
         let _ = mc;
         None
     }
 }
-pub type NativeLambdaPtr<'gc> = Gc<'gc, RefLock<dyn NativeLambda>>;
+pub type NativeLambdaPtr<'gc> = Gc<'gc, RefLock<dyn NativeLambda<'gc>>>;
 pub type LambdaResult<'gc> = Result<LambdaReturn<'gc>, LambdaError>;
 
 /// A compiled lambda is a wrapper around a [`ChunkPtr`] with additional information about arity

@@ -3,7 +3,7 @@ pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, Monotonic
 pub use control::{Apply, CallCc, Features};
 pub use conversions::{Exact, Inexact, StringToNumber, StringToSymbol, SymbolToString};
 pub use equality::{IsEq, IsEqv};
-pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr};
+pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr, Map};
 pub use math::{
     Add, Denominator, Divide, ExactIntegerSqrt, Gcd, Lcm, Multiply, Numerator, Subtract,
 };
@@ -25,12 +25,12 @@ mod equality {
     #[collect(require_static)]
     pub struct IsEq;
 
-    impl NativeLambda for IsEq {
+    impl<'gc> NativeLambda<'gc> for IsEq {
         fn arity(&self) -> Arity {
             Arity::Exact(2)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -53,12 +53,12 @@ mod equality {
     #[collect(require_static)]
     pub struct IsEqv;
 
-    impl NativeLambda for IsEqv {
+    impl<'gc> NativeLambda<'gc> for IsEqv {
         fn arity(&self) -> Arity {
             Arity::Exact(2)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -85,12 +85,12 @@ mod control {
     #[collect(require_static)]
     pub struct CallCc;
 
-    impl NativeLambda for CallCc {
+    impl<'gc> NativeLambda<'gc> for CallCc {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -130,12 +130,12 @@ mod control {
     #[collect(require_static)]
     pub struct Apply;
 
-    impl NativeLambda for Apply {
+    impl<'gc> NativeLambda<'gc> for Apply {
         fn arity(&self) -> Arity {
             Arity::AtLeast(2)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -222,12 +222,12 @@ mod control {
         }
     }
 
-    impl NativeLambda for Features {
+    impl<'gc> NativeLambda<'gc> for Features {
         fn arity(&self) -> Arity {
             Arity::Exact(0)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             _args: &[crate::ValuePtr<'gc>],
@@ -292,12 +292,12 @@ mod comparison {
 
     macro_rules! comparison_impl {
         ($cmp:expr => $tp:ty) => {
-            impl NativeLambda for $tp {
+            impl<'gc> NativeLambda<'gc> for $tp {
                 fn arity(&self) -> Arity {
                     Arity::AtLeast(2)
                 }
 
-                fn run<'gc>(
+                fn run(
                     &mut self,
                     ctx: NativeLambdaContext<'_, 'gc>,
                     args: &[ValuePtr<'gc>],
@@ -386,12 +386,12 @@ mod math {
     #[collect(require_static)]
     pub struct ExactIntegerSqrt;
 
-    impl NativeLambda for ExactIntegerSqrt {
+    impl<'gc> NativeLambda<'gc> for ExactIntegerSqrt {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -427,12 +427,12 @@ mod math {
     #[collect(require_static)]
     pub struct Add;
 
-    impl NativeLambda for Add {
+    impl<'gc> NativeLambda<'gc> for Add {
         fn arity(&self) -> Arity {
             Arity::AtLeast(0)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -467,12 +467,12 @@ mod math {
     #[collect(require_static)]
     pub struct Subtract;
 
-    impl NativeLambda for Subtract {
+    impl<'gc> NativeLambda<'gc> for Subtract {
         fn arity(&self) -> Arity {
             Arity::AtLeast(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -528,12 +528,12 @@ mod math {
     #[collect(require_static)]
     pub struct Multiply;
 
-    impl NativeLambda for Multiply {
+    impl<'gc> NativeLambda<'gc> for Multiply {
         fn arity(&self) -> Arity {
             Arity::AtLeast(0)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -570,12 +570,12 @@ mod math {
     #[collect(require_static)]
     pub struct Divide;
 
-    impl NativeLambda for Divide {
+    impl<'gc> NativeLambda<'gc> for Divide {
         fn arity(&self) -> Arity {
             Arity::AtLeast(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -665,12 +665,12 @@ mod math {
     #[collect(require_static)]
     pub struct Numerator;
 
-    impl NativeLambda for Numerator {
+    impl<'gc> NativeLambda<'gc> for Numerator {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -711,12 +711,12 @@ mod math {
     #[collect(require_static)]
     pub struct Denominator;
 
-    impl NativeLambda for Denominator {
+    impl<'gc> NativeLambda<'gc> for Denominator {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -755,12 +755,12 @@ mod math {
     #[collect(require_static)]
     pub struct Gcd;
 
-    impl NativeLambda for Gcd {
+    impl<'gc> NativeLambda<'gc> for Gcd {
         fn arity(&self) -> Arity {
             Arity::AtLeast(0)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -844,12 +844,12 @@ mod math {
     #[collect(require_static)]
     pub struct Lcm;
 
-    impl NativeLambda for Lcm {
+    impl<'gc> NativeLambda<'gc> for Lcm {
         fn arity(&self) -> Arity {
             Arity::AtLeast(0)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -930,22 +930,27 @@ mod math {
 }
 
 mod list {
-    use gc_arena::{Collect, Gc};
+    use either::Either;
+    use gc_arena::{Collect, Gc, RefLock, unsize};
 
     use crate::{
         Value, ValuePtr,
-        runtime::lambda::{Arity, LambdaResult, LambdaReturn, NativeLambda, NativeLambdaContext},
+        runtime::lambda::{
+            Arity, Lambda, LambdaResult, LambdaReturn, NativeLambda, NativeLambdaContext,
+            NativeLambdaPtr,
+        },
+        value::{ConsCell, ContinuationPtr},
     };
 
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct Car;
-    impl NativeLambda for Car {
+    impl<'gc> NativeLambda<'gc> for Car {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
@@ -967,12 +972,12 @@ mod list {
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct Caar;
-    impl NativeLambda for Caar {
+    impl<'gc> NativeLambda<'gc> for Caar {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
@@ -1002,12 +1007,12 @@ mod list {
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct Cadr;
-    impl NativeLambda for Cadr {
+    impl<'gc> NativeLambda<'gc> for Cadr {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
@@ -1037,12 +1042,12 @@ mod list {
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct Cdar;
-    impl NativeLambda for Cdar {
+    impl<'gc> NativeLambda<'gc> for Cdar {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
@@ -1072,12 +1077,12 @@ mod list {
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct Cddr;
-    impl NativeLambda for Cddr {
+    impl<'gc> NativeLambda<'gc> for Cddr {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
@@ -1107,12 +1112,12 @@ mod list {
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct Cdr;
-    impl NativeLambda for Cdr {
+    impl<'gc> NativeLambda<'gc> for Cdr {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
@@ -1128,6 +1133,133 @@ mod list {
             Ok(LambdaReturn::Return(vec![
                 c.cdr.unwrap_or(ctx.thread_ctx.null_value),
             ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(no_drop)]
+    pub struct Map<'gc> {
+        state: MapState<'gc>,
+    }
+
+    #[derive(Collect, Debug, Clone)]
+    #[collect(no_drop)]
+    enum Procedure<'gc> {
+        Lambda(Lambda<'gc>),
+        Continuation(ContinuationPtr<'gc>),
+    }
+
+    impl<'gc> From<Either<Lambda<'gc>, ContinuationPtr<'gc>>> for Procedure<'gc> {
+        fn from(value: Either<Lambda<'gc>, ContinuationPtr<'gc>>) -> Self {
+            match value {
+                Either::Left(lam) => Procedure::Lambda(lam),
+                Either::Right(cont) => Procedure::Continuation(cont),
+            }
+        }
+    }
+
+    #[derive(Collect, Debug, Clone)]
+    #[collect(no_drop)]
+    struct MapState<'gc> {
+        index: usize,
+        max: usize,
+        lists: Vec<Vec<ValuePtr<'gc>>>,
+        proc: Procedure<'gc>,
+    }
+
+    impl<'gc> NativeLambda<'gc> for Map<'gc> {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(2)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
+            if ctx.stack.is_empty() {
+                // We are in a fresh call, reset state and start work
+                let proc = match *args[0].borrow() {
+                    Value::Lambda(l) => Either::Left(l),
+                    Value::Continuation(c) => Either::Right(c),
+                    _ => {
+                        return Err(anyhow::anyhow!(
+                            "map expects a procedure as its first argument"
+                        ))?;
+                    }
+                };
+
+                let lists = args
+                    .iter()
+                    .skip(1)
+                    .map(|v| match *v.borrow() {
+                        Value::Cons(c) if c.is_list(*v, ctx.thread_ctx.null_value) => Ok((*v, c)),
+                        Value::Cons(_) => Err(anyhow::anyhow!(
+                            "map expects a proper list for the rest of its arguments"
+                        )),
+                        _ => Err(anyhow::anyhow!(
+                            "map expects a list for the rest of its arguments"
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                if let Either::Left(lam) = &proc {
+                    if !lam.arity().is_satisfied(lists.len()) {
+                        return Err(anyhow::anyhow!(
+                            "map expects a procedure that can accept {} arguments as its first argument",
+                            lists.len()
+                        ))?;
+                    }
+                }
+
+                let lists: Vec<_> = lists
+                    .into_iter()
+                    .map(|(v, l)| {
+                        l.list_values(v, ctx.thread_ctx.null_value)
+                            .into_iter()
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+
+                let max = lists.iter().map(|l| l.len()).max().unwrap_or_default();
+
+                if max == 0 {
+                    // If the longest list is the empty list, then we know the result is an empty list!
+                    return Ok(LambdaReturn::Return(vec![ctx.thread_ctx.null_value]));
+                }
+
+                // Get the first value of each list to call the proc!
+                let first_values: Vec<_> = lists.iter().map(|l| l[0]).collect();
+
+                let state = MapState {
+                    // We evaluate 0 *right now*
+                    index: 1,
+                    max,
+                    lists,
+                    proc: proc.into(),
+                };
+
+                self.state = state;
+
+                match proc {
+                    Either::Left(lambda) => Ok(LambdaReturn::Call {
+                        lambda,
+                        args: first_values,
+                        dynamic_wind: None,
+                    }),
+                    Either::Right(cont) => Ok(LambdaReturn::Continue {
+                        cont,
+                        args: first_values,
+                    }),
+                }
+            } else {
+                // Resume where we left off
+                todo!()
+            }
+        }
+
+        fn continuation(&self, mc: &gc_arena::Mutation<'gc>) -> Option<NativeLambdaPtr<'gc>> {
+            Some(todo!())
         }
     }
 }
@@ -1146,12 +1278,12 @@ mod predicates {
     #[collect(require_static)]
     pub struct IsPair;
 
-    impl NativeLambda for IsPair {
+    impl<'gc> NativeLambda<'gc> for IsPair {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1170,12 +1302,12 @@ mod predicates {
     #[collect(require_static)]
     pub struct IsNull;
 
-    impl NativeLambda for IsNull {
+    impl<'gc> NativeLambda<'gc> for IsNull {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1194,12 +1326,12 @@ mod predicates {
     #[collect(require_static)]
     pub struct IsExact;
 
-    impl NativeLambda for IsExact {
+    impl<'gc> NativeLambda<'gc> for IsExact {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1215,12 +1347,12 @@ mod predicates {
     #[collect(require_static)]
     pub struct IsInexact;
 
-    impl NativeLambda for IsInexact {
+    impl<'gc> NativeLambda<'gc> for IsInexact {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1236,12 +1368,12 @@ mod predicates {
     #[collect(require_static)]
     pub struct IsSymbol;
 
-    impl NativeLambda for IsSymbol {
+    impl<'gc> NativeLambda<'gc> for IsSymbol {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1256,12 +1388,12 @@ mod predicates {
     #[collect(require_static)]
     pub struct IsString;
 
-    impl NativeLambda for IsString {
+    impl<'gc> NativeLambda<'gc> for IsString {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1276,12 +1408,12 @@ mod predicates {
     #[collect(require_static)]
     pub struct IsProcedure;
 
-    impl NativeLambda for IsProcedure {
+    impl<'gc> NativeLambda<'gc> for IsProcedure {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1297,12 +1429,12 @@ mod predicates {
     #[collect(require_static)]
     pub struct IsEven;
 
-    impl NativeLambda for IsEven {
+    impl<'gc> NativeLambda<'gc> for IsEven {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1330,12 +1462,12 @@ mod predicates {
     #[collect(require_static)]
     pub struct IsOdd;
 
-    impl NativeLambda for IsOdd {
+    impl<'gc> NativeLambda<'gc> for IsOdd {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1374,12 +1506,12 @@ mod structure {
     #[collect(require_static)]
     pub struct Values;
 
-    impl NativeLambda for Values {
+    impl<'gc> NativeLambda<'gc> for Values {
         fn arity(&self) -> Arity {
             Arity::AtLeast(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: crate::runtime::lambda::NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1399,12 +1531,12 @@ mod structure {
     #[collect(require_static)]
     pub struct CallWithValues;
 
-    impl NativeLambda for CallWithValues {
+    impl<'gc> NativeLambda<'gc> for CallWithValues {
         fn arity(&self) -> Arity {
             Arity::Exact(2)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: crate::runtime::lambda::NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1452,12 +1584,12 @@ mod structure {
     #[collect(require_static)]
     pub struct Cons;
 
-    impl NativeLambda for Cons {
+    impl<'gc> NativeLambda<'gc> for Cons {
         fn arity(&self) -> crate::runtime::lambda::Arity {
             Arity::Exact(2)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: crate::runtime::lambda::NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1489,12 +1621,12 @@ mod conversions {
     #[collect(require_static)]
     pub struct Exact;
 
-    impl NativeLambda for Exact {
+    impl<'gc> NativeLambda<'gc> for Exact {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1517,12 +1649,12 @@ mod conversions {
     #[collect(require_static)]
     pub struct Inexact;
 
-    impl NativeLambda for Inexact {
+    impl<'gc> NativeLambda<'gc> for Inexact {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1541,12 +1673,12 @@ mod conversions {
     #[collect(require_static)]
     pub struct StringToNumber;
 
-    impl NativeLambda for StringToNumber {
+    impl<'gc> NativeLambda<'gc> for StringToNumber {
         fn arity(&self) -> Arity {
             Arity::AtLeast(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1650,12 +1782,12 @@ mod conversions {
     #[collect(require_static)]
     pub struct StringToSymbol;
 
-    impl NativeLambda for StringToSymbol {
+    impl<'gc> NativeLambda<'gc> for StringToSymbol {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
@@ -1678,12 +1810,12 @@ mod conversions {
     #[collect(require_static)]
     pub struct SymbolToString;
 
-    impl NativeLambda for SymbolToString {
+    impl<'gc> NativeLambda<'gc> for SymbolToString {
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
 
-        fn run<'gc>(
+        fn run(
             &mut self,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],

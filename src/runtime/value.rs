@@ -124,13 +124,66 @@ pub enum Value<'gc> {
     Error(SchemeErrorPtr<'gc>),
 }
 
+// implements logic behind equal?
+impl Value<'_> {
+    pub fn is_equal(self, other: Self) -> bool {
+        match self {
+            Value::Values(v) => {
+                matches!(other, Value::Values(ov) if v.len() == ov.len() && v.iter().zip(ov.iter()).all(|(v, ov)|
+                    v.borrow().is_equal(*ov.borrow())
+                ))
+            }
+            Value::Undefined => false,
+            Value::Void => matches!(other, Value::Void),
+            Value::Number(n) => matches!(other, Value::Number(on) if on == n),
+            Value::Inexact(i) => matches!(other, Value::Inexact(oi) if oi == i),
+            Value::String(s) => {
+                matches!(other, Value::String(os) if s.string == os.string)
+            }
+            Value::Symbol(sym) => matches!(other, Value::Symbol(osym) if osym == sym),
+            Value::Bool(b) => matches!(other, Value::Bool(ob) if ob == b),
+            Value::Char(c) => matches!(other, Value::Char(oc) if oc == c),
+            Value::Vector(_vp) => {
+                // Have to handle circular structures
+                todo!()
+            }
+            Value::Cons(_) => {
+                // Have to handle circular structures
+                todo!()
+            }
+            Value::Bytevector(bv) => {
+                if let Value::Bytevector(obv) = other {
+                    bv.vec.len() == obv.vec.len()
+                        && bv.vec.iter().zip(obv.vec.iter()).all(|(b, ob)| b == ob)
+                } else {
+                    false
+                }
+            }
+            Value::Record(_) => todo!(),
+            Value::InputPort(ip) => matches!(other, Value::InputPort(oip) if Gc::ptr_eq(ip, oip)),
+            Value::OutputPort(op) => {
+                matches!(other, Value::OutputPort(oop) if Gc::ptr_eq(op, oop))
+            }
+            Value::Environment(_) => todo!(),
+            Value::UserStruct(us) => {
+                matches!(other, Value::UserStruct(ous) if us == ous)
+            }
+            Value::Lambda(lptr) => matches!(other, Value::Lambda(optr) if lptr == optr),
+            Value::Continuation(c) => matches!(other, Value::Continuation(oc) if c == oc),
+            Value::Promise(p) => matches!(other, Value::Promise(op) if Gc::ptr_eq(p, op)),
+            Value::Parameter(p) => matches!(other, Value::Parameter(op) if p == op),
+            Value::Error(e) => matches!(other, Value::Error(oe) if Gc::ptr_eq(e, oe)),
+        }
+    }
+}
+
 // implements logic behind eqv?
 // where as ValuePtr::eq implements eq? logic
 impl PartialEq for Value<'_> {
     fn eq(&self, other: &Self) -> bool {
         match self {
             Value::Values(v) => matches!(other, Value::Values(ov) if v == ov),
-            Value::Undefined => matches!(other, Value::Undefined),
+            Value::Undefined => false,
             Value::Void => matches!(other, Value::Void),
             Value::Number(n) => matches!(other, Value::Number(on) if on == n),
             Value::Inexact(i) => matches!(other, Value::Inexact(oi) if oi == i),
@@ -143,10 +196,14 @@ impl PartialEq for Value<'_> {
             Value::Vector(vp) => {
                 matches!(other, Value::Vector(ovp) if Gc::ptr_eq(*vp, *ovp))
             }
-            Value::Bytevector(_) => todo!(),
+            Value::Bytevector(bv) => {
+                matches!(other, Value::Bytevector(obv) if Gc::ptr_eq(bv.vec, obv.vec))
+            }
             Value::Record(_) => todo!(),
-            Value::InputPort(_) => todo!(),
-            Value::OutputPort(_) => todo!(),
+            Value::InputPort(ip) => matches!(other, Value::InputPort(oip) if Gc::ptr_eq(*ip, *oip)),
+            Value::OutputPort(op) => {
+                matches!(other, Value::OutputPort(oop) if Gc::ptr_eq(*op, *oop))
+            }
             Value::Cons(ConsCell {
                 car: Some(car),
                 cdr: Some(cdr),
@@ -180,12 +237,14 @@ impl PartialEq for Value<'_> {
                 )
             }
             Value::Environment(_) => todo!(),
-            Value::UserStruct(_) => todo!(),
+            Value::UserStruct(us) => {
+                matches!(other, Value::UserStruct(ous) if us == ous)
+            }
             Value::Lambda(lptr) => matches!(other, Value::Lambda(optr) if lptr == optr),
             Value::Continuation(c) => matches!(other, Value::Continuation(oc) if c == oc),
             Value::Promise(p) => matches!(other, Value::Promise(op) if Gc::ptr_eq(*p, *op)),
             Value::Parameter(p) => matches!(other, Value::Parameter(op) if p == op),
-            Value::Error(_) => todo!(),
+            Value::Error(e) => matches!(other, Value::Error(oe) if Gc::ptr_eq(*e, *oe)),
         }
     }
 }
@@ -433,7 +492,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
 
                 // special handling for null
                 if Gc::ptr_eq(self.value_ptr, self.null_ptr) {
-                    return write!(f, "'()");
+                    return write!(f, "()");
                 }
 
                 write!(f, "(")?;
@@ -454,10 +513,10 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
                                 }
                             )?;
                         } else {
-                            write!(f, "'()")?;
+                            write!(f, "()")?;
                         }
                     } else {
-                        write!(f, "'()")?;
+                        write!(f, "()")?;
                     }
                     if !cdr.is_none_or(|cdr| Gc::ptr_eq(cdr, self.null_ptr)) {
                         write!(f, " ")?;

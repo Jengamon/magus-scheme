@@ -1,8 +1,10 @@
 // TODO Split, if this file gets too large, into separate files
 pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, MonotonicDescending};
 pub use control::{Apply, CallCc, Features};
-pub use conversions::{Exact, Inexact, StringToNumber, StringToSymbol, SymbolToString};
-pub use equality::{IsEq, IsEqv};
+pub use conversions::{
+    Exact, Inexact, ListToString, StringToList, StringToNumber, StringToSymbol, SymbolToString,
+};
+pub use equality::{IsEq, IsEqual, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr, Map};
 pub use math::{
     Add, Denominator, Divide, ExactIntegerSqrt, Gcd, Lcm, Multiply, Numerator, Subtract,
@@ -65,6 +67,26 @@ mod equality {
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
             Ok(LambdaReturn::Return(vec![
                 Value::Bool(args[0] == args[1]).into_ptr(&ctx),
+            ]))
+        }
+    }
+
+    #[derive(Collect, Debug)]
+    #[collect(require_static)]
+    pub struct IsEqual;
+
+    impl<'gc> NativeLambda<'gc> for IsEqual {
+        fn arity(&self) -> Arity {
+            Arity::Exact(2)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            Ok(LambdaReturn::Return(vec![
+                Value::Bool(args[0].borrow().is_equal(*args[1].borrow())).into_ptr(&ctx),
             ]))
         }
     }
@@ -1643,7 +1665,7 @@ mod conversions {
         ExactReal, SchemeNumber, Value,
         lexer::{SyntaxToken, read_number},
         runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
-        value::{self, Number},
+        value::{self, ConsCell, Number},
     };
 
     #[derive(Debug, Collect)]
@@ -1864,6 +1886,125 @@ mod conversions {
                 )))
                 .into_ptr(&ctx),
             ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct ListToString;
+
+    impl<'gc> NativeLambda<'gc> for ListToString {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let Value::Cons(c) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "list->string expects a proper list as its argument"
+                ))?;
+            };
+
+            if !c.is_list(args[0], ctx.thread_ctx.null_value) {
+                return Err(anyhow::anyhow!(
+                    "list->string expects a proper list as its argument"
+                ))?;
+            }
+
+            let values: Vec<_> = c
+                .list_values(args[0], ctx.thread_ctx.null_value)
+                .into_iter()
+                .map(|v| match *v.borrow() {
+                    Value::Char(c) => Ok(c),
+                    _ => Err(anyhow::anyhow!(
+                        "list->string expects a proper list of chars as its argument"
+                    )),
+                })
+                .collect::<Result<_, _>>()?;
+            let s = String::from_iter(values);
+
+            Ok(LambdaReturn::Return(vec![
+                Value::String(Gc::new(&ctx, RefLock::new(s)).into()).into_ptr(&ctx),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct StringToList;
+
+    impl<'gc> NativeLambda<'gc> for StringToList {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            use num::ToPrimitive;
+            let Value::String(s) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "string->list expects a string as its first argument"
+                ))?;
+            };
+
+            let maybe_start = args.get(1);
+            let start = if let Some(start) = maybe_start {
+                match *start.borrow() {
+                    Value::Number(n) if matches!(*n, Number::Integer(_)) => {
+                        let Number::Integer(start) = &*n else {
+                            unreachable!()
+                        };
+
+                        start
+                            .to_usize()
+                            .ok_or(anyhow::anyhow!("string->list: start is too big"))?
+                    }
+                    _ => Err(anyhow::anyhow!(
+                        "string->list expects an integer as its second argument"
+                    ))?,
+                }
+            } else {
+                0usize
+            };
+
+            let maybe_end = args.get(2);
+            let end = if let Some(end) = maybe_end {
+                match *end.borrow() {
+                    Value::Number(n) if matches!(*n, Number::Integer(_)) => {
+                        let Number::Integer(end) = &*n else {
+                            unreachable!()
+                        };
+
+                        end.to_usize()
+                            .ok_or(anyhow::anyhow!("string->list: end is too big"))?
+                    }
+                    _ => Err(anyhow::anyhow!(
+                        "string->list expects an integer as its third argument"
+                    ))?,
+                }
+            } else {
+                s.borrow().len()
+            };
+
+            if end < start {
+                return Err(anyhow::anyhow!("string->list: start must be less than end"))?;
+            }
+
+            let s = &s.borrow()[start..end];
+            let chars: Vec<_> = s.chars().map(|c| Value::Char(c).into_ptr(&ctx)).collect();
+
+            Ok(LambdaReturn::Return(vec![ConsCell::from_iter(
+                &ctx,
+                ctx.thread_ctx.null_value,
+                chars,
+            )]))
         }
     }
 }

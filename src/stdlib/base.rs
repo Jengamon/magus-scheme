@@ -25,9 +25,9 @@ pub use macros::{DefineSyntax, SyntaxRules};
 pub use procedures::{
     Add, Apply, Ascending, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr, Cons,
     Denominator, Descending, Divide, Equal, Exact, ExactIntegerSqrt, Features, Gcd, Inexact, IsEq,
-    IsEqv, IsEven, IsExact, IsInexact, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, Lcm,
-    Map, MonotonicAscending, MonotonicDescending, Multiply, Numerator, StringToNumber,
-    StringToSymbol, Subtract, SymbolToString, Values,
+    IsEqual, IsEqv, IsEven, IsExact, IsInexact, IsNull, IsOdd, IsPair, IsProcedure, IsString,
+    IsSymbol, Lcm, ListToString, Map, MonotonicAscending, MonotonicDescending, Multiply, Numerator,
+    StringToList, StringToNumber, StringToSymbol, Subtract, SymbolToString, Values,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -351,6 +351,7 @@ impl Module for Base {
             ">=",
             "eq?",
             "eqv?",
+            "equal?",
             "car",
             "cdr",
             "caar",
@@ -388,6 +389,8 @@ impl Module for Base {
             "cond-expand",
             "exact-integer-sqrt",
             "map",
+            "list->string",
+            "string->list",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -423,6 +426,7 @@ impl Module for Base {
             ">=" => lambda!(Descending),
             "eq?" => lambda!(IsEq),
             "eqv?" => lambda!(IsEqv),
+            "equal?" => lambda!(IsEqual),
             "car" => lambda!(Car),
             "cdr" => lambda!(Cdr),
             "caar" => lambda!(Caar),
@@ -455,6 +459,8 @@ impl Module for Base {
             "with-exception-handler" => lambda!(WithExceptionHandler),
             "exact-integer-sqrt" => lambda!(ExactIntegerSqrt),
             "map" => lambda!(Map::default()),
+            "list->string" => lambda!(ListToString),
+            "string->list" => lambda!(StringToList),
             _ => None,
         }
     }

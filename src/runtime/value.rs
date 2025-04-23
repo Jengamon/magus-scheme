@@ -424,7 +424,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
             Value::Bool(b) => write!(f, "#{}", if b { "t" } else { "f" }),
             Value::Char(c) => write!(
                 f,
-                "#{}",
+                "#\\{}",
                 escape_write_char(c, true).into_iter().collect::<Box<str>>()
             ),
             Value::Vector(ref vec) if vec.is_circular(self.value_ptr) => {
@@ -866,7 +866,40 @@ impl<'gc> ConsCell<'gc> {
                 // (and probably ever)
                 Value::Cons(cell) if stack.iter().all(|ptr| !Gc::ptr_eq(*ptr, self_ptr)) => {
                     stack.push(self_ptr);
-                    if cell.is_list_impl(val, null_ptr, stack) {
+                    if !cell.is_list_impl(val, null_ptr, stack) {
+                        return false;
+                    }
+                    assert!(Gc::ptr_eq(stack.pop().unwrap(), self_ptr));
+                }
+                _ => return false,
+            }
+        }
+        true
+    }
+
+    /// Returns if a cons cell is a valid list
+    ///
+    /// # Parameters
+    /// - `self_ptr`: [`ValuePtr`] pointing to this [`ConsCell`]
+    pub fn is_list(&self, self_ptr: ValuePtr<'gc>, null_ptr: ValuePtr<'gc>) -> bool {
+        let mut stack = vec![];
+        self.is_list_impl(self_ptr, null_ptr, &mut stack)
+    }
+
+    fn is_listable_impl(
+        &self,
+        self_ptr: ValuePtr<'gc>,
+        null_ptr: ValuePtr<'gc>,
+        stack: &mut Vec<ValuePtr<'gc>>,
+    ) -> bool {
+        if let Some(val) = self.cdr {
+            match *val.borrow() {
+                Value::Cons(_) if Gc::ptr_eq(val, null_ptr) => return true,
+                // only non-self recursive values are considered lists (for now)
+                // (and probably ever)
+                Value::Cons(cell) if stack.iter().all(|ptr| !Gc::ptr_eq(*ptr, self_ptr)) => {
+                    stack.push(self_ptr);
+                    if cell.is_listable_impl(val, null_ptr, stack) {
                         return true;
                     }
                     assert!(Gc::ptr_eq(stack.pop().unwrap(), self_ptr));
@@ -877,13 +910,23 @@ impl<'gc> ConsCell<'gc> {
         true
     }
 
-    /// `None` if not a valid list
+    /// Returns if a cons cell can look like a list
+    ///
+    /// # Parameters
+    /// - `self_ptr`: [`ValuePtr`] pointing to this [`ConsCell`]
+    pub fn is_listable(&self, self_ptr: ValuePtr<'gc>, null_ptr: ValuePtr<'gc>) -> bool {
+        let mut stack = vec![];
+        self.is_listable_impl(self_ptr, null_ptr, &mut stack)
+    }
+
+    /// Get the values of a list (permissively treating improper lists as proper but skipping
+    /// the last value)
     pub fn list_values(
         &self,
         self_ptr: ValuePtr<'gc>,
         null_ptr: ValuePtr<'gc>,
     ) -> impl IntoIterator<Item = ValuePtr<'gc>> + use<'gc> {
-        if !self.is_list(self_ptr, null_ptr) {
+        if !self.is_listable(self_ptr, null_ptr) {
             return if let Some(car) = self.car {
                 vec![car]
             } else {
@@ -907,15 +950,6 @@ impl<'gc> ConsCell<'gc> {
 
             std::iter::once(car).chain(cdr).collect::<Vec<_>>()
         }
-    }
-
-    /// Returns if a cons cell is a valid list
-    ///
-    /// # Parameters
-    /// - `self_ptr`: [`ValuePtr`] pointing to this [`ConsCell`]
-    pub fn is_list(&self, self_ptr: ValuePtr<'gc>, null_ptr: ValuePtr<'gc>) -> bool {
-        let mut stack = vec![];
-        self.is_list_impl(self_ptr, null_ptr, &mut stack)
     }
 
     pub fn from_iter<

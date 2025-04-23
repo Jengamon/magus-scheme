@@ -44,23 +44,40 @@ def escape_html []: string -> string {
 def upcase_scheme []: string -> string {
   if $in =~ "(?i)R\\dRS" {
     $in | str upcase
+  } else if $in =~ '(?i)srfi \d+' {
+    $in | str upcase
   } else {
     $in
   }
 }
 
+def library_name []: string -> string {
+  if $in =~ '(?i)srfi \d+' {
+    $in
+  } else {
+    $"scheme ($in)"
+  }
+}
+
 let section_format = {|it|
-$"### (if ($it.impl-type | is_empty) {"symbol"} else {$it.impl-type} | str capitalize) `\(scheme ($in.library))`: _($it.identifier | into string | escape_html)_
+$"### (if ($it.impl-type | is_empty) {"symbol"} else {$it.impl-type} | str capitalize) `\(($in.library | library_name))`: _($it.identifier | into string | escape_html)_
 - Implementation status: (match $it.impl-status { true => {($impled)}, never => {($never_impled)}, partial => {($partial_impled)}, _ => {($not_impled)}})
 - _(if ($it.description | is_empty) { 'No description' } else { $it.description | escape_html })_
 (if ($it.notes? | is_empty) {''} else {$"\n($it.notes | escape_html)"})
 "}
 
-let section_text = $sections | sort-by library | each {
+let section_text = $sections | where library !~ '(?i)srfi \d+' | sort-by library | each {
 let all_impled = ($in.items | all { $in.impl-status == true})
 let all_nevered = ($in.items | all { $in.impl-status == never})
 let impl_mark = if $all_impled { $" ($impled)" } else if $all_nevered { $" ($never_impled)" } else { "" }
-$"## Scheme Standard: ($in.library | str title-case | upcase_scheme) Library `\(scheme ($in.library)\)`($impl_mark)
+$"## Scheme Standard: ($in.library | str title-case | upcase_scheme) Library `\(($in.library | library_name)\)`($impl_mark)
 ($in.items | each $section_format | str join "\n")"};
 
-[$prelude] ++ $section_text  | str join "\n"
+let srfi_section_text = $sections | where library =~ '(?i)srfi \d+' | sort-by library | each {
+let all_impled = ($in.items | all { $in.impl-status == true})
+let all_nevered = ($in.items | all { $in.impl-status == never})
+let impl_mark = if $all_impled { $" ($impled)" } else if $all_nevered { $" ($never_impled)" } else { "" }
+$"## Scheme SRFI: ($in.library | str title-case | upcase_scheme) Library `\(($in.library | library_name)\)`($impl_mark)
+($in.items | each $section_format | str join "\n")"};
+
+[$prelude] ++ $section_text ++ $srfi_section_text  | str join "\n"

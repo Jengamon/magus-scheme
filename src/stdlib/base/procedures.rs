@@ -10,7 +10,7 @@ pub use math::{
     Add, Denominator, Divide, ExactIntegerSqrt, Gcd, Lcm, Multiply, Numerator, Subtract,
 };
 pub use predicates::{
-    IsEven, IsExact, IsInexact, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol,
+    IsEven, IsExact, IsInexact, IsList, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol,
 };
 pub use structure::{CallWithValues, Cons, Values};
 
@@ -1339,13 +1339,17 @@ mod predicates {
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
-            let val = match *args[0].borrow() {
+            let is_pair = match *args[0].borrow() {
                 Value::Cons(_) if Gc::ptr_eq(args[0], ctx.thread_ctx.null_value) => false,
                 Value::Cons(_) => true,
                 _ => false,
             };
 
-            Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+            Ok(LambdaReturn::Return(vec![if is_pair {
+                ctx.thread_ctx.true_value
+            } else {
+                ctx.thread_ctx.false_value
+            }]))
         }
     }
 
@@ -1363,13 +1367,37 @@ mod predicates {
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
-            // TODO Do we allow the degenerate case of a cons cell with (None None)?
-            // It does mean that we can just do a pointer comparison...
-            //
-            // I think no, for the stdlib, the only pair considered to be null is the thread null value
-            let val = matches!(*args[0].borrow(), Value::Cons(_) if Gc::ptr_eq(args[0], ctx.thread_ctx.null_value));
+            let is_null = matches!(*args[0].borrow(), Value::Cons(_) if Gc::ptr_eq(args[0], ctx.thread_ctx.null_value));
 
-            Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+            Ok(LambdaReturn::Return(vec![if is_null {
+                ctx.thread_ctx.true_value
+            } else {
+                ctx.thread_ctx.false_value
+            }]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IsList;
+
+    impl<'gc> NativeLambda<'gc> for IsList {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let is_list = matches!(*args[0].borrow(), Value::Cons(c) if c.is_list(args[0], ctx.thread_ctx.null_value));
+
+            Ok(LambdaReturn::Return(vec![if is_list {
+                ctx.thread_ctx.true_value
+            } else {
+                ctx.thread_ctx.false_value
+            }]))
         }
     }
 

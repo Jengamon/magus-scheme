@@ -6,7 +6,7 @@
 ; that getting the name before it's defined is...undefined. But any runtime tricks
 ; are in this module
 (import (magus impl))
-(export list not memq memv abs square boolean? boolean=?
+(export list not memq memv member abs square boolean? boolean=?
     zero? positive? negative? length)
 ; Sketch functions (to be removed once implemented properly)
 (export assq assv)
@@ -45,7 +45,6 @@
                 #f)))
     (if (and (not (null? lst)) (boolean? (car lst)))
         (boolean=-iter (car lst) (cdr lst))
-        ; rn we just use #f, but it *should* error (maybe??)
         (if (null? lst) #t #f)))
   (define (memq x lst)
       (define (memq-iter a lst)
@@ -89,6 +88,14 @@
                   (car ascl)
                   (assv-iter k (cdr ascl)))))
       (assv-iter x alist))
+  (define (member x lst)
+      (define (member-iter a lst)
+          (if (null? lst)
+              #f
+              (if (equal? a (car lst))
+                  lst
+                  (member-iter a (cdr lst)))))
+      (member-iter x lst))
   ; TODO member, which uses equal (does a length check, and should error if rest is too long,
   ; so waiting on impls equal?, raise)
   (define-syntax when

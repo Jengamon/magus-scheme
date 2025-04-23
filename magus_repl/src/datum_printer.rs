@@ -309,7 +309,7 @@ impl DatumVisitor for DatumPrintImpl<'_, '_> {
             if let Some(char) = char.char() {
                 write!(
                     visitor.fmt,
-                    "#{}",
+                    "#\\{}",
                     escape_write_char(char, true)
                         .into_iter()
                         .collect::<Box<str>>()

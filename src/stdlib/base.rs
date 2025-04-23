@@ -25,9 +25,9 @@ pub use macros::{DefineSyntax, SyntaxRules};
 pub use procedures::{
     Add, Apply, Ascending, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr, Cons,
     Denominator, Descending, Divide, Equal, Exact, ExactIntegerSqrt, Features, Gcd, Inexact, IsEq,
-    IsEqual, IsEqv, IsEven, IsExact, IsInexact, IsNull, IsOdd, IsPair, IsProcedure, IsString,
-    IsSymbol, Lcm, ListToString, Map, MonotonicAscending, MonotonicDescending, Multiply, Numerator,
-    StringToList, StringToNumber, StringToSymbol, Subtract, SymbolToString, Values,
+    IsEqual, IsEqv, IsEven, IsExact, IsInexact, IsList, IsNull, IsOdd, IsPair, IsProcedure,
+    IsString, IsSymbol, Lcm, ListToString, Map, MonotonicAscending, MonotonicDescending, Multiply,
+    Numerator, StringToList, StringToNumber, StringToSymbol, Subtract, SymbolToString, Values,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -391,6 +391,7 @@ impl Module for Base {
             "map",
             "list->string",
             "string->list",
+            "list?",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -461,6 +462,7 @@ impl Module for Base {
             "map" => lambda!(Map::default()),
             "list->string" => lambda!(ListToString),
             "string->list" => lambda!(StringToList),
+            "list?" => lambda!(IsList),
             _ => None,
         }
     }

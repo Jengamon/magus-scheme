@@ -21,8 +21,8 @@ pub use lasso;
 pub use rowan;
 
 pub use compiler::{
-    ExternalCompilerContext, LibraryName, LibraryNameItem, Syntax, SyntaxContext, SyntaxReturn,
-    World,
+    ExternalCompilerContext, LibraryDefinitionContext, LibraryName, LibraryNameItem, ParseProgram,
+    Syntax, SyntaxContext, SyntaxReturn, World,
 };
 pub use general_parser::{CompoundTermKind, TokenKind, gast::*, general_parse};
 pub use interpreter::{ChunkHandle, CompilerHandle, Interpreter, ThreadHandle};

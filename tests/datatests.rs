@@ -42,7 +42,7 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
     )?;
     let includer = NullIncluder;
     let comp = interp.new_compiler();
-    let thread = interp.new_empty_thread();
+    let thread = interp.new_thread();
     interp.register_module(
         &thread,
         &comp,
@@ -80,7 +80,6 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
         },
     )?;
     let mut fuel = Fuel::with(1_000_000);
-    // let thread = interp.new_thread(&chunk);
     interp.run(&thread, |ctx, arena, _| {
         // TODO no Option
         let chunk = arena.get_chunk(&chunk).expect("freed chunk");

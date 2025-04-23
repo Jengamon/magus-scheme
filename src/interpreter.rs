@@ -501,7 +501,7 @@ impl Interpreter {
         Ok(())
     }
 
-    pub fn new_empty_thread(&mut self) -> ThreadHandle {
+    pub fn new_thread(&mut self) -> ThreadHandle {
         let knob = Arc::new(());
         self.arena.mutate_root(|mc, arena| {
             let new_thread = thread::Thread::default();

@@ -22,3 +22,6 @@ tasks:
   - build-wasm: |
       cd magus
       just build-wasm-ci
+  - readme-example: |
+      cd magus
+      cargo run --example readme

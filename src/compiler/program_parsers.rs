@@ -233,12 +233,16 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
                             ),
                         )));
                     }
-                    Some(SchemeNumber::Exact(ExactReal::Nan { is_neg: _ })) => {
+                    Some(SchemeNumber::Exact(ExactReal::Nan { is_neg })) => {
                         // negativity of nan is ignored, as it is not meaningful
                         self.ptr = Some(Ok(Gc::new(
                             self.mc,
                             Program::new(
-                                ProgramData::Inexact(f64::NAN),
+                                ProgramData::Inexact(f64::NAN.copysign(if is_neg {
+                                    -1.
+                                } else {
+                                    1.
+                                })),
                                 source_data!(self, number),
                             ),
                         )));

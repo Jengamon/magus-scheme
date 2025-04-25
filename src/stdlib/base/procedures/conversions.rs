@@ -113,21 +113,6 @@ impl<'gc> NativeLambda<'gc> for NumberToString {
             })
             .unwrap_or(Ok(10))?;
 
-        fn to_string_radix(mut num: u32, radix: u32) -> String {
-            let mut digits = Vec::new();
-            while num > 0 {
-                let digit = num % radix;
-                num /= radix;
-                digits.push(char::from_digit(digit, radix).unwrap());
-            }
-
-            if digits.is_empty() {
-                "0".to_string()
-            } else {
-                digits.into_iter().rev().collect()
-            }
-        }
-
         let output_string = match num {
             Either::Right(n) if radix == 10 => {
                 // decimal-point repr
@@ -148,38 +133,13 @@ impl<'gc> NativeLambda<'gc> for NumberToString {
                 "number->string: unsupported inexact radix {radix}"
             ))?,
             Either::Left(i) => match &*i {
-                Number::Integer(i) => {
-                    let (sign, components) = i.to_u32_digits();
-                    let mut string = String::new();
-                    for i in components.into_iter().rev() {
-                        string.push_str(&to_string_radix(i, radix));
-                    }
-
-                    if sign == Sign::Minus {
-                        format!("-{string}")
-                    } else {
-                        string
-                    }
-                }
+                Number::Integer(i) => i.to_str_radix(radix),
                 Number::Rational(r) => {
-                    let (sign_num, component_num) = r.numer().to_u32_digits();
-                    let (sign_den, component_den) = r.denom().to_u32_digits();
-
-                    let mut string = String::new();
-
-                    for i in component_num.into_iter().rev() {
-                        string.push_str(&to_string_radix(i, radix));
-                    }
+                    let mut string = r.numer().to_str_radix(radix);
                     string.push('/');
-                    for i in component_den.into_iter().rev() {
-                        string.push_str(&to_string_radix(i, radix));
-                    }
+                    string.push_str(&r.denom().to_str_radix(radix));
 
-                    if (sign_num == Sign::Minus) ^ (sign_den == Sign::Minus) {
-                        format!("-{string}")
-                    } else {
-                        string
-                    }
+                    string
                 }
             },
         };

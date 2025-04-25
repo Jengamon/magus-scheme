@@ -333,6 +333,9 @@ fn is_valid_scheme_identifier(s: &str) -> bool {
     if !s.is_ascii() || s.chars().any(|c| !c.is_ascii_graphic()) {
         // Scheme identifiers must be in ASCII (and not whitespace)
         return false;
+    } else if s.starts_with(|c: char| c.is_ascii_digit()) {
+        // due to lexing technicalities, we don't allow unquoted idenfiers to start with an ASCII digit
+        return false;
     }
     true
 }

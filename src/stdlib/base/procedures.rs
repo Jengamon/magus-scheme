@@ -2,7 +2,8 @@
 pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, MonotonicDescending};
 pub use control::{Apply, CallCc, Features};
 pub use conversions::{
-    Exact, Inexact, ListToString, StringToList, StringToNumber, StringToSymbol, SymbolToString,
+    CharToInteger, Exact, Inexact, IntegerToChar, ListToString, StringToList, StringToNumber,
+    StringToSymbol, SymbolToString,
 };
 pub use equality::{IsEq, IsEqual, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr, Map};
@@ -2033,6 +2034,71 @@ mod conversions {
                 ctx.thread_ctx.null_value,
                 chars,
             )]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct CharToInteger;
+
+    impl<'gc> NativeLambda<'gc> for CharToInteger {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let Value::Char(c) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "char->integer expects a char as its argument"
+                ))?;
+            };
+
+            Ok(LambdaReturn::Return(vec![
+                // u32 -> i64 is always valid, so we can unwrap
+                Value::Number(Gc::new(&ctx, Number::from_integer(c as u32).unwrap()))
+                    .into_ptr(&ctx),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IntegerToChar;
+
+    impl<'gc> NativeLambda<'gc> for IntegerToChar {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            use num::ToPrimitive;
+            let Value::Number(n) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "integer->char expects an exact integer as its argument"
+                ))?;
+            };
+
+            let Number::Integer(i) = &*n else {
+                return Err(anyhow::anyhow!(
+                    "integer->char expects an exact integer as its argument"
+                ))?;
+            };
+
+            let Some(c) = i.to_u32().and_then(char::from_u32) else {
+                return Err(anyhow::anyhow!(
+                    "integer->char expects a valid Unicode codepoint"
+                ))?;
+            };
+
+            Ok(LambdaReturn::Return(vec![Value::Char(c).into_ptr(&ctx)]))
         }
     }
 }

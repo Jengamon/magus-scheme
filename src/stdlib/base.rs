@@ -23,11 +23,12 @@ pub use define::{Define, SetBang};
 pub use exception::WithExceptionHandler;
 pub use macros::{DefineSyntax, SyntaxRules};
 pub use procedures::{
-    Add, Apply, Ascending, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr, Cons,
-    Denominator, Descending, Divide, Equal, Exact, ExactIntegerSqrt, Features, Gcd, Inexact, IsEq,
-    IsEqual, IsEqv, IsEven, IsExact, IsInexact, IsList, IsNull, IsOdd, IsPair, IsProcedure,
-    IsString, IsSymbol, Lcm, ListToString, Map, MonotonicAscending, MonotonicDescending, Multiply,
-    Numerator, StringToList, StringToNumber, StringToSymbol, Subtract, SymbolToString, Values,
+    Add, Apply, Ascending, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr, CharToInteger,
+    Cons, Denominator, Descending, Divide, Equal, Exact, ExactIntegerSqrt, Features, Gcd, Inexact,
+    IntegerToChar, IsEq, IsEqual, IsEqv, IsEven, IsExact, IsInexact, IsList, IsNull, IsOdd, IsPair,
+    IsProcedure, IsString, IsSymbol, Lcm, ListToString, Map, MonotonicAscending,
+    MonotonicDescending, Multiply, Numerator, StringToList, StringToNumber, StringToSymbol,
+    Subtract, SymbolToString, Values,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -392,6 +393,8 @@ impl Module for Base {
             "list->string",
             "string->list",
             "list?",
+            "char->integer",
+            "integer->char",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -463,6 +466,8 @@ impl Module for Base {
             "list->string" => lambda!(ListToString),
             "string->list" => lambda!(StringToList),
             "list?" => lambda!(IsList),
+            "char->integer" => lambda!(CharToInteger),
+            "integer->char" => lambda!(IntegerToChar),
             _ => None,
         }
     }

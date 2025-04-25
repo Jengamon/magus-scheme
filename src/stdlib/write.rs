@@ -13,6 +13,7 @@ mod procedures {
     use crate::{
         Value, ValuePtr,
         runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        value::ModeWrite,
     };
 
     #[derive(Debug, Collect)]
@@ -56,7 +57,11 @@ mod procedures {
 
             eprintln!(
                 "{}",
-                Value::resolve_into(args[0], ctx.interner.clone(), ctx.thread_ctx.null_value)
+                Value::resolve_into::<_, ModeWrite>(
+                    args[0],
+                    ctx.interner.clone(),
+                    ctx.thread_ctx.null_value
+                )
             );
 
             // rn just ignore ports, and just dump to stdout

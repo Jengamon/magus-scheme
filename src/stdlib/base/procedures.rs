@@ -6,9 +6,10 @@ pub use conversions::{
     StringToNumber, StringToSymbol, SymbolToString,
 };
 pub use equality::{IsEq, IsEqual, IsEqv};
+pub use error::{Raise, RaiseContinuable};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr, Map};
 pub use math::{
-    Add, Denominator, Divide, ExactIntegerSqrt, Gcd, Lcm, Multiply, Numerator, Subtract,
+    Add, Denominator, Divide, ExactIntegerSqrt, Expt, Gcd, Lcm, Multiply, Numerator, Subtract,
 };
 pub use predicates::{
     IsEven, IsExact, IsInexact, IsList, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol,
@@ -16,6 +17,56 @@ pub use predicates::{
 pub use structure::{CallWithValues, Cons, Values};
 
 mod conversions;
+
+mod error {
+    use gc_arena::Collect;
+
+    use crate::runtime::lambda::{
+        Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext,
+    };
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Raise;
+
+    impl<'gc> NativeLambda<'gc> for Raise {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            _ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            Ok(LambdaReturn::Raise {
+                error: args[0],
+                is_continuable: false,
+            })
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct RaiseContinuable;
+
+    impl<'gc> NativeLambda<'gc> for RaiseContinuable {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            _ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            Ok(LambdaReturn::Raise {
+                error: args[0],
+                is_continuable: true,
+            })
+        }
+    }
+}
 
 mod equality {
     //! defines eq? and eqv?
@@ -381,6 +432,27 @@ mod math {
     use either::Either;
     use gc_arena::{Collect, Gc};
     use num::{BigInt, FromPrimitive, Zero};
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Expt;
+
+    impl<'gc> NativeLambda<'gc> for Expt {
+        fn arity(&self) -> Arity {
+            Arity::Exact(2)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            // So if our *second* argument is a non-negative exact integer, we preserve exactness,
+            // otherwise we return an inexact b/c figuring out how to do roots is not what I wanna do.
+            // (If the value is negative and the power even, we don't support it yet as we don't support complex numbers)
+            todo!("expt")
+        }
+    }
 
     #[derive(Debug, Collect)]
     #[collect(require_static)]

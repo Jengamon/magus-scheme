@@ -6,6 +6,7 @@ use magus::{
     interpreter::{Interpreter, NullIncluder, ValuePointers, thread::Thread},
     lexer::Token,
     library_name, stdlib,
+    value::ModeWrite,
 };
 use similar::{ChangeTag, TextDiff};
 
@@ -105,7 +106,10 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
             match ctx.thread.borrow().result().expect("finished execution") {
                 Ok(v) => Ok(v
                     .into_iter()
-                    .map(|v| Value::resolve_into(v, interner.clone(), ctx.null_value).to_string())
+                    .map(|v| {
+                        Value::resolve_into::<_, ModeWrite>(v, interner.clone(), ctx.null_value)
+                            .to_string()
+                    })
                     .map(|s| Box::from(s.as_str()))
                     .collect::<Vec<_>>()),
                 // Alternate display, which removes pointer data (for UI tests)

@@ -1,6 +1,7 @@
 //! Representation of Scheme values
 
 use core::fmt;
+use std::marker::PhantomData;
 use std::rc::Rc;
 use std::string::String as StdString;
 
@@ -281,24 +282,27 @@ impl<'gc> Value<'gc> {
         Gc::new(mc, RefLock::new(self))
     }
 
-    pub fn resolve_into<K: lasso::Resolver>(
+    #[expect(private_bounds)]
+    pub fn resolve_into<K: lasso::Resolver, M: WriteMode + Collect<'gc>>(
         value_ptr: ValuePtr<'gc>,
         resolver: impl IntoResolver<Resolver = K> + 'static,
         null_ptr: ValuePtr<'gc>,
-    ) -> ResolvedValue<'gc, K> {
+    ) -> ResolvedValue<'gc, K, M> {
         Self::resolve(value_ptr, Rc::new(resolver.into_resolver()), null_ptr)
     }
 
-    pub fn resolve<K: lasso::Resolver>(
+    #[expect(private_bounds)]
+    pub fn resolve<K: lasso::Resolver, M: WriteMode + Collect<'gc>>(
         value_ptr: ValuePtr<'gc>,
         resolver: Rc<K>,
         null_ptr: ValuePtr<'gc>,
-    ) -> ResolvedValue<'gc, K> {
+    ) -> ResolvedValue<'gc, K, M> {
         ResolvedValue {
             value: *value_ptr.borrow(),
             value_ptr,
             null_ptr,
             resolver,
+            _marker: PhantomData,
         }
     }
 }
@@ -308,6 +312,7 @@ enum ConsInner<'a, 'gc> {
     Vec(&'a Vector<'gc>),
 }
 // Handles printing possibly self-referential structures
+// TODO Accept a WriteMode
 struct CircularPrinter<'a, 'gc, K: lasso::Resolver> {
     cons: ConsInner<'a, 'gc>,
     self_ptr: ValuePtr<'gc>,
@@ -370,28 +375,41 @@ pub fn escape_write_char(c: char, is_single: bool) -> Vec<char> {
     }
 }
 
+trait WriteMode {}
+#[derive(Collect)]
+#[collect(require_static)]
+pub struct ModeWrite {}
+impl WriteMode for ModeWrite {}
+#[derive(Collect)]
+#[collect(require_static)]
+pub struct ModeDisplay {}
+impl WriteMode for ModeDisplay {}
 #[derive(Collect)]
 #[collect(no_drop)]
-pub struct ResolvedValue<'gc, R: lasso::Resolver> {
+// TODO Add a way to select "modes" (Display, Write, WriteShared(?), WriteSimple(?)) at *compile time* (typestate)
+#[expect(private_bounds)]
+pub struct ResolvedValue<'gc, R: lasso::Resolver, M: WriteMode + Collect<'gc> = ModeWrite> {
     value: Value<'gc>,
     value_ptr: ValuePtr<'gc>,
     null_ptr: ValuePtr<'gc>,
     #[collect(require_static)]
     resolver: Rc<R>,
+    _marker: PhantomData<M>,
 }
 
-impl<R: lasso::Resolver> Clone for ResolvedValue<'_, R> {
+impl<'gc, R: lasso::Resolver, M: WriteMode + Collect<'gc>> Clone for ResolvedValue<'gc, R, M> {
     fn clone(&self) -> Self {
         Self {
             value: self.value,
             value_ptr: self.value_ptr,
             null_ptr: self.null_ptr,
             resolver: self.resolver.clone(),
+            _marker: PhantomData,
         }
     }
 }
 
-impl<K: lasso::Resolver> fmt::Debug for ResolvedValue<'_, K> {
+impl<'gc, K: lasso::Resolver, M: WriteMode + Collect<'gc>> fmt::Debug for ResolvedValue<'gc, K, M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ResolvedValue")
             .field("value", &self.value)
@@ -399,7 +417,7 @@ impl<K: lasso::Resolver> fmt::Debug for ResolvedValue<'_, K> {
     }
 }
 
-impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
+impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K, ModeWrite> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.value {
             Value::Values(v) => {
@@ -452,11 +470,12 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
                     write!(
                         f,
                         "{}",
-                        ResolvedValue {
+                        ResolvedValue::<K, ModeWrite> {
                             value: *elem.borrow(),
                             value_ptr: *elem,
                             null_ptr: self.null_ptr,
-                            resolver: Rc::clone(&self.resolver)
+                            resolver: Rc::clone(&self.resolver),
+                            _marker: PhantomData,
                         }
                     )?;
                 }
@@ -508,11 +527,12 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
                             write!(
                                 f,
                                 "{}",
-                                ResolvedValue {
+                                ResolvedValue::<K, ModeWrite> {
                                     value: *car.borrow(),
                                     value_ptr: car,
                                     null_ptr: self.null_ptr,
-                                    resolver: Rc::clone(&self.resolver)
+                                    resolver: Rc::clone(&self.resolver),
+                                    _marker: PhantomData,
                                 }
                             )?;
                         } else {
@@ -533,11 +553,178 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K> {
                             write!(
                                 f,
                                 ". {})",
-                                ResolvedValue {
+                                ResolvedValue::<K, ModeWrite> {
                                     value: *cdr.borrow(),
                                     value_ptr: cdr,
                                     null_ptr: self.null_ptr,
                                     resolver: Rc::clone(&self.resolver),
+                                    _marker: PhantomData,
+                                }
+                            )?;
+                            break;
+                        }
+                    } else {
+                        write!(f, ")")?;
+                        break;
+                    }
+                }
+
+                Ok(())
+            }
+            Value::Environment(_) => todo!(),
+            Value::UserStruct(user) => {
+                let label = user.label().unwrap_or("userdata");
+                write!(f, "#<{label} {:p}>", &self.value)
+            }
+            // Value::Lambda(lambda) => write!(f, "<lambda {:p}>", *lambda.borrow()),
+            Value::Lambda(lambda) => write!(f, "#<lambda {lambda:p}>"),
+            Value::Continuation(cont) => write!(f, "#<continuation {cont}>"),
+            Value::Promise(p) => write!(
+                f,
+                "#<promise {} . {p:p}>",
+                if p.borrow().is_evaled() { "#t" } else { "#f" }
+            ),
+            Value::Parameter(p) => write!(f, "#<parameter {p:p}>"),
+            Value::Error(e) => write!(f, "#<error {e:p}>"),
+        }
+    }
+}
+
+impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K, ModeDisplay> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.value {
+            Value::Values(v) => {
+                write!(f, "#<values count={}>", v.len())
+            }
+            Value::Undefined => write!(f, "#<undef>"),
+            Value::Void => write!(f, ""),
+            Value::Number(n) => write!(f, "{n}"),
+            Value::Inexact(fp) if fp.is_infinite() && fp.is_sign_negative() => write!(f, "-inf.0"),
+            Value::Inexact(fp) if fp.is_infinite() => write!(f, "+inf.0"),
+            Value::Inexact(fp) if fp.is_nan() => write!(f, "+nan.0"),
+            Value::Inexact(fp) => write!(f, "{fp}"),
+            Value::String(s) => write!(f, "{}", s.borrow()),
+            Value::Symbol(sym) if is_valid_scheme_identifier(self.resolver.resolve(&sym.0)) => {
+                write!(f, "{}", self.resolver.resolve(&sym.0))
+            }
+            Value::Symbol(sym) => write!(f, "|{}|", self.resolver.resolve(&sym.0)),
+            Value::Bool(b) => write!(f, "#{}", if b { "t" } else { "f" }),
+            Value::Char(c) => write!(
+                f,
+                "{}",
+                escape_write_char(c, true).into_iter().collect::<Box<str>>()
+            ),
+            Value::Vector(ref vec) if vec.is_circular(self.value_ptr) => {
+                write!(
+                    f,
+                    "{}",
+                    CircularPrinter {
+                        cons: ConsInner::Vec(vec),
+                        self_ptr: self.value_ptr,
+                        resolver: self.resolver.clone(),
+                        null_ptr: self.null_ptr,
+                    }
+                )
+            }
+            Value::Vector(ref vec) => {
+                // just dfs the structure, we know it isn't circular
+                write!(f, "#(")?;
+                for (idx, elem) in vec.vec.iter().enumerate() {
+                    if idx != 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(
+                        f,
+                        "{}",
+                        ResolvedValue::<K, ModeDisplay> {
+                            value: *elem.borrow(),
+                            value_ptr: *elem,
+                            null_ptr: self.null_ptr,
+                            resolver: Rc::clone(&self.resolver),
+                            _marker: PhantomData,
+                        }
+                    )?;
+                }
+                write!(f, ")")
+            }
+            Value::Bytevector(bv) => {
+                write!(f, "#u8(")?;
+                for (idx, elem) in bv.vec.iter().enumerate() {
+                    if idx != 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", elem)?;
+                }
+                write!(f, ")")?;
+                Ok(())
+            }
+            // Handle with cons printer (or just display name and member names, so we don't have to!!)
+            Value::Record(_) => todo!(),
+            Value::InputPort(_) => todo!(),
+            Value::OutputPort(_) => todo!(),
+            // TODO this needs special handling, b/c a cons might recurse into itself
+            Value::Cons(ref cons) if cons.is_circular(self.value_ptr) => {
+                write!(
+                    f,
+                    "{}",
+                    CircularPrinter {
+                        cons: ConsInner::Cons(cons),
+                        self_ptr: self.value_ptr,
+                        resolver: self.resolver.clone(),
+                        null_ptr: self.null_ptr,
+                    }
+                )
+            }
+            Value::Cons(ref cons) => {
+                // we know we aren't cyclical at *all*, so just dfs
+
+                // special handling for null
+                if Gc::ptr_eq(self.value_ptr, self.null_ptr) {
+                    return write!(f, "()");
+                }
+
+                write!(f, "(")?;
+                let mut cons = *cons;
+                loop {
+                    let car = cons.car;
+                    let cdr = cons.cdr;
+                    if let Some(car) = car {
+                        if !Gc::ptr_eq(car, self.null_ptr) {
+                            write!(
+                                f,
+                                "{}",
+                                ResolvedValue::<K, ModeDisplay> {
+                                    value: *car.borrow(),
+                                    value_ptr: car,
+                                    null_ptr: self.null_ptr,
+                                    resolver: Rc::clone(&self.resolver),
+                                    _marker: PhantomData,
+                                }
+                            )?;
+                        } else {
+                            write!(f, "()")?;
+                        }
+                    } else {
+                        write!(f, "()")?;
+                    }
+                    if !cdr.is_none_or(|cdr| Gc::ptr_eq(cdr, self.null_ptr)) {
+                        write!(f, " ")?;
+                        let Some(cdr) = cdr else {
+                            unreachable!();
+                        };
+
+                        if let Value::Cons(c) = *cdr.borrow() {
+                            cons = c;
+                        } else {
+                            write!(
+                                f,
+                                ". {})",
+                                ResolvedValue::<K, ModeDisplay> {
+                                    value: *cdr.borrow(),
+                                    value_ptr: cdr,
+                                    null_ptr: self.null_ptr,
+                                    resolver: Rc::clone(&self.resolver),
+                                    _marker: PhantomData,
                                 }
                             )?;
                             break;

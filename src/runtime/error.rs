@@ -10,6 +10,8 @@ use crate::{
     value::ResolvedValue,
 };
 
+use super::value::ModeDisplay;
+
 /// Errors store this to record where they're from
 #[derive(Debug, Clone, Copy, Collect)]
 #[collect(no_drop)]
@@ -30,11 +32,11 @@ pub struct StackFrame<'gc> {
 #[collect(no_drop)]
 pub enum SchemeErrorType<'gc> {
     /// A value was raised by 'raise
-    #[error("a value was raised: {0}")]
-    Raise(ResolvedValue<'gc, lasso::RodeoResolver>),
+    #[error("{0}")]
+    Raise(ResolvedValue<'gc, lasso::RodeoResolver, ModeDisplay>),
     /// A value was raised by 'raise-continuable
-    #[error("a value was raised: {0}")]
-    RaiseContinuable(ResolvedValue<'gc, lasso::RodeoResolver>),
+    #[error("{0}")]
+    RaiseContinuable(ResolvedValue<'gc, lasso::RodeoResolver, ModeDisplay>),
     /// Handler returned on a non-continuable error
     #[error("error handler failed: {0}")]
     HandlerFailed(Gc<'gc, SchemeErrorType<'gc>>),

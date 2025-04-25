@@ -12,7 +12,9 @@ use magus::{
     interpreter::{CompilerHandle, Includer, Interpreter, ThreadHandle, ValueHandle},
     library_name,
     runtime::lambda::Lambda,
-    stdlib, ChunkHandle, ContainsDatum, ExternalCompilerContext, Fuel, GAstNode, Module, Value,
+    stdlib,
+    value::ModeWrite,
+    ChunkHandle, ContainsDatum, ExternalCompilerContext, Fuel, GAstNode, Module, Value,
 };
 use reedline::{
     Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus, PromptViMode, Reedline,
@@ -358,7 +360,11 @@ fn execute(
                                 for v in res {
                                     println!(
                                         "{}",
-                                        Value::resolve_into(v, interner.clone(), ctx.null_value)
+                                        Value::resolve_into::<_, ModeWrite>(
+                                            v,
+                                            interner.clone(),
+                                            ctx.null_value
+                                        )
                                     );
                                 }
                             }

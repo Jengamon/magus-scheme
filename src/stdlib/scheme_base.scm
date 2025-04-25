@@ -20,6 +20,7 @@
       (if (null? a)
           l
           (length-iter (cdr a) (+ l 1))))
+    (if (not (list? xs)) (raise-continuable "length expects a list as its argument"))
     (length-iter xs 0))
   ; this impl should work bc = keeps numbers exact as long as the input is exact
   ; and we use exact to force the input to be exact

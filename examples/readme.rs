@@ -1,3 +1,5 @@
+use magus::value::ModeWrite;
+
 fn main() -> anyhow::Result<()> {
     use magus::ParseProgram;
     let input: &str = include_str!("input.scm");
@@ -67,7 +69,11 @@ fn main() -> anyhow::Result<()> {
                 for result in res {
                     eprintln!(
                         "{}",
-                        magus::Value::resolve_into(result, interner.clone(), ctx.null_value)
+                        magus::Value::resolve_into::<_, ModeWrite>(
+                            result,
+                            interner.clone(),
+                            ctx.null_value
+                        )
                     )
                 }
                 Ok(())

@@ -304,47 +304,29 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
             #[token("-")]
             Minus,
 
-            #[token("0")]
-            Zero,
-            #[token("1")]
-            One,
-
-            #[token("2")]
-            Two,
-            #[token("3")]
-            Three,
-            #[token("4")]
-            Four,
-            #[token("5")]
-            Five,
-            #[token("6")]
-            Six,
-            #[token("7")]
-            Seven,
-
-            #[token("8")]
-            Eight,
-            #[token("9")]
-            Nine,
-
-            #[token("a")]
-            #[token("A")]
-            Ten,
-            #[token("b")]
-            #[token("B")]
-            Eleven,
-            #[token("c")]
-            #[token("C")]
-            Twelve,
-            #[token("d")]
-            #[token("D")]
-            Thirteen,
-            #[token("e")]
-            #[token("E")]
-            Fourteen,
-            #[token("f")]
-            #[token("F")]
-            Fifteen,
+            #[token("0", |_| 0)]
+            #[token("1", |_| 1)]
+            #[token("2", |_| 2)]
+            #[token("3", |_| 3)]
+            #[token("4", |_| 4)]
+            #[token("5", |_| 5)]
+            #[token("6", |_| 6)]
+            #[token("7", |_| 7)]
+            #[token("8", |_| 8)]
+            #[token("9", |_| 9)]
+            #[token("a", |_| 10)]
+            #[token("A", |_| 10)]
+            #[token("b", |_| 11)]
+            #[token("B", |_| 11)]
+            #[token("c", |_| 12)]
+            #[token("C", |_| 12)]
+            #[token("d", |_| 13)]
+            #[token("D", |_| 13)]
+            #[token("e", |_| 14)]
+            #[token("E", |_| 14)]
+            #[token("f", |_| 15)]
+            #[token("F", |_| 15)]
+            Digit(u32),
 
             #[token("+inf.0")]
             PosInf,
@@ -373,9 +355,13 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                 is_neg: bool,
                 value: f64,
                 post_digits: Vec<u8>,
+            },
+            DecimalExponent {
+                is_neg: bool,
+                value: f64,
+                post_digits: Vec<u8>,
                 exponent_sign: Option<Sign>,
-                exponent: BigUint,
-                is_valid: bool,
+                exponent_digits: Vec<u8>,
             },
             Rational {
                 is_neg: bool,
@@ -391,77 +377,18 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                 ParsingState::Init => match lexer.next() {
                     Some(Ok(StnComponent::Plus)) => ParsingState::ReadSign { is_neg: false },
                     Some(Ok(StnComponent::Minus)) => ParsingState::ReadSign { is_neg: true },
-                    Some(Ok(StnComponent::Zero)) => ParsingState::ReadDigit {
+                    Some(Ok(StnComponent::Digit(0))) => ParsingState::ReadDigit {
                         is_neg: false,
                         prefix: BigUint::ZERO,
                     },
-                    Some(Ok(StnComponent::One)) => ParsingState::ReadDigit {
+                    Some(Ok(StnComponent::Digit(d))) if radix > d => ParsingState::ReadDigit {
                         is_neg: false,
-                        prefix: BigUint::new(vec![1]),
-                    },
-                    Some(Ok(StnComponent::Two)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg: false,
-                        prefix: BigUint::new(vec![2]),
-                    },
-                    Some(Ok(StnComponent::Three)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg: false,
-                        prefix: BigUint::new(vec![3]),
-                    },
-                    Some(Ok(StnComponent::Four)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg: false,
-                        prefix: BigUint::new(vec![4]),
-                    },
-                    Some(Ok(StnComponent::Five)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg: false,
-                        prefix: BigUint::new(vec![5]),
-                    },
-                    Some(Ok(StnComponent::Six)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg: false,
-                        prefix: BigUint::new(vec![6]),
-                    },
-                    Some(Ok(StnComponent::Seven)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg: false,
-                        prefix: BigUint::new(vec![7]),
-                    },
-                    Some(Ok(StnComponent::Eight)) if radix >= 10 => ParsingState::ReadDigit {
-                        is_neg: false,
-                        prefix: BigUint::new(vec![8]),
-                    },
-                    Some(Ok(StnComponent::Nine)) if radix >= 10 => ParsingState::ReadDigit {
-                        is_neg: false,
-                        prefix: BigUint::new(vec![9]),
-                    },
-                    Some(Ok(StnComponent::Ten)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg: false,
-                        prefix: BigUint::new(vec![10]),
-                    },
-                    Some(Ok(StnComponent::Eleven)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg: false,
-                        prefix: BigUint::new(vec![11]),
-                    },
-                    Some(Ok(StnComponent::Twelve)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg: false,
-                        prefix: BigUint::new(vec![12]),
-                    },
-                    Some(Ok(StnComponent::Thirteen)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg: false,
-                        prefix: BigUint::new(vec![13]),
-                    },
-                    Some(Ok(StnComponent::Fourteen)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg: false,
-                        prefix: BigUint::new(vec![14]),
-                    },
-                    Some(Ok(StnComponent::Fifteen)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg: false,
-                        prefix: BigUint::new(vec![15]),
+                        prefix: BigUint::new(vec![d]),
                     },
                     Some(Ok(StnComponent::Dot)) if radix == 10 => ParsingState::Decimal {
                         is_neg: false,
                         value: 0.0,
                         post_digits: vec![],
-                        exponent_sign: None,
-                        exponent: BigUint::ZERO,
-                        is_valid: false,
                     },
                     Some(Ok(StnComponent::PosInf)) if lexer.next().is_none() => {
                         return Ok(LambdaReturn::Return(vec![
@@ -483,154 +410,47 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                     _ => break,
                 },
                 ParsingState::ReadSign { is_neg } => match lexer.next() {
-                    Some(Ok(StnComponent::Zero)) => ParsingState::ReadDigit {
+                    Some(Ok(StnComponent::Digit(0))) => ParsingState::ReadDigit {
                         is_neg,
                         prefix: BigUint::ZERO,
                     },
-                    Some(Ok(StnComponent::One)) => ParsingState::ReadDigit {
+                    Some(Ok(StnComponent::Digit(d))) if radix > d => ParsingState::ReadDigit {
                         is_neg,
-                        prefix: BigUint::new(vec![1]),
-                    },
-                    Some(Ok(StnComponent::Two)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: BigUint::new(vec![2]),
-                    },
-                    Some(Ok(StnComponent::Three)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: BigUint::new(vec![3]),
-                    },
-                    Some(Ok(StnComponent::Four)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: BigUint::new(vec![4]),
-                    },
-                    Some(Ok(StnComponent::Five)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: BigUint::new(vec![5]),
-                    },
-                    Some(Ok(StnComponent::Six)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: BigUint::new(vec![6]),
-                    },
-                    Some(Ok(StnComponent::Seven)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: BigUint::new(vec![7]),
-                    },
-                    Some(Ok(StnComponent::Eight)) if radix >= 10 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: BigUint::new(vec![8]),
-                    },
-                    Some(Ok(StnComponent::Nine)) if radix >= 10 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: BigUint::new(vec![9]),
-                    },
-                    Some(Ok(StnComponent::Ten)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: BigUint::new(vec![10]),
-                    },
-                    Some(Ok(StnComponent::Eleven)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: BigUint::new(vec![11]),
-                    },
-                    Some(Ok(StnComponent::Twelve)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: BigUint::new(vec![12]),
-                    },
-                    Some(Ok(StnComponent::Thirteen)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: BigUint::new(vec![13]),
-                    },
-                    Some(Ok(StnComponent::Fourteen)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: BigUint::new(vec![14]),
-                    },
-                    Some(Ok(StnComponent::Fifteen)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: BigUint::new(vec![15]),
+                        prefix: BigUint::new(vec![d]),
                     },
                     Some(Ok(StnComponent::Dot)) if radix == 10 => ParsingState::Decimal {
                         is_neg,
                         value: 0.0,
                         post_digits: vec![],
-                        exponent_sign: None,
-                        exponent: BigUint::ZERO,
-                        is_valid: false,
                     },
                     _ => break,
                 },
                 ParsingState::ReadDigit { is_neg, prefix } => match lexer.next() {
-                    Some(Ok(StnComponent::Zero)) => ParsingState::ReadDigit {
+                    Some(Ok(StnComponent::Digit(0))) => ParsingState::ReadDigit {
                         is_neg,
                         prefix: prefix * BigUint::new(vec![radix]),
                     },
-                    Some(Ok(StnComponent::One)) => ParsingState::ReadDigit {
+                    Some(Ok(StnComponent::Digit(d))) if radix > d => ParsingState::ReadDigit {
                         is_neg,
-                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![1]),
+                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![d]),
                     },
-                    Some(Ok(StnComponent::Two)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![2]),
-                    },
-                    Some(Ok(StnComponent::Three)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![3]),
-                    },
-                    Some(Ok(StnComponent::Four)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![4]),
-                    },
-                    Some(Ok(StnComponent::Five)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![5]),
-                    },
-                    Some(Ok(StnComponent::Six)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![6]),
-                    },
-                    Some(Ok(StnComponent::Seven)) if radix >= 8 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![7]),
-                    },
-                    Some(Ok(StnComponent::Eight)) if radix >= 10 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![8]),
-                    },
-                    Some(Ok(StnComponent::Nine)) if radix >= 10 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![9]),
-                    },
-                    Some(Ok(StnComponent::Ten)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![10]),
-                    },
-                    Some(Ok(StnComponent::Eleven)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![11]),
-                    },
-                    Some(Ok(StnComponent::Twelve)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![12]),
-                    },
-                    Some(Ok(StnComponent::Thirteen)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![13]),
-                    },
-                    Some(Ok(StnComponent::Fourteen)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![14]),
-                    },
-                    Some(Ok(StnComponent::Fifteen)) if radix == 16 => ParsingState::ReadDigit {
-                        is_neg,
-                        prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![15]),
-                    },
+                    Some(Ok(StnComponent::Digit(0xe))) if radix == 10 => {
+                        ParsingState::DecimalExponent {
+                            is_neg,
+                            value: prefix
+                                .to_f64()
+                                .ok_or(anyhow::anyhow!("string->number: number too big"))?,
+                            post_digits: vec![],
+                            exponent_sign: None,
+                            exponent_digits: vec![],
+                        }
+                    }
                     Some(Ok(StnComponent::Dot)) if radix == 10 => ParsingState::Decimal {
                         is_neg,
                         value: prefix
                             .to_f64()
                             .ok_or(anyhow::anyhow!("string->number: number too big"))?,
                         post_digits: vec![],
-                        exponent_sign: None,
-                        exponent: BigUint::ZERO,
-                        is_valid: false,
                     },
                     Some(Ok(StnComponent::Slash)) => ParsingState::Rational {
                         is_neg,
@@ -654,36 +474,40 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                     is_neg,
                     value,
                     mut post_digits,
-                    exponent_sign,
-                    exponent,
-                    is_valid,
                 } => match lexer.next() {
-                    Some(Ok(StnComponent::Zero)) => {
-                        post_digits.push(0);
+                    Some(Ok(StnComponent::Digit(d))) if d < 10 => {
+                        post_digits.push(d as u8);
                         ParsingState::Decimal {
                             is_neg,
                             value,
                             post_digits,
-                            exponent_sign,
-                            exponent,
-                            is_valid,
                         }
                     }
-                    _ => {
-                        if is_valid {
+                    Some(Ok(StnComponent::Digit(0xe))) => ParsingState::DecimalExponent {
+                        is_neg,
+                        value,
+                        post_digits,
+                        exponent_sign: None,
+                        exponent_digits: vec![],
+                    },
+                    None => {
+                        if !post_digits.is_empty() {
                             return Ok(LambdaReturn::Return(vec![
                                 Value::Inexact(
                                     value
-                                        * (10.0f64.powf(
-                                            BigInt::from_biguint(
-                                                exponent_sign.unwrap_or(Sign::Plus),
-                                                exponent,
-                                            )
-                                            .to_f64()
-                                            .ok_or(
-                                                anyhow::anyhow!("string->number: number too big"),
-                                            )?,
-                                        )),
+                                        + post_digits
+                                            .into_iter()
+                                            .enumerate()
+                                            .map(|(idx, n)| {
+                                                Ok::<_, anyhow::Error>(n as f64
+                                                    / 10.0f64.powi(
+                                                        TryInto::<i32>::try_into(idx)
+                                                        .map_err(|_| {
+                                                            anyhow::anyhow!("string->number: number too big")
+                                                        })? + 1,
+                                                    ))
+                                            })
+                                            .collect::<Result<Vec<_>, _>>()?.into_iter().sum::<f64>()
                                 )
                                 .into_ptr(&ctx),
                             ]));
@@ -691,150 +515,107 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                             break;
                         }
                     }
+                    _ => break,
+                },
+                ParsingState::DecimalExponent {
+                    is_neg,
+                    value,
+                    post_digits,
+                    exponent_sign,
+                    mut exponent_digits,
+                } => match lexer.next() {
+                    Some(Ok(StnComponent::Plus))
+                        if exponent_sign.is_none() && exponent_digits.is_empty() =>
+                    {
+                        ParsingState::DecimalExponent {
+                            is_neg,
+                            value,
+                            post_digits,
+                            exponent_sign: Some(Sign::Plus),
+                            exponent_digits,
+                        }
+                    }
+                    Some(Ok(StnComponent::Minus))
+                        if exponent_sign.is_none() && exponent_digits.is_empty() =>
+                    {
+                        ParsingState::DecimalExponent {
+                            is_neg,
+                            value,
+                            post_digits,
+                            exponent_sign: Some(Sign::Minus),
+                            exponent_digits,
+                        }
+                    }
+                    Some(Ok(StnComponent::Digit(d))) if d < 10 => {
+                        exponent_digits.push(d as u8);
+                        ParsingState::DecimalExponent {
+                            is_neg,
+                            value,
+                            post_digits,
+                            exponent_sign,
+                            exponent_digits,
+                        }
+                    }
+                    None => {
+                        if !exponent_digits.is_empty() {
+                            return Ok(LambdaReturn::Return(vec![
+                                Value::Inexact(
+                                    (value
+                                        + post_digits
+                                            .into_iter()
+                                            .enumerate()
+                                            .map(|(idx, n)| {
+                                                Ok::<_, anyhow::Error>(n as f64
+                                                    / 10.0f64.powi(
+                                                        TryInto::<i32>::try_into(idx)
+                                                        .map_err(|_| {
+                                                            anyhow::anyhow!("string->number: number too big")
+                                                        })? + 1,
+                                                    ))
+                                            })
+                                            .collect::<Result<Vec<_>, _>>()?.into_iter().sum::<f64>())
+                                            * 10.0f64.powi(
+                                                if let Some(Sign::Minus) = exponent_sign {
+                                                    -1
+                                                } else {
+                                                    1
+                                                } * exponent_digits
+                                                    .into_iter()
+                                                    .rev()
+                                                    .enumerate()
+                                                    .map(|(idx, n)| Ok::<_, anyhow::Error>(n as i32 *
+                                                        10i32.pow(TryInto::<u32>::try_into(idx)
+                                                        .map_err(|_| {
+                                                            anyhow::anyhow!("string->number: number too big")
+                                                        })?)))
+                                                    .collect::<Result<Vec<_>, _>>()?.into_iter().sum::<i32>(),
+                                            ),
+                                )
+                                .into_ptr(&ctx),
+                            ]));
+                        } else {
+                            break;
+                        }
+                    }
+                    _ => break,
                 },
                 ParsingState::Rational {
                     is_neg,
                     numer,
                     denom,
                 } => match lexer.next() {
-                    Some(Ok(StnComponent::Zero)) => ParsingState::Rational {
+                    Some(Ok(StnComponent::Digit(0))) => ParsingState::Rational {
                         is_neg,
                         numer,
                         denom: denom.map(|denom| denom * BigUint::new(vec![radix])),
                     },
-                    Some(Ok(StnComponent::One)) => ParsingState::Rational {
+                    Some(Ok(StnComponent::Digit(d))) if radix > d => ParsingState::Rational {
                         is_neg,
                         numer,
                         denom: if let Some(denom) = denom {
-                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![1]))
+                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![d]))
                         } else {
-                            Some(BigUint::new(vec![1]))
-                        },
-                    },
-                    Some(Ok(StnComponent::Two)) if radix >= 8 => ParsingState::Rational {
-                        is_neg,
-                        numer,
-                        denom: if let Some(denom) = denom {
-                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![2]))
-                        } else {
-                            Some(BigUint::new(vec![2]))
-                        },
-                    },
-                    Some(Ok(StnComponent::Three)) if radix >= 8 => ParsingState::Rational {
-                        is_neg,
-                        numer,
-                        denom: if let Some(denom) = denom {
-                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![3]))
-                        } else {
-                            Some(BigUint::new(vec![3]))
-                        },
-                    },
-                    Some(Ok(StnComponent::Four)) if radix >= 8 => ParsingState::Rational {
-                        is_neg,
-                        numer,
-                        denom: if let Some(denom) = denom {
-                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![4]))
-                        } else {
-                            Some(BigUint::new(vec![4]))
-                        },
-                    },
-                    Some(Ok(StnComponent::Five)) if radix >= 8 => ParsingState::Rational {
-                        is_neg,
-                        numer,
-                        denom: if let Some(denom) = denom {
-                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![5]))
-                        } else {
-                            Some(BigUint::new(vec![5]))
-                        },
-                    },
-                    Some(Ok(StnComponent::Six)) if radix >= 8 => ParsingState::Rational {
-                        is_neg,
-                        numer,
-                        denom: if let Some(denom) = denom {
-                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![6]))
-                        } else {
-                            Some(BigUint::new(vec![6]))
-                        },
-                    },
-                    Some(Ok(StnComponent::Seven)) if radix >= 8 => ParsingState::Rational {
-                        is_neg,
-                        numer,
-                        denom: if let Some(denom) = denom {
-                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![7]))
-                        } else {
-                            Some(BigUint::new(vec![7]))
-                        },
-                    },
-                    Some(Ok(StnComponent::Eight)) if radix >= 10 => ParsingState::Rational {
-                        is_neg,
-                        numer,
-                        denom: if let Some(denom) = denom {
-                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![8]))
-                        } else {
-                            Some(BigUint::new(vec![8]))
-                        },
-                    },
-                    Some(Ok(StnComponent::Nine)) if radix >= 10 => ParsingState::Rational {
-                        is_neg,
-                        numer,
-                        denom: if let Some(denom) = denom {
-                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![9]))
-                        } else {
-                            Some(BigUint::new(vec![9]))
-                        },
-                    },
-                    Some(Ok(StnComponent::Ten)) if radix == 16 => ParsingState::Rational {
-                        is_neg,
-                        numer,
-                        denom: if let Some(denom) = denom {
-                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![10]))
-                        } else {
-                            Some(BigUint::new(vec![10]))
-                        },
-                    },
-                    Some(Ok(StnComponent::Eleven)) if radix == 16 => ParsingState::Rational {
-                        is_neg,
-                        numer,
-                        denom: if let Some(denom) = denom {
-                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![11]))
-                        } else {
-                            Some(BigUint::new(vec![11]))
-                        },
-                    },
-                    Some(Ok(StnComponent::Twelve)) if radix == 16 => ParsingState::Rational {
-                        is_neg,
-                        numer,
-                        denom: if let Some(denom) = denom {
-                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![12]))
-                        } else {
-                            Some(BigUint::new(vec![12]))
-                        },
-                    },
-                    Some(Ok(StnComponent::Thirteen)) if radix == 16 => ParsingState::Rational {
-                        is_neg,
-                        numer,
-                        denom: if let Some(denom) = denom {
-                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![13]))
-                        } else {
-                            Some(BigUint::new(vec![13]))
-                        },
-                    },
-                    Some(Ok(StnComponent::Fourteen)) if radix == 16 => ParsingState::Rational {
-                        is_neg,
-                        numer,
-                        denom: if let Some(denom) = denom {
-                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![14]))
-                        } else {
-                            Some(BigUint::new(vec![14]))
-                        },
-                    },
-                    Some(Ok(StnComponent::Fifteen)) if radix == 16 => ParsingState::Rational {
-                        is_neg,
-                        numer,
-                        denom: if let Some(denom) = denom {
-                            Some(denom * BigUint::new(vec![radix]) + BigUint::new(vec![15]))
-                        } else {
-                            Some(BigUint::new(vec![15]))
+                            Some(BigUint::new(vec![d]))
                         },
                     },
                     None => {

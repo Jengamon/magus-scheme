@@ -2,8 +2,8 @@
 pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, MonotonicDescending};
 pub use control::{Apply, CallCc, Features};
 pub use conversions::{
-    CharToInteger, Exact, Inexact, IntegerToChar, ListToString, StringToList, StringToNumber,
-    StringToSymbol, SymbolToString,
+    CharToInteger, Exact, Inexact, IntegerToChar, ListToString, NumberToString, StringToList,
+    StringToNumber, StringToSymbol, SymbolToString,
 };
 pub use equality::{IsEq, IsEqual, IsEqv};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr, Map};
@@ -1687,6 +1687,7 @@ mod structure {
 }
 
 mod conversions {
+    use either::Either;
     use gc_arena::{Collect, Gc, RefLock};
     use num::{BigInt, BigRational, Zero, bigint::Sign};
 
@@ -1746,6 +1747,125 @@ mod conversions {
             };
 
             Ok(LambdaReturn::Return(vec![ptr]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct NumberToString;
+
+    impl<'gc> NativeLambda<'gc> for NumberToString {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(1)
+        }
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            if args.len() > 2 {
+                return Err(anyhow::anyhow!(
+                    "number->string expects either 1 or 2 arguments"
+                ))?;
+            }
+
+            // TODO Support complex numbers
+            let num = match *args[0].borrow() {
+                Value::Number(n) => Either::Left(n),
+                Value::Inexact(i) => Either::Right(i),
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "number->string expects a number as its first argument"
+                    ))?;
+                }
+            };
+
+            let radix = if args.len() == 2 {
+                let Value::Number(radix) = *args[1].borrow() else {
+                    return Err(anyhow::anyhow!(
+                        "number->string expects an exact number as its second argument"
+                    ))?;
+                };
+                Some(radix)
+            } else {
+                None
+            };
+
+            let radix = radix
+                .map(|r| match &*r {
+                    Number::Integer(i) if i == &BigInt::new(Sign::Plus, vec![2]) => Ok(2),
+                    Number::Integer(i) if i == &BigInt::new(Sign::Plus, vec![8]) => Ok(8),
+                    Number::Integer(i) if i == &BigInt::new(Sign::Plus, vec![10]) => Ok(10),
+                    Number::Integer(i) if i == &BigInt::new(Sign::Plus, vec![16]) => Ok(16),
+                    _ => Err(anyhow::anyhow!(
+                        "number->string expects its second argument to be exactly {{2, 8, 10, 16}}"
+                    )),
+                })
+                .unwrap_or(Ok(10))?;
+
+            fn to_string_radix(mut num: u32, radix: u32) -> String {
+                let mut digits = Vec::new();
+                while num > 0 {
+                    let digit = num % radix;
+                    num /= radix;
+                    digits.push(char::from_digit(digit, radix).unwrap());
+                }
+
+                if digits.is_empty() {
+                    "0".to_string()
+                } else {
+                    digits.into_iter().rev().collect()
+                }
+            }
+
+            let output_string = match num {
+                Either::Right(n) if radix == 10 => {
+                    // decimal-point repr
+                    format!("{n}")
+                }
+                Either::Right(_) => Err(anyhow::anyhow!(
+                    "number->string: unsupported inexact radix {radix}"
+                ))?,
+                Either::Left(i) => match &*i {
+                    Number::Integer(i) => {
+                        let (sign, components) = i.to_u32_digits();
+                        let mut string = String::new();
+                        for i in components.into_iter().rev() {
+                            string.push_str(&to_string_radix(i, radix));
+                        }
+
+                        if sign == Sign::Minus {
+                            format!("-{string}")
+                        } else {
+                            string
+                        }
+                    }
+                    Number::Rational(r) => {
+                        let (sign_num, component_num) = r.numer().to_u32_digits();
+                        let (sign_den, component_den) = r.denom().to_u32_digits();
+
+                        let mut string = String::new();
+
+                        for i in component_num.into_iter().rev() {
+                            string.push_str(&to_string_radix(i, radix));
+                        }
+                        string.push('/');
+                        for i in component_den.into_iter().rev() {
+                            string.push_str(&to_string_radix(i, radix));
+                        }
+
+                        if (sign_num == Sign::Minus) ^ (sign_den == Sign::Minus) {
+                            format!("-{string}")
+                        } else {
+                            string
+                        }
+                    }
+                },
+            };
+
+            Ok(LambdaReturn::Return(vec![
+                Value::String(Gc::new(&ctx, RefLock::new(output_string)).into()).into_ptr(&ctx),
+            ]))
         }
     }
 

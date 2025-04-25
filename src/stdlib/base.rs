@@ -27,8 +27,8 @@ pub use procedures::{
     Cons, Denominator, Descending, Divide, Equal, Exact, ExactIntegerSqrt, Features, Gcd, Inexact,
     IntegerToChar, IsEq, IsEqual, IsEqv, IsEven, IsExact, IsInexact, IsList, IsNull, IsOdd, IsPair,
     IsProcedure, IsString, IsSymbol, Lcm, ListToString, Map, MonotonicAscending,
-    MonotonicDescending, Multiply, Numerator, StringToList, StringToNumber, StringToSymbol,
-    Subtract, SymbolToString, Values,
+    MonotonicDescending, Multiply, NumberToString, Numerator, StringToList, StringToNumber,
+    StringToSymbol, Subtract, SymbolToString, Values,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -376,6 +376,7 @@ impl Module for Base {
             "and",
             "or",
             "string->number",
+            "number->string",
             "string->symbol",
             "symbol->string",
             "symbol?",
@@ -468,6 +469,7 @@ impl Module for Base {
             "list?" => lambda!(IsList),
             "char->integer" => lambda!(CharToInteger),
             "integer->char" => lambda!(IntegerToChar),
+            "number->string" => lambda!(NumberToString),
             _ => None,
         }
     }

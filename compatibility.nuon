@@ -146,7 +146,7 @@
     [ "base", "", newline, false, "", "" ],
     [ "base", "procedure", not, true, "returns #t if input is #f, and #f otherwise", "implemented in Scheme" ],
     [ "base", "procedure", null?, true, "test if a value is the empty list `'()`", "" ],
-    [ "base", "", number->string, false, "", "" ],
+    [ "base", "procedure", number->string, true, "convert a number to a string (optionally with a non-decimal radix)", "" ],
     [ "base", "", number?, false, "", "" ],
     [ "base", "procedure", numerator, true, "get the numerator of a rational input", "" ],
     [ "base", "procedure", odd?, true, "tests if a value is an odd integer", "" ],

@@ -320,7 +320,10 @@ pub(crate) fn read_number(
         let mut exponent_sign_state = None::<bool>;
         let mut is_neg_state = None::<bool>;
         loop {
-            // eprintln!("State {:?} ({s:?}) (im? {is_imaginary}) ({number_state:?} {leading_zeros} {second_number_state:?} {third_number_state:?} {exponent_sign_state:?} {is_neg_state:?})", iter.peek());
+            // eprintln!(
+            //     "State {:?} ({s:?}) (im? {is_imaginary}) ({number_state:?} {leading_zeros} {second_number_state:?} {third_number_state:?} {exponent_sign_state:?} {is_neg_state:?})",
+            //     iter.peek()
+            // );
             let ns = match s {
                 State::Start => match iter.next() {
                     Some('+') => {

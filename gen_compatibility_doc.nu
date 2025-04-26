@@ -62,8 +62,8 @@ def library_name []: string -> string {
 let section_format = {|it|
 $"### (if ($it.impl-type | is_empty) {"symbol"} else {$it.impl-type} | str capitalize) `\(($in.library | library_name))`: _($it.identifier | into string | escape_html)_
 - Implementation status: (match $it.impl-status { true => {($impled)}, never => {($never_impled)}, partial => {($partial_impled)}, _ => {($not_impled)}})
-- _(if ($it.description | is_empty) { 'No description' } else { $it.description | escape_html })_
-(if ($it.notes? | is_empty) {''} else {$"\n($it.notes | escape_html)"})
+- _(if ($it.description | is_empty) { 'No description' } else { $it.description })_
+(if ($it.notes? | is_empty) {''} else {$"\n($it.notes)"})
 "}
 
 let section_text = $sections | where library !~ '(?i)srfi \d+' | sort-by library | each {

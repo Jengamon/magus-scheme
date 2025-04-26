@@ -758,7 +758,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K, ModeDisplay> {
                 if p.borrow().is_evaled() { "#t" } else { "#f" }
             ),
             Value::Parameter(p) => write!(f, "#<parameter {p:p}>"),
-            Value::Error(e) => write!(f, "#<error {e:p}>"),
+            Value::Error(e) => write!(f, "{}", e.error_type),
         }
     }
 }

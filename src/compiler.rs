@@ -1953,10 +1953,6 @@ impl<'gc> Compiler<'gc> {
                         // Force upvalue if we need to call it
                         if let Some(upvalue_def_code) = self.force_upvalue(ref_upvalue) {
                             code.extend(upvalue_def_code);
-                            code.extend([
-                                Bytecode::SetUpvalue { index: ref_upvalue },
-                                Bytecode::Pop,
-                            ]);
                         }
                     }
                     code.extend(head_code);
@@ -2861,9 +2857,16 @@ impl<'gc> Compiler<'gc> {
     /// Find the definition of an upvalue at a point, then force it's definition
     fn force_upvalue(&self, upvalue_index: usize) -> Option<Vec<Bytecode>> {
         for argument_scope in self.scopes.iter().rev() {
-            for (name, v) in argument_scope.variables_defined.borrow().iter() {
+            for (name, v) in argument_scope.variables_defined.borrow_mut().iter_mut() {
                 if &Some(upvalue_index) == v {
-                    return Some(vec![Bytecode::Reference { symbol: *name }]);
+                    *v = None;
+                    return Some(vec![
+                        Bytecode::Reference { symbol: *name },
+                        Bytecode::SetUpvalue {
+                            index: upvalue_index,
+                        },
+                        Bytecode::Pop,
+                    ]);
                 }
             }
         }

@@ -20,9 +20,9 @@ use super::{error::SchemeErrorPtr, value::ContinuationPtr};
 #[derive(thiserror::Error, Debug)]
 pub enum LambdaError {
     #[error(transparent)]
-    NonContinuable(anyhow::Error),
+    NonContinuable(#[from] anyhow::Error),
     #[error(transparent)]
-    Continuable(#[from] anyhow::Error),
+    Continuable(anyhow::Error),
 }
 
 impl LambdaError {

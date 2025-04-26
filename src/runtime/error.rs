@@ -105,6 +105,7 @@ impl<'gc> SchemeErrorType<'gc> {
         match self {
             Self::Raise(v) => Some(v.value_ptr()),
             Self::RaiseContinuable(v, _) => Some(v.value_ptr()),
+            Self::HandlerFailed(h) => h.value(),
             _ => None,
         }
     }

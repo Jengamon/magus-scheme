@@ -7,9 +7,7 @@
 ; are in this module
 (import (magus impl))
 (export list not memq memv member abs square boolean? boolean=?
-    zero? positive? negative? length)
-; Sketch functions (to be removed once implemented properly)
-(export assq assv)
+    zero? positive? negative? length assq assv make-list)
 (begin
   (define (list . in) in)
   (define (not x) (if x #f #t))
@@ -47,6 +45,16 @@
     (if (and (not (null? lst)) (boolean? (car lst)))
         (boolean=-iter (car lst) (cdr lst))
         (if (null? lst) #t #f)))
+  (define (make-list n . fill)
+    (define (make-list-iter lst n fill)
+      (if (= n 0)
+          lst
+          (make-list-iter (cons fill lst) (- n 1) fill)))
+    (if (or (not (exact-integer? n)) (> 0 n)) (raise "make-list expects a positive or zero exact integer as its first argument"))
+    (if (> (length fill) 1) (raise "make-list expects 1 or 2 arguments"))
+    (if (> n 0)
+        (make-list-iter '() n (if (null? fill) 0 (car fill)))
+        '()))
   (define (memq x lst)
       (define (memq-iter a lst)
           (if (null? lst)
@@ -56,17 +64,15 @@
                   (memq-iter a (cdr lst)))))
       (memq-iter x lst))
   (define (assq x alist)
-      ; TODO This is a sketch b/c typechecking on "alist" is required
-      ; (list of lists where each member list has length == 2)
-      ; (b/c 'It is an error if alist (for “association list”) is not a list of pairs.'
-      ; in the report.) We *could* check it (if we support raise-continuable), but it would require
-      ; a separate iteration that isn't really worth it compared to just implementing it in Rust.
+      (define (assp-check p) (if (not (pair? (car p))) (raise "assq expects an association list as a second argument")))
       (define (assq-iter k ascl)
+          (assp-check ascl)
           (if (null? ascl)
               #f
-              (if (eq? k (caar ascl))
-                  (car ascl)
-                  (assq-iter k (cdr ascl)))))
+              (begin
+                  (if (eq? k (caar ascl))
+                      (car ascl)
+                      (assq-iter k (cdr ascl))))))
       (assq-iter x alist))
   (define (memv x lst)
       (define (memv-iter a lst)
@@ -77,26 +83,24 @@
                   (memv-iter a (cdr lst)))))
       (memv-iter x lst))
   (define (assv x alist)
-      ; TODO This is a sketch b/c typechecking on "alist" is required
-      ; (list of lists where each member list has length == 2)
-      ; (b/c 'It is an error if alist (for “association list”) is not a list of pairs.'
-      ; in the report.) We *could* check it (if we support raise-continuable), but it would require
-      ; a separate iteration that isn't really worth it compared to just implementing it in Rust.
+      (define (assp-check p) (if (not (or (null? p) (pair? (car p)))) (raise "assv expects an association list as a second argument")))
       (define (assv-iter k ascl)
+          (assp-check ascl)
           (if (null? ascl)
               #f
               (if (eqv? k (caar ascl))
                   (car ascl)
                   (assv-iter k (cdr ascl)))))
       (assv-iter x alist))
-  (define (member x lst)
-      (define (member-iter a lst)
+  (define (member x lst . compare)
+      (define (member-iter a lst compare)
           (if (null? lst)
               #f
-              (if (equal? a (car lst))
+              (if (compare a (car lst))
                   lst
-                  (member-iter a (cdr lst)))))
-      (member-iter x lst))
+                  (member-iter a (cdr lst) compare))))
+      (if (> (length compare) 1) (raise "member expects 2 or 3 arguments"))
+      (member-iter x lst (if (null? compare) equal? (car compare))))
   ; TODO member, which uses equal (does a length check, and should error if rest is too long,
   ; so waiting on impls equal?, raise)
   (define-syntax when

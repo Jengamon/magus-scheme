@@ -25,10 +25,11 @@ pub use macros::{DefineSyntax, SyntaxRules};
 pub use procedures::{
     Add, Apply, Ascending, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr, CharToInteger,
     Cons, Denominator, Descending, Divide, Equal, Exact, ExactIntegerSqrt, Expt, Features, Gcd,
-    Inexact, IntegerToChar, IsEq, IsEqual, IsEqv, IsEven, IsExact, IsInexact, IsList, IsNull,
-    IsOdd, IsPair, IsProcedure, IsString, IsSymbol, Lcm, ListToString, Map, MonotonicAscending,
-    MonotonicDescending, Multiply, NumberToString, Numerator, Raise, RaiseContinuable,
-    StringToList, StringToNumber, StringToSymbol, Subtract, SymbolToString, Values,
+    Inexact, IntegerToChar, IsEq, IsEqual, IsEqv, IsEven, IsExact, IsExactInteger, IsInexact,
+    IsInteger, IsList, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, Lcm, ListToString,
+    Map, MonotonicAscending, MonotonicDescending, Multiply, NumberToString, Numerator, Raise,
+    RaiseContinuable, StringToList, StringToNumber, StringToSymbol, Subtract, SymbolToString,
+    Values,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -399,6 +400,8 @@ impl Module for Base {
             "integer->char",
             "raise",
             "raise-continuable",
+            "integer?",
+            "exact-integer?",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -476,6 +479,8 @@ impl Module for Base {
             "number->string" => lambda!(NumberToString),
             "raise" => lambda!(Raise),
             "raise-continuable" => lambda!(RaiseContinuable),
+            "integer?" => lambda!(IsInteger),
+            "exact-integer?" => lambda!(IsExactInteger),
             _ => None,
         }
     }

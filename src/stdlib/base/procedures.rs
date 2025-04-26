@@ -12,7 +12,8 @@ pub use math::{
     Add, Denominator, Divide, ExactIntegerSqrt, Expt, Gcd, Lcm, Multiply, Numerator, Subtract,
 };
 pub use predicates::{
-    IsEven, IsExact, IsInexact, IsList, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol,
+    IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull, IsOdd, IsPair,
+    IsProcedure, IsString, IsSymbol,
 };
 pub use structure::{CallWithValues, Cons, Values};
 
@@ -1638,6 +1639,61 @@ mod predicates {
             };
 
             Ok(LambdaReturn::Return(vec![if ret {
+                ctx.thread_ctx.true_value
+            } else {
+                ctx.thread_ctx.false_value
+            }]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IsInteger;
+
+    impl<'gc> NativeLambda<'gc> for IsInteger {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let is_integer = match *args[0].borrow() {
+                Value::Number(n) => matches!(*n, Number::Integer(_)),
+                Value::Inexact(i) => i.fract() == 0.0,
+                _ => false,
+            };
+
+            Ok(LambdaReturn::Return(vec![if is_integer {
+                ctx.thread_ctx.true_value
+            } else {
+                ctx.thread_ctx.false_value
+            }]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IsExactInteger;
+
+    impl<'gc> NativeLambda<'gc> for IsExactInteger {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let is_exact_integer = match *args[0].borrow() {
+                Value::Number(n) => matches!(*n, Number::Integer(_)),
+                _ => false,
+            };
+
+            Ok(LambdaReturn::Return(vec![if is_exact_integer {
                 ctx.thread_ctx.true_value
             } else {
                 ctx.thread_ctx.false_value

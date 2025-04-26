@@ -1929,17 +1929,37 @@ impl<'gc> Compiler<'gc> {
                         code.extend(res?.into_bytecode());
                     }
 
-                    match head {
-                        ListHead::Program(program) => {
-                            code.extend(self.compile_code(ctx, *program)?.into_bytecode());
-                        }
+                    let head_code = match head {
+                        ListHead::Program(program) => self
+                            .compile_code(ctx, *program)?
+                            .into_bytecode()
+                            .into_iter()
+                            .collect(),
                         // head_symbol is Some(spur) where spur is the symbol we want
                         ListHead::DefineLibrary | ListHead::Import => {
-                            code.push(Bytecode::Reference {
+                            vec![Bytecode::Reference {
                                 symbol: head_symbol.unwrap(),
-                            });
+                            }]
                         }
                     };
+
+                    for ref_upvalue in head_code.iter().filter_map(|c| {
+                        if let Bytecode::FetchUpvalue { index } = c {
+                            Some(*index)
+                        } else {
+                            None
+                        }
+                    }) {
+                        // Force upvalue if we need to call it
+                        if let Some(upvalue_def_code) = self.force_upvalue(ref_upvalue) {
+                            code.extend(upvalue_def_code);
+                            code.extend([
+                                Bytecode::SetUpvalue { index: ref_upvalue },
+                                Bytecode::Pop,
+                            ]);
+                        }
+                    }
+                    code.extend(head_code);
 
                     code.push(Bytecode::Call { args });
                     Ok(SyntaxReturn::Code(code.into()))
@@ -2836,6 +2856,18 @@ impl<'gc> Compiler<'gc> {
         };
         self.environments.push(new_env);
         EnvironmentSpec(nzp)
+    }
+
+    /// Find the definition of an upvalue at a point, then force it's definition
+    fn force_upvalue(&self, upvalue_index: usize) -> Option<Vec<Bytecode>> {
+        for argument_scope in self.scopes.iter().rev() {
+            for (name, v) in argument_scope.variables_defined.borrow().iter() {
+                if &Some(upvalue_index) == v {
+                    return Some(vec![Bytecode::Reference { symbol: *name }]);
+                }
+            }
+        }
+        None
     }
 
     /// Helper function for pushing arguments to certain names (while also handling upvalues)

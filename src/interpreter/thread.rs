@@ -457,10 +457,13 @@ impl<'gc> Thread<'gc> {
                     ctx,
                     SchemeError {
                         backtrace: Self::make_backtrace(&self.frames),
-                        error_type: SchemeErrorType::HandlerFailed(Gc::new(
-                            ctx,
-                            err.error_type.clone(),
-                        )),
+                        error_type: if !matches!(err.error_type, SchemeErrorType::HandlerFailed(_))
+                        {
+                            SchemeErrorType::HandlerFailed(Gc::new(ctx, err.error_type.clone()))
+                        } else {
+                            // don't repeatedly wrap
+                            err.error_type.clone()
+                        },
                     },
                 ));
             }

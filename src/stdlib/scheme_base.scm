@@ -64,7 +64,7 @@
                   (memq-iter a (cdr lst)))))
       (memq-iter x lst))
   (define (assq x alist)
-      (define (assp-check p) (if (not (pair? (car p))) (raise "assq expects an association list as a second argument")))
+      (define (assp-check p) (if (not (or (null? p) (pair? (car p)))) (raise "assq expects an association list as a second argument")))
       (define (assq-iter k ascl)
           (assp-check ascl)
           (if (null? ascl)

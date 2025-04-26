@@ -4,7 +4,7 @@ use std::rc::Rc;
 use gc_arena::{Collect, Gc};
 
 use crate::{
-    ValueType,
+    ValuePtr, ValueType,
     bytecode::Bytecode,
     interpreter::thread::{Execution, LambdaException},
     value::ResolvedValue,
@@ -85,10 +85,19 @@ pub enum SchemeErrorType<'gc> {
     TooMuchRecursion,
 }
 
-impl SchemeErrorType<'_> {
+impl<'gc> SchemeErrorType<'gc> {
     /// Can Scheme catch and process the error?
     pub fn is_continuable(&self) -> bool {
         matches!(self, Self::RaiseContinuable(_) | Self::RustContinuable(_))
+    }
+
+    /// Argument value
+    pub fn value(&self) -> Option<ValuePtr<'gc>> {
+        match self {
+            Self::Raise(v) => Some(v.value_ptr()),
+            Self::RaiseContinuable(v) => Some(v.value_ptr()),
+            _ => None,
+        }
     }
 }
 

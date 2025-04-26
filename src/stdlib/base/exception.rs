@@ -72,10 +72,14 @@ impl<'gc> NativeLambda<'gc> for WithExceptionHandler {
         let [handler, _thunk] = Self::arguments(args)?;
         // TODO An error must capture its continuation for support of raise-continuation (?)
         if ctx.stack.is_empty() {
+            let arg = err
+                .error_type
+                .value()
+                .unwrap_or_else(|| Value::Error(err).into_ptr(&ctx));
             Ok(LambdaReturn::CallHandler {
                 lambda: handler,
                 exception: err,
-                args: vec![Value::Error(err).into_ptr(&ctx)],
+                args: vec![arg],
                 dynamic_wind: None,
             })
         } else {

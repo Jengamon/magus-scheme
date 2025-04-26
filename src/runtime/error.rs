@@ -10,7 +10,7 @@ use crate::{
     value::ResolvedValue,
 };
 
-use super::value::ModeDisplay;
+use super::value::{ContinuationPtr, ModeDisplay};
 
 /// Errors store this to record where they're from
 #[derive(Debug, Clone, Copy, Collect)]
@@ -36,7 +36,10 @@ pub enum SchemeErrorType<'gc> {
     Raise(ResolvedValue<'gc, lasso::RodeoResolver, ModeDisplay>),
     /// A value was raised by 'raise-continuable
     #[error("{0}")]
-    RaiseContinuable(ResolvedValue<'gc, lasso::RodeoResolver, ModeDisplay>),
+    RaiseContinuable(
+        ResolvedValue<'gc, lasso::RodeoResolver, ModeDisplay>,
+        ContinuationPtr<'gc>,
+    ),
     /// Handler returned on a non-continuable error
     #[error("error handler failed: {0}")]
     HandlerFailed(Gc<'gc, SchemeErrorType<'gc>>),
@@ -45,7 +48,10 @@ pub enum SchemeErrorType<'gc> {
     Rust(#[collect(require_static)] Rc<anyhow::Error>),
     /// Rust code produced an error (continuable)
     #[error("Rust code produced an error: {0}")]
-    RustContinuable(#[collect(require_static)] Rc<anyhow::Error>),
+    RustContinuable(
+        #[collect(require_static)] Rc<anyhow::Error>,
+        ContinuationPtr<'gc>,
+    ),
     /// Attempted to read from environment a name that doesn't exist
     #[error("`{0}` does not exist in environment")]
     EnvLoad(Box<str>),
@@ -88,14 +94,26 @@ pub enum SchemeErrorType<'gc> {
 impl<'gc> SchemeErrorType<'gc> {
     /// Can Scheme catch and process the error?
     pub fn is_continuable(&self) -> bool {
-        matches!(self, Self::RaiseContinuable(_) | Self::RustContinuable(_))
+        matches!(
+            self,
+            Self::RaiseContinuable(_, _) | Self::RustContinuable(_, _)
+        )
     }
 
     /// Argument value
     pub fn value(&self) -> Option<ValuePtr<'gc>> {
         match self {
             Self::Raise(v) => Some(v.value_ptr()),
-            Self::RaiseContinuable(v) => Some(v.value_ptr()),
+            Self::RaiseContinuable(v, _) => Some(v.value_ptr()),
+            _ => None,
+        }
+    }
+
+    /// Continuation
+    pub fn continuation(&self) -> Option<ContinuationPtr<'gc>> {
+        match self {
+            Self::RaiseContinuable(_, cont) => Some(*cont),
+            Self::RustContinuable(_, cont) => Some(*cont),
             _ => None,
         }
     }

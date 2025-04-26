@@ -1358,7 +1358,11 @@ impl<'gc> Thread<'gc> {
                                 self.stack
                                     .push(Value::Values(Gc::new(&ctx, vals)).into_ptr(&ctx));
                             }
-                            self.handle_frame_end(&ctx, true);
+                            if let Some(cont) = error.and_then(|e| e.error_type.continuation()) {
+                                self.handle_continuation(cont);
+                            } else {
+                                self.handle_frame_end(&ctx, true);
+                            }
                         }
                         Ok(LambdaReturn::Continue { cont, args }) => {
                             if args.len() > 1 {
@@ -1376,7 +1380,8 @@ impl<'gc> Thread<'gc> {
                         }) => {
                             if is_continuable {
                                 make_error!(SchemeErrorType::RaiseContinuable(
-                                    Value::resolve_into(error, interner.clone(), ctx.null_value)
+                                    Value::resolve_into(error, interner.clone(), ctx.null_value),
+                                    Gc::new(&ctx, self.create_continuation(&ctx, true)),
                                 ));
                             } else {
                                 make_error!(SchemeErrorType::Raise(Value::resolve_into(
@@ -1384,8 +1389,8 @@ impl<'gc> Thread<'gc> {
                                     interner.clone(),
                                     ctx.null_value
                                 )));
+                                self.handle_frame_end(&ctx, true);
                             }
-                            self.handle_frame_end(&ctx, true);
                         }
                         Ok(LambdaReturn::Propagate(err)) => {
                             // TODO Check if same error
@@ -1476,22 +1481,20 @@ impl<'gc> Thread<'gc> {
                             self.frames.last_mut().unwrap().dynamic_wind = dynamic_wind;
                             // self.handle_frame_end(&ctx, true);
                         }
-                        // Ok(LambdaReturn::SetExceptionHandler(handler)) => {
-                        //     frame.handler = Some(handler);
-                        // }
                         Err(e) => {
                             // TODO Add current error to new error irritants if present
                             match e {
                                 LambdaError::Continuable(ce) => {
                                     make_error!(SchemeErrorType::RustContinuable(
-                                        std::rc::Rc::new(ce)
+                                        std::rc::Rc::new(ce),
+                                        Gc::new(&ctx, self.create_continuation(&ctx, true)),
                                     ));
                                 }
                                 LambdaError::NonContinuable(e) => {
                                     make_error!(SchemeErrorType::Rust(std::rc::Rc::new(e)));
+                                    self.handle_frame_end(&ctx, true);
                                 }
                             }
-                            self.handle_frame_end(&ctx, true);
                         }
                     }
                 }

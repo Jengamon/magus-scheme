@@ -1,0 +1,5 @@
+---
+65
+---
+(import (only (scheme base) with-exception-handler lambda + raise-continuable if eq? quote))
+(with-exception-handler (lambda (e) (if (eq? e 'k) 42)) (lambda () (+ (raise-continuable 'k) 23)))

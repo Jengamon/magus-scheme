@@ -397,6 +397,7 @@ pub struct ResolvedValue<'gc, R: lasso::Resolver, M: WriteMode + Collect<'gc> = 
     _marker: PhantomData<M>,
 }
 
+#[expect(private_bounds)]
 impl<'gc, R: lasso::Resolver, M: WriteMode + Collect<'gc>> ResolvedValue<'gc, R, M> {
     pub fn value_ptr(&self) -> ValuePtr<'gc> {
         self.value_ptr

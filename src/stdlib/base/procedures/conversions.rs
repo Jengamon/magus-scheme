@@ -731,6 +731,10 @@ impl<'gc> NativeLambda<'gc> for StringToList {
             ))?;
         };
 
+        if args.len() > 3 {
+            return Err(anyhow::anyhow!("string->list expects 1, 2, or 3 arguments"))?;
+        }
+
         let maybe_start = args.get(1);
         let start = if let Some(start) = maybe_start {
             match *start.borrow() {
@@ -767,21 +771,198 @@ impl<'gc> NativeLambda<'gc> for StringToList {
                 ))?,
             }
         } else {
-            s.borrow().len()
+            s.borrow().chars().count()
         };
 
         if end < start {
             return Err(anyhow::anyhow!("string->list: start must be less than end"))?;
+        } else if end > s.borrow().chars().count() {
+            return Err(anyhow::anyhow!("string->list: end out of range"))?;
         }
 
-        let s = &s.borrow()[start..end];
-        let chars: Vec<_> = s.chars().map(|c| Value::Char(c).into_ptr(&ctx)).collect();
+        let chars: Vec<_> = s
+            .borrow()
+            .chars()
+            .skip(start)
+            .take(end - start)
+            .map(|c| Value::Char(c).into_ptr(&ctx))
+            .collect();
 
         Ok(LambdaReturn::Return(vec![ConsCell::from_iter(
             &ctx,
             ctx.thread_ctx.null_value,
             chars,
         )]))
+    }
+}
+
+#[derive(Debug, Collect)]
+#[collect(require_static)]
+pub struct Utf8ToString;
+
+impl<'gc> NativeLambda<'gc> for Utf8ToString {
+    fn arity(&self) -> Arity {
+        Arity::AtLeast(1)
+    }
+
+    fn run(
+        &mut self,
+        ctx: NativeLambdaContext<'_, 'gc>,
+        args: &[crate::ValuePtr<'gc>],
+    ) -> Result<LambdaReturn<'gc>, LambdaError> {
+        use num::ToPrimitive;
+        let Value::Bytevector(b) = *args[0].borrow() else {
+            return Err(anyhow::anyhow!(
+                "utf8->string expects a bytevector as its first argument"
+            ))?;
+        };
+
+        if args.len() > 3 {
+            return Err(anyhow::anyhow!("utf8->string expects 1, 2, or 3 arguments"))?;
+        }
+
+        let maybe_start = args.get(1);
+        let start = if let Some(start) = maybe_start {
+            match *start.borrow() {
+                Value::Number(n) if matches!(*n, Number::Integer(_)) => {
+                    let Number::Integer(start) = &*n else {
+                        unreachable!()
+                    };
+
+                    start
+                        .to_usize()
+                        .ok_or(anyhow::anyhow!("utf8->string: start is too big"))?
+                }
+                _ => Err(anyhow::anyhow!(
+                    "utf8->string expects an integer as its second argument"
+                ))?,
+            }
+        } else {
+            0usize
+        };
+
+        let maybe_end = args.get(2);
+        let end = if let Some(end) = maybe_end {
+            match *end.borrow() {
+                Value::Number(n) if matches!(*n, Number::Integer(_)) => {
+                    let Number::Integer(end) = &*n else {
+                        unreachable!()
+                    };
+
+                    end.to_usize()
+                        .ok_or(anyhow::anyhow!("utf8->string: end is too big"))?
+                }
+                _ => Err(anyhow::anyhow!(
+                    "utf8->string expects an integer as its third argument"
+                ))?,
+            }
+        } else {
+            b.vec.len()
+        };
+
+        if end < start {
+            return Err(anyhow::anyhow!("utf8->string: start must be less than end"))?;
+        } else if end > b.vec.len() {
+            return Err(anyhow::anyhow!("utf8->string: end out of range"))?;
+        }
+
+        let b = b
+            .vec
+            .iter()
+            .skip(start)
+            .take(end - start)
+            .copied()
+            .collect::<Vec<_>>();
+        let s = String::from_utf8(b)
+            .map_err(|_| anyhow::anyhow!("utf8->string: bytes were not valid UTF8"))?;
+
+        Ok(LambdaReturn::Return(vec![
+            Value::String(Gc::new(&ctx, RefLock::new(s)).into()).into_ptr(&ctx),
+        ]))
+    }
+}
+
+#[derive(Debug, Collect)]
+#[collect(require_static)]
+pub struct StringToUtf8;
+
+impl<'gc> NativeLambda<'gc> for StringToUtf8 {
+    fn arity(&self) -> Arity {
+        Arity::AtLeast(1)
+    }
+
+    fn run(
+        &mut self,
+        ctx: NativeLambdaContext<'_, 'gc>,
+        args: &[crate::ValuePtr<'gc>],
+    ) -> Result<LambdaReturn<'gc>, LambdaError> {
+        use num::ToPrimitive;
+        let Value::String(s) = *args[0].borrow() else {
+            return Err(anyhow::anyhow!(
+                "string->utf8 expects a string as its first argument"
+            ))?;
+        };
+
+        if args.len() > 3 {
+            return Err(anyhow::anyhow!("string->utf8 expects 1, 2, or 3 arguments"))?;
+        }
+
+        let maybe_start = args.get(1);
+        let start = if let Some(start) = maybe_start {
+            match *start.borrow() {
+                Value::Number(n) if matches!(*n, Number::Integer(_)) => {
+                    let Number::Integer(start) = &*n else {
+                        unreachable!()
+                    };
+
+                    start
+                        .to_usize()
+                        .ok_or(anyhow::anyhow!("string->utf8: start is too big"))?
+                }
+                _ => Err(anyhow::anyhow!(
+                    "string->utf8 expects an integer as its second argument"
+                ))?,
+            }
+        } else {
+            0usize
+        };
+
+        let maybe_end = args.get(2);
+        let end = if let Some(end) = maybe_end {
+            match *end.borrow() {
+                Value::Number(n) if matches!(*n, Number::Integer(_)) => {
+                    let Number::Integer(end) = &*n else {
+                        unreachable!()
+                    };
+
+                    end.to_usize()
+                        .ok_or(anyhow::anyhow!("string->utf8: end is too big"))?
+                }
+                _ => Err(anyhow::anyhow!(
+                    "string->utf8 expects an integer as its third argument"
+                ))?,
+            }
+        } else {
+            s.borrow().chars().count()
+        };
+
+        if end < start {
+            return Err(anyhow::anyhow!("string->utf8: start must be less than end"))?;
+        } else if end > s.borrow().chars().count() {
+            return Err(anyhow::anyhow!("string->utf8: end out of range"))?;
+        }
+
+        let s = s
+            .borrow()
+            .chars()
+            .skip(start)
+            .take(end - start)
+            .collect::<String>();
+        let bytes = im_rc::Vector::from_iter(s.as_bytes().iter().copied());
+
+        Ok(LambdaReturn::Return(vec![
+            Value::Bytevector(Gc::new(&ctx, gc_arena::Static(bytes)).into()).into_ptr(&ctx),
+        ]))
     }
 }
 

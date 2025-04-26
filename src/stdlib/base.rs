@@ -29,7 +29,7 @@ pub use procedures::{
     IsInteger, IsList, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, IsVector, Lcm,
     ListCopy, ListSetBang, ListToString, Map, MonotonicAscending, MonotonicDescending, Multiply,
     NumberToString, Numerator, Raise, RaiseContinuable, StringToList, StringToNumber,
-    StringToSymbol, Subtract, SymbolToString, Values, VectorRef,
+    StringToSymbol, StringToUtf8, Subtract, SymbolToString, Utf8ToString, Values, VectorRef,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -406,6 +406,8 @@ impl Module for Base {
             "list-copy",
             "vector-ref",
             "vector?",
+            "string->utf8",
+            "utf8->string",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -489,6 +491,8 @@ impl Module for Base {
             "list-copy" => lambda!(ListCopy),
             "vector?" => lambda!(IsVector),
             "vector-ref" => lambda!(VectorRef),
+            "string->utf8" => lambda!(StringToUtf8),
+            "utf8->string" => lambda!(Utf8ToString),
             _ => None,
         }
     }

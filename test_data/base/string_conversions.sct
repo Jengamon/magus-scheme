@@ -1,0 +1,11 @@
+---
+"λ"
+"λ"
+#u8(206 187)
+(#\λ)
+---
+(import (only (scheme base) values string->utf8 string->list utf8->string list->string list))
+(values (utf8->string #u8(#xce #xbb))
+        (list->string (list #\x3bb))
+        (string->utf8 "aλb" 1 2)
+        (string->list "aλb" 1 2))

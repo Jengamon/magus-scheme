@@ -3,7 +3,7 @@ pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, Monotonic
 pub use control::{Apply, CallCc, Features};
 pub use conversions::{
     CharToInteger, Exact, Inexact, IntegerToChar, ListToString, NumberToString, StringToList,
-    StringToNumber, StringToSymbol, SymbolToString,
+    StringToNumber, StringToSymbol, StringToUtf8, SymbolToString, Utf8ToString,
 };
 pub use equality::{IsEq, IsEqual, IsEqv};
 pub use error::{Raise, RaiseContinuable};

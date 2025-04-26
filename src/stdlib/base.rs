@@ -23,12 +23,12 @@ pub use define::{Define, SetBang};
 pub use exception::WithExceptionHandler;
 pub use macros::{DefineSyntax, SyntaxRules};
 pub use procedures::{
-    Add, Apply, Ascending, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr, CharToInteger,
-    Cons, Denominator, Descending, Divide, Equal, Exact, ExactIntegerSqrt, Expt, Features, Gcd,
-    Inexact, IntegerToChar, IsEq, IsEqual, IsEqv, IsEven, IsExact, IsExactInteger, IsInexact,
-    IsInteger, IsList, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, IsVector, Lcm,
-    ListCopy, ListSetBang, ListToString, Map, MonotonicAscending, MonotonicDescending, Multiply,
-    NumberToString, Numerator, Raise, RaiseContinuable, StringToList, StringToNumber,
+    Add, Apply, Ascending, Bytevector, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr,
+    CharToInteger, Cons, Denominator, Descending, Divide, Equal, Exact, ExactIntegerSqrt, Expt,
+    Features, Gcd, Inexact, IntegerToChar, IsEq, IsEqual, IsEqv, IsEven, IsExact, IsExactInteger,
+    IsInexact, IsInteger, IsList, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, IsVector,
+    Lcm, ListCopy, ListSetBang, ListToString, Map, MonotonicAscending, MonotonicDescending,
+    Multiply, NumberToString, Numerator, Raise, RaiseContinuable, StringToList, StringToNumber,
     StringToSymbol, StringToUtf8, Subtract, SymbolToString, Utf8ToString, Values, VectorRef,
 };
 pub use quote::{Quasiquote, Quote};
@@ -408,6 +408,7 @@ impl Module for Base {
             "vector?",
             "string->utf8",
             "utf8->string",
+            "bytevector",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -493,6 +494,7 @@ impl Module for Base {
             "vector-ref" => lambda!(VectorRef),
             "string->utf8" => lambda!(StringToUtf8),
             "utf8->string" => lambda!(Utf8ToString),
+            "bytevector" => lambda!(Bytevector),
             _ => None,
         }
     }

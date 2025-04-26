@@ -29,7 +29,7 @@
     [ "base", "", binary-port?, false, "", "" ],
     [ "base", "procedure", boolean=?, true, "test if all arguments are `#t`, or `#f`", "implemented in Scheme" ],
     [ "base", "procedure", boolean?, true, "test if argument is either `#t` or `#f`", "implemented in Scheme" ],
-    [ "base", "", bytevector, false, "", "" ],
+    [ "base", "procedure", bytevector, true, "create a bytevector given its arguments", "" ],
     [ "base", "", bytevector-append, false, "", "" ],
     [ "base", "", bytevector-copy, false, "", "" ],
     [ "base", "", bytevector-copy!, false, "", "" ],

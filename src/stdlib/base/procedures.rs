@@ -1,4 +1,5 @@
 // TODO Split, if this file gets too large, into separate files
+pub use bytevector::Bytevector;
 pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, MonotonicDescending};
 pub use control::{Apply, CallCc, Features};
 pub use conversions::{
@@ -1555,6 +1556,62 @@ mod vector {
             Ok(LambdaReturn::Return(vec![v.vec.get(i).copied().ok_or(
                 anyhow::anyhow!("vector-ref: index {i} out of range"),
             )?]))
+        }
+    }
+}
+
+mod bytevector {
+    //! Scheme bytevector stuff
+    use gc_arena::{Collect, Gc};
+    use im_rc::Vector;
+
+    use crate::{
+        Value,
+        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        value::Number,
+    };
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Bytevector;
+
+    impl<'gc> NativeLambda<'gc> for Bytevector {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(0)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let mut bytes = Vec::<u8>::with_capacity(args.len());
+
+            for arg in args {
+                use num::ToPrimitive;
+                let Value::Number(n) = *arg.borrow() else {
+                    return Err(anyhow::anyhow!(
+                        "bytevector expects exact byte-sized integers as its arguments"
+                    ))?;
+                };
+                let Number::Integer(i) = &*n else {
+                    return Err(anyhow::anyhow!(
+                        "bytevector expects exact byte-sized integers as its arguments"
+                    ))?;
+                };
+                let Some(b) = i.to_u8() else {
+                    return Err(anyhow::anyhow!(
+                        "bytevector expects exact byte-sized integers as its arguments"
+                    ))?;
+                };
+
+                bytes.push(b);
+            }
+
+            Ok(LambdaReturn::Return(vec![
+                Value::Bytevector(Gc::new(&ctx, gc_arena::Static(Vector::from_iter(bytes))).into())
+                    .into_ptr(&ctx),
+            ]))
         }
     }
 }

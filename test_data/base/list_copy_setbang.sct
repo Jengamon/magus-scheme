@@ -1,0 +1,12 @@
+---
+(l 2 3)
+(l 2 3)
+(k 2 3)
+---
+(import (only (scheme base) define list-copy list-set! list quote values))
+(define x (list 1 2 3))
+(define y x)
+(define z (list-copy y))
+(list-set! z 0 'k)
+(list-set! y 0 'l)
+(values x y z)

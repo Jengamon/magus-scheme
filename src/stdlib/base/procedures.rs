@@ -7,7 +7,7 @@ pub use conversions::{
 };
 pub use equality::{IsEq, IsEqual, IsEqv};
 pub use error::{Raise, RaiseContinuable};
-pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr, Map};
+pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr, ListCopy, ListSetBang, Map};
 pub use math::{
     Add, Denominator, Divide, ExactIntegerSqrt, Expt, Gcd, Lcm, Multiply, Numerator, Subtract,
 };
@@ -1011,14 +1011,15 @@ mod math {
 mod list {
     use either::Either;
     use gc_arena::{Collect, Gc, RefLock, unsize};
+    use num::BigInt;
 
     use crate::{
-        Value, ValuePtr,
+        Value, ValuePtr, ValueType,
         runtime::lambda::{
             Arity, Lambda, LambdaResult, LambdaReturn, NativeLambda, NativeLambdaContext,
             NativeLambdaPtr,
         },
-        value::{ConsCell, ContinuationPtr},
+        value::{ConsCell, ContinuationPtr, Number},
     };
 
     #[derive(Debug, Collect)]
@@ -1387,6 +1388,121 @@ mod list {
                     state: self.state.clone()
                 })) => RefLock<dyn NativeLambda<'gc> + 'gc>
             ])
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct ListSetBang;
+
+    impl<'gc> NativeLambda<'gc> for ListSetBang {
+        fn arity(&self) -> Arity {
+            Arity::Exact(3)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
+            let mut ptr = args[0];
+            let Value::Cons(mut c) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "list-set! expects a list as its first argument"
+                ))?;
+            };
+            let Value::Number(n) = *args[1].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "list-set! expects an exact integer as its second argument"
+                ))?;
+            };
+            let val = args[2];
+
+            let Number::Integer(mut i) = (*n).clone() else {
+                return Err(anyhow::anyhow!(
+                    "list-set! expects an exact integer as its second argument"
+                ))?;
+            };
+            let orig_i = i.clone();
+
+            // Find the correct cons cell
+            while i > BigInt::ZERO {
+                let Some(Value::Cons(cdr)) = c.cdr.map(|c| *c.borrow()) else {
+                    return Err(anyhow::anyhow!("list-set!: index {orig_i} out of range"))?;
+                };
+                i -= 1;
+                ptr = c.cdr.unwrap();
+                c = cdr;
+            }
+
+            // mutate and set
+            c.car = Some(val);
+            *ptr.borrow_mut(&ctx) = Value::Cons(c);
+
+            Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct ListCopy;
+
+    impl<'gc> NativeLambda<'gc> for ListCopy {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
+            fn copy_list<'gc>(
+                mc: &gc_arena::Mutation<'gc>,
+                cell_ptr: ValuePtr<'gc>,
+                encountered: &mut Vec<ValuePtr<'gc>>,
+                null_ptr: ValuePtr<'gc>,
+            ) -> anyhow::Result<ConsCell<'gc>> {
+                if encountered.iter().any(|oc| Gc::ptr_eq(cell_ptr, *oc)) {
+                    return Err(anyhow::anyhow!(
+                        "list-copy expects a non-circular list as its argument"
+                    ));
+                }
+
+                encountered.push(cell_ptr);
+
+                let Value::Cons(mut c) = *cell_ptr.borrow() else {
+                    return Err(anyhow::anyhow!("list-copy expects a list as its argument"))?;
+                };
+
+                let copied_cdr = if let Some(c) = c.cdr {
+                    if Gc::ptr_eq(c, null_ptr) {
+                        Some(c)
+                    } else {
+                        Some(if c.borrow().value_type() == ValueType::Cons {
+                            Value::Cons(copy_list(mc, c, encountered, null_ptr)?).into_ptr(mc)
+                        } else {
+                            c
+                        })
+                    }
+                } else {
+                    None
+                };
+
+                c.cdr = copied_cdr;
+                Ok(c)
+            }
+
+            let mut encountered = vec![];
+            Ok(LambdaReturn::Return(vec![
+                Value::Cons(copy_list(
+                    &ctx,
+                    args[0],
+                    &mut encountered,
+                    ctx.thread_ctx.null_value,
+                )?)
+                .into_ptr(&ctx),
+            ]))
         }
     }
 }

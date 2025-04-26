@@ -20,7 +20,6 @@ all forms of numbers (and with how we store them, the Scheme `ieee-float` featur
 we currently do not have a runtime that supports numbers beyond exact integers (for my purposes,
 this is fine).
 
-TODO Work on allowing writing of rationals in a Program
 TODO (future) Work on using BigIntegers in the Frontend
 
 **UPDATE** (2025-03-01): We don't actually support polar numbers. We should, eventually.

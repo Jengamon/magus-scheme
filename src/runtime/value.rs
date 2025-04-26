@@ -611,10 +611,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K, ModeDisplay> {
             Value::Inexact(fp) if fp.is_nan() => write!(f, "+nan.0"),
             Value::Inexact(fp) => write!(f, "{fp}"),
             Value::String(s) => write!(f, "{}", s.borrow()),
-            Value::Symbol(sym) if is_valid_scheme_identifier(self.resolver.resolve(&sym.0)) => {
-                write!(f, "{}", self.resolver.resolve(&sym.0))
-            }
-            Value::Symbol(sym) => write!(f, "|{}|", self.resolver.resolve(&sym.0)),
+            Value::Symbol(sym) => write!(f, "{}", self.resolver.resolve(&sym.0)),
             Value::Bool(b) => write!(f, "#{}", if b { "t" } else { "f" }),
             Value::Char(c) => write!(
                 f,

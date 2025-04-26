@@ -26,10 +26,10 @@ pub use procedures::{
     Add, Apply, Ascending, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr, CharToInteger,
     Cons, Denominator, Descending, Divide, Equal, Exact, ExactIntegerSqrt, Expt, Features, Gcd,
     Inexact, IntegerToChar, IsEq, IsEqual, IsEqv, IsEven, IsExact, IsExactInteger, IsInexact,
-    IsInteger, IsList, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, Lcm, ListCopy,
-    ListSetBang, ListToString, Map, MonotonicAscending, MonotonicDescending, Multiply,
+    IsInteger, IsList, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, IsVector, Lcm,
+    ListCopy, ListSetBang, ListToString, Map, MonotonicAscending, MonotonicDescending, Multiply,
     NumberToString, Numerator, Raise, RaiseContinuable, StringToList, StringToNumber,
-    StringToSymbol, Subtract, SymbolToString, Values,
+    StringToSymbol, Subtract, SymbolToString, Values, VectorRef,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -404,6 +404,8 @@ impl Module for Base {
             "exact-integer?",
             "list-set!",
             "list-copy",
+            "vector-ref",
+            "vector?",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -485,6 +487,8 @@ impl Module for Base {
             "exact-integer?" => lambda!(IsExactInteger),
             "list-set!" => lambda!(ListSetBang),
             "list-copy" => lambda!(ListCopy),
+            "vector?" => lambda!(IsVector),
+            "vector-ref" => lambda!(VectorRef),
             _ => None,
         }
     }

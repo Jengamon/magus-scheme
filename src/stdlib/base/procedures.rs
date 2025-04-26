@@ -13,9 +13,10 @@ pub use math::{
 };
 pub use predicates::{
     IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull, IsOdd, IsPair,
-    IsProcedure, IsString, IsSymbol,
+    IsProcedure, IsString, IsSymbol, IsVector,
 };
 pub use structure::{CallWithValues, Cons, Values};
+pub use vector::VectorRef;
 
 mod conversions;
 
@@ -1507,6 +1508,57 @@ mod list {
     }
 }
 
+mod vector {
+    //! Scheme Vector stuff
+    use gc_arena::Collect;
+
+    use crate::{
+        Value,
+        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        value::Number,
+    };
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct VectorRef;
+
+    impl<'gc> NativeLambda<'gc> for VectorRef {
+        fn arity(&self) -> Arity {
+            Arity::Exact(2)
+        }
+
+        fn run(
+            &mut self,
+            _ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            use num::ToPrimitive;
+            let Value::Vector(v) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "vector-ref expects a vector as its first argument"
+                ))?;
+            };
+            let Value::Number(n) = *args[1].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "vector-ref expects an exact integer as its second argument"
+                ))?;
+            };
+            let Number::Integer(i) = &*n else {
+                return Err(anyhow::anyhow!(
+                    "vector-ref expects an exact integer as its second argument"
+                ))?;
+            };
+            let Some(i) = i.to_usize() else {
+                return Err(anyhow::anyhow!("vector-ref: index {i} too large"))?;
+            };
+
+            Ok(LambdaReturn::Return(vec![v.vec.get(i).copied().ok_or(
+                anyhow::anyhow!("vector-ref: index {i} out of range"),
+            )?]))
+        }
+    }
+}
+
 mod predicates {
     //! Scheme typechecking stuff
     use gc_arena::{Collect, Gc};
@@ -1516,6 +1568,16 @@ mod predicates {
         runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
         value::Number,
     };
+
+    macro_rules! bool_ctx {
+        ($ctx:expr, $bool:expr) => {
+            if $bool {
+                $ctx.thread_ctx.true_value
+            } else {
+                $ctx.thread_ctx.false_value
+            }
+        };
+    }
 
     #[derive(Debug, Collect)]
     #[collect(require_static)]
@@ -1537,11 +1599,7 @@ mod predicates {
                 _ => false,
             };
 
-            Ok(LambdaReturn::Return(vec![if is_pair {
-                ctx.thread_ctx.true_value
-            } else {
-                ctx.thread_ctx.false_value
-            }]))
+            Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, is_pair)]))
         }
     }
 
@@ -1561,11 +1619,7 @@ mod predicates {
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
             let is_null = matches!(*args[0].borrow(), Value::Cons(_) if Gc::ptr_eq(args[0], ctx.thread_ctx.null_value));
 
-            Ok(LambdaReturn::Return(vec![if is_null {
-                ctx.thread_ctx.true_value
-            } else {
-                ctx.thread_ctx.false_value
-            }]))
+            Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, is_null)]))
         }
     }
 
@@ -1585,11 +1639,7 @@ mod predicates {
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
             let is_list = matches!(*args[0].borrow(), Value::Cons(c) if c.is_list(args[0], ctx.thread_ctx.null_value));
 
-            Ok(LambdaReturn::Return(vec![if is_list {
-                ctx.thread_ctx.true_value
-            } else {
-                ctx.thread_ctx.false_value
-            }]))
+            Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, is_list)]))
         }
     }
 
@@ -1608,9 +1658,9 @@ mod predicates {
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
             // TODO add Complex
-            let val = matches!(*args[0].borrow(), Value::Number(_));
+            let is_exact = matches!(*args[0].borrow(), Value::Number(_));
 
-            Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+            Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, is_exact)]))
         }
     }
 
@@ -1629,9 +1679,9 @@ mod predicates {
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
             // TODO add InexactComplex
-            let val = matches!(*args[0].borrow(), Value::Inexact(_));
+            let is_inexact = matches!(*args[0].borrow(), Value::Inexact(_));
 
-            Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+            Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, is_inexact)]))
         }
     }
 
@@ -1649,9 +1699,9 @@ mod predicates {
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
-            let val = matches!(*args[0].borrow(), Value::Symbol(_));
+            let is_symbol = matches!(*args[0].borrow(), Value::Symbol(_));
 
-            Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+            Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, is_symbol)]))
         }
     }
 
@@ -1669,9 +1719,9 @@ mod predicates {
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
-            let val = matches!(*args[0].borrow(), Value::String(_));
+            let is_string = matches!(*args[0].borrow(), Value::String(_));
 
-            Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+            Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, is_string)]))
         }
     }
 
@@ -1690,9 +1740,9 @@ mod predicates {
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
             // TODO parameters (which are considered procedures with arity 0)
-            let val = matches!(*args[0].borrow(), Value::Lambda(_) | Value::Continuation(_));
+            let is_proc = matches!(*args[0].borrow(), Value::Lambda(_) | Value::Continuation(_));
 
-            Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+            Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, is_proc)]))
         }
     }
 
@@ -1721,11 +1771,7 @@ mod predicates {
                 }
             };
 
-            Ok(LambdaReturn::Return(vec![if ret {
-                ctx.thread_ctx.true_value
-            } else {
-                ctx.thread_ctx.false_value
-            }]))
+            Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, ret)]))
         }
     }
 
@@ -1754,11 +1800,7 @@ mod predicates {
                 }
             };
 
-            Ok(LambdaReturn::Return(vec![if ret {
-                ctx.thread_ctx.true_value
-            } else {
-                ctx.thread_ctx.false_value
-            }]))
+            Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, ret)]))
         }
     }
 
@@ -1782,11 +1824,7 @@ mod predicates {
                 _ => false,
             };
 
-            Ok(LambdaReturn::Return(vec![if is_integer {
-                ctx.thread_ctx.true_value
-            } else {
-                ctx.thread_ctx.false_value
-            }]))
+            Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, is_integer)]))
         }
     }
 
@@ -1809,11 +1847,27 @@ mod predicates {
                 _ => false,
             };
 
-            Ok(LambdaReturn::Return(vec![if is_exact_integer {
-                ctx.thread_ctx.true_value
-            } else {
-                ctx.thread_ctx.false_value
-            }]))
+            Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, is_exact_integer)]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IsVector;
+
+    impl<'gc> NativeLambda<'gc> for IsVector {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let is_vector = matches!(*args[0].borrow(), Value::Vector(_));
+
+            Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, is_vector)]))
         }
     }
 }

@@ -232,12 +232,12 @@ mod control {
                 {
                     cons.list_values(*sptr, ctx.thread_ctx.null_value)
                         .into_iter()
-                        .collect()
+                        .collect::<Vec<_>>()
                 }
-                // Non-list cons and other values are just treated as the last argument
-                Some((ptr, _)) => {
-                    vec![*ptr]
-                }
+                // Non-list cons and other values cause an error
+                Some((_, _)) => Err(anyhow::anyhow!(
+                    "apply expects a proper list as its last argument"
+                ))?,
                 None => unreachable!("arity of 1"),
             };
             let args_len = args.len() - 1;

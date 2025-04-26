@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashSet};
+use std::{borrow::Cow, collections::HashSet, time::Instant};
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
@@ -611,10 +611,12 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
         )
     });
 
+    let mut exec_time = None;
     const HELP_STRING: &str = "### HELP ###
 #?, #help - this help message
 #q, #quit - quit repl
 #gc - check GC stats
+#time - check the time of last execution
 #env - (todo) check current root environment
 #collect - force GC collection";
 
@@ -622,8 +624,10 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
     loop {
         match readline.read_line(&prompt) {
             Ok(Signal::Success(cmd))
-                if ["#gc", "#env", "#collect", "#quit", "#q", "#help", "#?"]
-                    .contains(&cmd.to_lowercase().as_str()) =>
+                if [
+                    "#gc", "#env", "#collect", "#quit", "#q", "#help", "#?", "#time",
+                ]
+                .contains(&cmd.to_lowercase().as_str()) =>
             {
                 double_ctrl_c = false;
                 match cmd.to_lowercase().as_str() {
@@ -633,6 +637,13 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
                     "#quit" | "#q" => break,
                     "#env" => {
                         eprintln!("TO BE WRITTEN")
+                    }
+                    "#time" => {
+                        if let Some(dur) = exec_time {
+                            println!("### Time taken: {} ###", humantime::format_duration(dur));
+                        } else {
+                            println!("### No code executed ###");
+                        }
                     }
                     "#gc" => {
                         let metrics = interpreter.metrics();
@@ -666,6 +677,7 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
                         // consider this line successfully executed
                         prompt.completed_lines += 1;
 
+                        let start = Instant::now();
                         execute(
                             src,
                             case_insensitive,
@@ -677,6 +689,8 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
                             Some(&stashed_env),
                             &world,
                         );
+                        let end = Instant::now();
+                        exec_time = Some(end - start);
                     }
                     Err(errors) => {
                         let idx = LineIndex::new(src);

@@ -11,3 +11,4 @@ codesnake = "0.2.1"
 magus = { version = "0.1.0", path = ".." }
 yansi = { version = "1.0.1", features = ["detect-env", "detect-tty"] }
 reedline = { version = "0.39", features = ["sqlite", "system_clipboard"] }
+humantime = "2.2.0"

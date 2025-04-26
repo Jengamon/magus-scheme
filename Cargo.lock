@@ -708,6 +708,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fbd780fe5cc30f81464441920d82ac8740e2e46b29a6fad543ddd075229ce37e"
 
 [[package]]
+name = "humantime"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b112acc8b3adf4b107a8ec20977da0273a8c386765a3ec0229bd500a1443f9f"
+
+[[package]]
 name = "iana-time-zone"
 version = "0.1.62"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1065,6 +1071,7 @@ dependencies = [
  "anyhow",
  "clap",
  "codesnake",
+ "humantime",
  "magus",
  "reedline",
  "yansi",

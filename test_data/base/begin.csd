@@ -4,10 +4,14 @@ Chunk {
     upvalues: 0,
     constants: [
         Number(
-            3,
+            Integer(
+                3,
+            ),
         ),
         Number(
-            4,
+            Integer(
+                4,
+            ),
         ),
     ],
     lambdas: [
@@ -20,10 +24,14 @@ Chunk {
                     upvalues: 0,
                     constants: [
                         Number(
-                            3,
+                            Integer(
+                                3,
+                            ),
                         ),
                         Number(
-                            4,
+                            Integer(
+                                4,
+                            ),
                         ),
                     ],
                     lambdas: [],

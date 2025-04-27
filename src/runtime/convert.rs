@@ -2,9 +2,7 @@ use std::convert::Infallible;
 
 use gc_arena::{Gc, Mutation, RefLock};
 
-use crate::{
-    bytecode, environment::StackEnvironmentPtr, runtime::userstruct::UserStruct, value::Number,
-};
+use crate::{bytecode, environment::StackEnvironmentPtr, runtime::userstruct::UserStruct};
 
 use super::{
     lambda::Lambda,
@@ -131,18 +129,18 @@ impl<'gc> IntoValue<'gc> for bytecode::Constant {
         match self {
             Self::Symbol(s) => Value::Symbol(Symbol(s)),
             Self::Char(c) => c.into_value(mc),
-            Self::Number(i) => i.into_value(mc),
-            Self::Rational(sign, numer, denom) => {
-                use num::{BigInt, BigRational, bigint::Sign};
-                let ratio = BigRational::new(
-                    BigInt::from_bytes_be(
-                        if sign { Sign::Minus } else { Sign::Plus },
-                        &numer.to_be_bytes(),
-                    ),
-                    BigInt::from_bytes_be(Sign::Plus, &denom.to_be_bytes()),
-                );
-                Value::Number(Gc::new(mc, Number::from_rational(ratio)))
-            }
+            Self::Number(i) => Value::Number(Gc::new(mc, i)),
+            // Self::Rational(sign, numer, denom) => {
+            //     use num::{BigInt, BigRational, bigint::Sign};
+            //     let ratio = BigRational::new(
+            //         BigInt::from_bytes_be(
+            //             if sign { Sign::Minus } else { Sign::Plus },
+            //             &numer.to_be_bytes(),
+            //         ),
+            //         BigInt::from_bytes_be(Sign::Plus, &denom.to_be_bytes()),
+            //     );
+            //     Value::Number(Gc::new(mc, Number::from_rational(ratio)))
+            // }
             Self::Inexact(f) => f.into_value(mc),
             Self::String(s) => s.into_value(mc),
             Self::Bytevector(bv) => Value::Bytevector(

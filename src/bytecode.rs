@@ -7,7 +7,10 @@ use fxhash::FxHashMap;
 use gc_arena::{Collect, Gc, Mutation, Static};
 
 use crate::{
-    ValuePtr, environment::StackEnvironmentPtr, runtime::lambda::Lambda, value::PromisePtr,
+    ValuePtr,
+    environment::StackEnvironmentPtr,
+    runtime::lambda::Lambda,
+    value::{Number, PromisePtr},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -172,8 +175,8 @@ impl fmt::Display for Bytecode {
 pub enum Constant {
     Symbol(lasso::Spur),
     Char(char),
-    Number(i64),
-    Rational(bool, u64, u64),
+    Number(Number),
+    // Rational(bool, u64, u64),
     // TODO Support exact rational numbers
     // (We can use BigRational directly here b/c Copy is not required as it is in Value)
     // (well it's more likely (due to how our frontend works) to support Rational64 instead)

@@ -1,6 +1,7 @@
 use core::fmt;
 
 use gc_arena::{Gc, Mutation};
+use num::{BigInt, BigRational, BigUint, bigint::Sign};
 
 use crate::{
     AbbreviationKind, ContainsDatum as _, DatumVisitor, ExactReal, GAstNode, GAstToken as _,
@@ -8,6 +9,7 @@ use crate::{
     bytecode::SourceData,
     compiler::{ListHead, Program, ProgramData},
     general_parser::GeneralParserError,
+    value::Number,
 };
 
 use super::{ParseProgram, ProgramPtr};
@@ -57,14 +59,14 @@ impl<T: AsRef<str>, SN: AsRef<str>> ParseProgram for (SN, T) {
 
 #[derive(thiserror::Error, Debug)]
 pub enum GAstProgramError {
-    #[error(transparent)]
-    NumberError(#[from] std::num::TryFromIntError),
     #[error("out of range")]
     OutOfRange(rowan::TextRange),
     #[error("number is not supported")]
     UnsupportedNumber(rowan::TextRange),
     #[error("not parsable")]
     Unparseable(rowan::TextRange),
+    #[error("cannot divide by zero")]
+    DivideByZero,
 }
 impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
     type Error = GAstProgramError;
@@ -172,6 +174,7 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
             }
 
             fn visit_number(&mut self, number: &crate::Number) {
+                use num::FromPrimitive;
                 let num = number.number();
                 match num {
                     Some(SchemeNumber::Inexact(f)) => {
@@ -196,28 +199,42 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
                         )));
                     }
                     Some(SchemeNumber::Exact(ExactReal::Integer { value, is_neg })) => {
-                        let num = TryInto::<i64>::try_into(value)
-                            .map(|i| i * if is_neg { -1 } else { 1 })
-                            .map_err(GAstProgramError::NumberError);
-                        self.ptr = Some(num.map(|i| {
-                            Gc::new(
-                                self.mc,
-                                Program::new(ProgramData::Integer(i), source_data!(self, number)),
-                            )
-                        }));
+                        self.ptr = Some(Ok(Gc::new(
+                            self.mc,
+                            Program::new(
+                                ProgramData::Number(Number::Integer(BigInt::from_biguint(
+                                    if is_neg { Sign::Minus } else { Sign::Plus },
+                                    BigUint::from_u64(value).unwrap(),
+                                ))),
+                                source_data!(self, number),
+                            ),
+                        )));
                     }
                     Some(SchemeNumber::Exact(ExactReal::Rational {
                         numer,
                         denom,
                         is_neg,
                     })) => {
-                        self.ptr = Some(Ok(Gc::new(
-                            self.mc,
-                            Program::new(
-                                ProgramData::Rational(is_neg, numer, denom),
-                                source_data!(self, number),
-                            ),
-                        )));
+                        if denom == 0 {
+                            self.ptr = Some(Err(GAstProgramError::DivideByZero));
+                        } else {
+                            self.ptr = Some(Ok(Gc::new(
+                                self.mc,
+                                Program::new(
+                                    ProgramData::Number(Number::from_rational(BigRational::new(
+                                        BigInt::from_biguint(
+                                            if is_neg { Sign::Minus } else { Sign::Plus },
+                                            BigUint::from_u64(numer).unwrap(),
+                                        ),
+                                        BigInt::from_biguint(
+                                            Sign::Plus,
+                                            BigUint::from_u64(denom).unwrap(),
+                                        ),
+                                    ))),
+                                    source_data!(self, number),
+                                ),
+                            )));
+                        }
                     }
                     Some(SchemeNumber::Exact(ExactReal::Inf { is_neg })) => {
                         // infinities are always inexact
@@ -251,15 +268,16 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
                         real: ExactReal::Integer { value, is_neg },
                         imaginary: i,
                     }) if i.is_zero() => {
-                        let num = TryInto::<i64>::try_into(value)
-                            .map(|i| i * if is_neg { -1 } else { 1 })
-                            .map_err(GAstProgramError::NumberError);
-                        self.ptr = Some(num.map(|i| {
-                            Gc::new(
-                                self.mc,
-                                Program::new(ProgramData::Integer(i), source_data!(self, number)),
-                            )
-                        }));
+                        self.ptr = Some(Ok(Gc::new(
+                            self.mc,
+                            Program::new(
+                                ProgramData::Number(Number::Integer(BigInt::from_biguint(
+                                    if is_neg { Sign::Minus } else { Sign::Plus },
+                                    BigUint::from_u64(value).unwrap(),
+                                ))),
+                                source_data!(self, number),
+                            ),
+                        )));
                     }
                     Some(SchemeNumber::Exact(_)) | Some(SchemeNumber::ExactComplex { .. }) => {
                         self.ptr = Some(Err(GAstProgramError::UnsupportedNumber(

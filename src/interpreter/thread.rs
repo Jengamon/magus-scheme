@@ -1509,6 +1509,7 @@ impl<'gc> Thread<'gc> {
 #[cfg(test)]
 mod tests {
     use gc_arena::{Gc, RefLock, arena};
+    use num::{BigInt, FromPrimitive};
     use rstest::{fixture, rstest};
 
     use crate::{
@@ -1518,6 +1519,7 @@ mod tests {
         environment::Environment,
         interpreter::{Context, Includer, NullIncluder},
         runtime::convert::IntoValue,
+        value::Number,
     };
 
     use super::Thread;
@@ -1573,7 +1575,9 @@ mod tests {
                     //     symbol: interner.get_or_intern_static("nuban"),
                     // },
                 ],
-                [Constant::Number(3)],
+                [Constant::Number(Number::Integer(
+                    BigInt::from_u32(3).unwrap(),
+                ))],
                 [],
                 [],
                 0,

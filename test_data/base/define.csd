@@ -4,7 +4,9 @@ Chunk {
     upvalues: 0,
     constants: [
         Number(
-            3,
+            Integer(
+                3,
+            ),
         ),
         String(
             "🤲",

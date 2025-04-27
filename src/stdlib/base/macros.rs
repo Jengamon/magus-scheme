@@ -10,6 +10,7 @@ use crate::{
         Checkpoint, Compiler, EnvironmentSpec, ListHead, ProgramData, ProgramPtr, Transformer,
     },
     environment::StackEnvironmentPtr,
+    value::Number,
 };
 
 #[derive(Debug)]
@@ -77,8 +78,7 @@ pub struct SyntaxRulesImpl {
 #[derive(Debug, Collect)]
 #[collect(require_static)]
 enum Literal {
-    Integer(i64),
-    // TODO Rational
+    Number(Number),
     Inexact(f64),
     String(lasso::Spur),
     Symbol(lasso::Spur),
@@ -139,12 +139,12 @@ impl Matcher {
     ) -> Option<FxHashMap<lasso::Spur, BoundItem<'gc>>> {
         // We are trying to match on a single element
         match self {
-            Matcher::Literal(idx) => match literals[*idx] {
-                Literal::Integer(i) => match ptr.data {
-                    ProgramData::Integer(pi) if i == pi => Some(FxHashMap::default()),
+            Matcher::Literal(idx) => match &literals[*idx] {
+                Literal::Number(n) => match &ptr.data {
+                    ProgramData::Number(pn) if n == pn => Some(FxHashMap::default()),
                     _ => None,
                 },
-                Literal::String(s) => match ptr.data {
+                Literal::String(s) => match &ptr.data {
                     ProgramData::String(ps) if s == ps => Some(FxHashMap::default()),
                     _ => None,
                 },

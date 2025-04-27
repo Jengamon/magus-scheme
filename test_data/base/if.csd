@@ -4,19 +4,29 @@ Chunk {
     upvalues: 0,
     constants: [
         Number(
-            3,
+            Integer(
+                3,
+            ),
         ),
         Number(
-            5,
+            Integer(
+                5,
+            ),
         ),
         Number(
-            4,
+            Integer(
+                4,
+            ),
         ),
         Number(
-            2,
+            Integer(
+                2,
+            ),
         ),
         Number(
-            6,
+            Integer(
+                6,
+            ),
         ),
     ],
     lambdas: [],

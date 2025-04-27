@@ -7,13 +7,17 @@ Chunk {
             Spur(8),
         ),
         Number(
-            3,
+            Integer(
+                3,
+            ),
         ),
         String(
             "🍁 leaf",
         ),
         Number(
-            4,
+            Integer(
+                4,
+            ),
         ),
         Symbol(
             Spur(10),

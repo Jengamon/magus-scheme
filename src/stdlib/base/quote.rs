@@ -24,12 +24,13 @@ fn quote_program<'gc>(
     }
 
     Ok(match &ptr.data {
-        ProgramData::Integer(i) => constant_eval!(*i => Number),
-        ProgramData::Rational(sign, numer, denom) if *denom != 0 => {
-            let index = ctx.add_constant(Constant::Rational(*sign, *numer, *denom));
-            vec![Bytecode::PushConst { index }]
-        }
-        ProgramData::Rational(_, _, _) => anyhow::bail!("ratio over 0 in source"),
+        ProgramData::Number(n) => constant_eval!(n.clone() => Number),
+        // ProgramData::Integer(i) => constant_eval!(*i => Number),
+        // ProgramData::Rational(sign, numer, denom) if *denom != 0 => {
+        //     let index = ctx.add_constant(Constant::Rational(*sign, *numer, *denom));
+        //     vec![Bytecode::PushConst { index }]
+        // }
+        // ProgramData::Rational(_, _, _) => anyhow::bail!("ratio over 0 in source"),
         ProgramData::Inexact(f) => constant_eval!(*f => Inexact),
         ProgramData::Bytevector(bv) => constant_eval!(Arc::from(bv.as_ref()) => Bytevector),
         ProgramData::String(s) => {

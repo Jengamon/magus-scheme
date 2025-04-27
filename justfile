@@ -25,6 +25,9 @@ lexer-test *FLAGS:
 parser-test *FLAGS:
     cargo nextest r -E "test(gpd)" {{FLAGS}}
 
+compile-test *FLAGS:
+    cargo nextest r -E "test(csd)" {{FLAGS}}
+
 scheme-test *FLAGS:
     cargo nextest r -E "test(sct)" {{FLAGS}}
 

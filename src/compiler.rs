@@ -9,6 +9,7 @@ use std::{
 
 use fxhash::{FxHashMap, FxHashSet};
 use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
+use num::{BigInt, ToPrimitive};
 use program_parsers::StringProgramError;
 
 use crate::{
@@ -17,7 +18,7 @@ use crate::{
     environment::{Environment, StackEnvironment, StackEnvironmentPtr},
     interpreter::{Includer, ValuePointers, thread::ThreadPtr},
     runtime::lambda::{CompiledLambda, CompiledLambdaPtr, Lambda, NativeLambdaPtr},
-    value::PromisePtr,
+    value::{Number, PromisePtr},
 };
 
 /// List of Scheme feature identifiers that we support
@@ -130,11 +131,12 @@ pub type ProgramPtr<'gc> = Gc<'gc, Program<'gc>>;
 #[derive(Debug, Collect, Clone)]
 #[collect(no_drop)]
 pub enum ProgramData<'gc> {
-    Integer(i64),
+    Number(Number),
+    // Integer(i64),
     // TODO Support exact rationals (b/c string->number supports them, and
     // not accepting these directly is *odd*)
     // (sign, numer, denom)
-    Rational(bool, u64, u64),
+    // Rational(bool, u64, u64),
     Inexact(f64),
     // TODO complex numbers
     String(#[collect(require_static)] lasso::Spur),
@@ -428,67 +430,69 @@ impl LibraryName {
         let define_library = interner.get_or_intern_static("define-library");
         match &ptr.data {
             ProgramData::List { head, body }
-                if matches!(head, ListHead::Import)
-                    && body.iter().all(|p| {
-                        matches!(p.data, ProgramData::Integer(i) if i >= 0)
-                            || matches!(p.data, ProgramData::Symbol(_))
-                    }) =>
+                if matches!(head, ListHead::Import) && body.iter().all(|p| {
+                    matches!(&p.data, ProgramData::Number(Number::Integer(i)) if i >= &BigInt::ZERO)
+                        || matches!(p.data, ProgramData::Symbol(_))
+                }) =>
             {
-                let body_items = body.iter().map(|p| match p.data {
-                    ProgramData::Symbol(s) => LibraryNameItem::Identifier(s),
-                    ProgramData::Integer(i) if i >= 0 => LibraryNameItem::Integer(i as u64),
+                let body_items = body.iter().map(|p| match &p.data {
+                    ProgramData::Symbol(s) => Some(LibraryNameItem::Identifier(*s)),
+                    ProgramData::Number(Number::Integer(i)) if i >= &BigInt::ZERO => {
+                        i.to_u64().map(LibraryNameItem::Integer)
+                    }
                     _ => unreachable!(),
                 });
 
                 Some(LibraryName(
-                    std::iter::once(LibraryNameItem::Identifier(import))
+                    std::iter::once(Some(LibraryNameItem::Identifier(import)))
                         .chain(body_items)
-                        .collect(),
+                        .collect::<Option<_>>()?,
                 ))
             }
             ProgramData::List { head, body }
-                if matches!(head, ListHead::DefineLibrary)
-                    && body.iter().all(|p| {
-                        matches!(p.data, ProgramData::Integer(i) if i >= 0)
-                            || matches!(p.data, ProgramData::Symbol(_))
-                    }) =>
+                if matches!(head, ListHead::DefineLibrary) && body.iter().all(|p| {
+                    matches!(&p.data, ProgramData::Number(Number::Integer(i)) if i >= &BigInt::ZERO)
+                        || matches!(p.data, ProgramData::Symbol(_))
+                }) =>
             {
-                let body_items = body.iter().map(|p| match p.data {
-                    ProgramData::Symbol(s) => LibraryNameItem::Identifier(s),
-                    ProgramData::Integer(i) if i >= 0 => LibraryNameItem::Integer(i as u64),
+                let body_items = body.iter().map(|p| match &p.data {
+                    ProgramData::Symbol(s) => Some(LibraryNameItem::Identifier(*s)),
+                    ProgramData::Number(Number::Integer(i)) if i >= &BigInt::ZERO => {
+                        i.to_u64().map(LibraryNameItem::Integer)
+                    }
                     _ => unreachable!(),
                 });
 
                 Some(LibraryName(
-                    std::iter::once(LibraryNameItem::Identifier(define_library))
+                    std::iter::once(Some(LibraryNameItem::Identifier(define_library)))
                         .chain(body_items)
-                        .collect(),
+                        .collect::<Option<_>>()?,
                 ))
             }
             ProgramData::List { head, body }
-                if matches!(head, ListHead::Program(p) if matches!(p.data, ProgramData::Symbol(_)) || matches!(p.data, ProgramData::Integer(i) if i >= 0))
+                if matches!(head, ListHead::Program(p) if matches!(p.data, ProgramData::Symbol(_)) || matches!(&p.data, ProgramData::Number(Number::Integer(i)) if i >= &BigInt::ZERO))
                     && body.iter().all(|p| {
-                        matches!(p.data, ProgramData::Integer(i) if i >= 0)
+                        matches!(&p.data, ProgramData::Number(Number::Integer(i)) if i >= &BigInt::ZERO)
                             || matches!(p.data, ProgramData::Symbol(_))
                     }) =>
             {
-                let body_items = body.iter().map(|p| match p.data {
-                    ProgramData::Symbol(s) => LibraryNameItem::Identifier(s),
-                    ProgramData::Integer(i) if i >= 0 => LibraryNameItem::Integer(i as u64),
+                let body_items = body.iter().map(|p| match &p.data {
+                    ProgramData::Symbol(s) => Some(LibraryNameItem::Identifier(*s)),
+                    ProgramData::Number(Number::Integer(i)) if i >= &BigInt::ZERO => i.to_u64().map(LibraryNameItem::Integer),
                     _ => unreachable!(),
                 });
 
                 let ListHead::Program(list_head) = head else {
                     unreachable!()
                 };
-                let first_item = match list_head.data {
-                    ProgramData::Symbol(s) => LibraryNameItem::Identifier(s),
-                    ProgramData::Integer(i) if i >= 0 => LibraryNameItem::Integer(i as u64),
+                let first_item = match &list_head.data {
+                    ProgramData::Symbol(s) => Some(LibraryNameItem::Identifier(*s)),
+                    ProgramData::Number(Number::Integer(i)) if i >= &BigInt::ZERO => i.to_u64().map(LibraryNameItem::Integer),
                     _ => unreachable!(),
                 };
 
                 Some(LibraryName(
-                    std::iter::once(first_item).chain(body_items).collect(),
+                    std::iter::once(first_item).chain(body_items).collect::<Option<_>>()?,
                 ))
             }
             _ => None,
@@ -909,9 +913,11 @@ pub enum ImportSetError {
 }
 impl ImportSet {
     fn as_library_name_item(ptr: ProgramPtr<'_>) -> Option<LibraryNameItem> {
-        match ptr.data {
-            ProgramData::Integer(i) if i >= 0 => Some(LibraryNameItem::Integer(i as u64)),
-            ProgramData::Symbol(s) => Some(LibraryNameItem::Identifier(s)),
+        match &ptr.data {
+            ProgramData::Number(Number::Integer(i)) if i >= &BigInt::ZERO => {
+                i.to_u64().map(LibraryNameItem::Integer)
+            }
+            ProgramData::Symbol(s) => Some(LibraryNameItem::Identifier(*s)),
             _ => None,
         }
     }
@@ -1078,10 +1084,15 @@ impl ImportSet {
                     Err(ImportSetError::NotImportSet(ptr.source))
                 }
                 ListHead::Program(p)
-                    if matches!(&p.data, ProgramData::Symbol(_) | ProgramData::Integer(_))
-                        && body.iter().all(|p| {
-                            matches!(&p.data, ProgramData::Symbol(_) | ProgramData::Integer(_))
-                        }) =>
+                    if matches!(
+                        &p.data,
+                        ProgramData::Symbol(_) | ProgramData::Number(Number::Integer(_))
+                    ) && body.iter().all(|p| {
+                        matches!(
+                            &p.data,
+                            ProgramData::Symbol(_) | ProgramData::Number(Number::Integer(_))
+                        )
+                    }) =>
                 {
                     Ok(Self::Name(
                         Self::as_library_name(ptr, interner)
@@ -1738,16 +1749,21 @@ impl<'gc> Compiler<'gc> {
             }};
         }
         match &program.data {
-            ProgramData::Integer(i) => {
-                simple_constant!(*i => Number)
+            ProgramData::Number(n) => {
+                simple_constant!(n.clone() => Number)
             }
-            ProgramData::Rational(sign, numer, denom) if *denom != 0 => {
-                let index = ctx.add_constant(Constant::Rational(*sign, *numer, *denom));
-                Ok(SyntaxReturn::Code(Box::from([Bytecode::PushConst {
-                    index,
-                }])))
-            }
-            ProgramData::Rational(_, _, _) => Err(CompileError::RatioOverZero(program.source)),
+            // ProgramData::Integer(i) => {
+            //     // simple_constant!(*i => Number)
+            //     todo!()
+            // }
+            // ProgramData::Rational(sign, numer, denom) if *denom != 0 => {
+            //     // let index = ctx.add_constant(Constant::Rational(*sign, *numer, *denom));
+            //     // Ok(SyntaxReturn::Code(Box::from([Bytecode::PushConst {
+            //     //     index,
+            //     // }])))
+            //     todo!()
+            // }
+            // ProgramData::Rational(_, _, _) => Err(CompileError::RatioOverZero(program.source)),
             ProgramData::Inexact(f) => {
                 simple_constant!(*f => Inexact)
             }

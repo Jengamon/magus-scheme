@@ -1,5 +1,5 @@
 // TODO Split, if this file gets too large, into separate files
-pub use bytevector::Bytevector;
+pub use bytevector::{Bytevector, MakeBytevector};
 pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, MonotonicDescending};
 pub use control::{Apply, CallCc, Features};
 pub use conversions::{
@@ -1638,6 +1638,7 @@ mod bytevector {
     //! Scheme bytevector stuff
     use gc_arena::{Collect, Gc};
     use im_rc::Vector;
+    use num::BigInt;
 
     use crate::{
         Value,
@@ -1685,6 +1686,73 @@ mod bytevector {
             Ok(LambdaReturn::Return(vec![
                 Value::Bytevector(Gc::new(&ctx, gc_arena::Static(Vector::from_iter(bytes))).into())
                     .into_ptr(&ctx),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct MakeBytevector;
+
+    impl<'gc> NativeLambda<'gc> for MakeBytevector {
+        fn arity(&self) -> Arity {
+            Arity::Bounded { min: 1, max: 2 }
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            use num::ToPrimitive;
+            let Value::Number(n) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "make-bytevector expects an exact nonnegative integer as its first argument"
+                ))?;
+            };
+            let Number::Integer(i) = &*n else {
+                return Err(anyhow::anyhow!(
+                    "make-bytevector expects an exact nonnegative integer as its first argument"
+                ))?;
+            };
+
+            if i < &BigInt::ZERO {
+                return Err(anyhow::anyhow!(
+                    "make-bytevector expects an exact nonnegative integer as its first argument"
+                ))?;
+            }
+            let count = i
+                .to_usize()
+                .ok_or(anyhow::anyhow!("make-bytevector: count too big"))?;
+
+            let byte = match args.get(1).map(|v| *v.borrow()) {
+                None => 0u8,
+                Some(Value::Number(n)) if matches!(&*n, Number::Integer(i) if i >= &BigInt::ZERO && i <= &BigInt::from_slice(num::bigint::Sign::Plus, &[u8::MAX as u32])) =>
+                {
+                    let Number::Integer(i) = &*n else {
+                        unreachable!()
+                    };
+
+                    i.to_u8().unwrap()
+                }
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "make-bytevector expects a byte as its second argument"
+                    ))?;
+                }
+            };
+
+            Ok(LambdaReturn::Return(vec![
+                Value::Bytevector(
+                    Gc::new(
+                        &ctx,
+                        gc_arena::Static(im_rc::Vector::from_iter(std::iter::repeat_n(
+                            byte, count,
+                        ))),
+                    )
+                    .into(),
+                )
+                .into_ptr(&ctx),
             ]))
         }
     }

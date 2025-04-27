@@ -1,11 +1,11 @@
 use either::Either;
 use gc_arena::{Collect, Gc, RefLock};
-use num::{BigInt, BigRational, BigUint, bigint::Sign};
+use num::{bigint::Sign, BigInt, BigRational, BigUint};
 
 use crate::{
-    Value,
     runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
     value::{self, ConsCell, Number},
+    Value,
 };
 
 #[derive(Debug, Collect)]
@@ -138,9 +138,10 @@ impl<'gc> NativeLambda<'gc> for NumberToString {
             },
         };
 
-        Ok(LambdaReturn::Return(vec![
-            Value::String(Gc::new(&ctx, RefLock::new(output_string)).into()).into_ptr(&ctx),
-        ]))
+        Ok(LambdaReturn::Return(vec![Value::String(
+            Gc::new(&ctx, RefLock::new(output_string)).into(),
+        )
+        .into_ptr(&ctx)]))
     }
 }
 
@@ -341,19 +342,20 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                     },
                     Some(Ok(StnComponent::PosInf)) if lexer.next().is_none() => {
                         return Ok(LambdaReturn::Return(vec![
-                            Value::Inexact(f64::INFINITY).into_ptr(&ctx),
+                            Value::Inexact(f64::INFINITY).into_ptr(&ctx)
                         ]));
                     }
                     Some(Ok(StnComponent::NegInf)) if lexer.next().is_none() => {
-                        return Ok(LambdaReturn::Return(vec![
-                            Value::Inexact(f64::NEG_INFINITY).into_ptr(&ctx),
-                        ]));
+                        return Ok(LambdaReturn::Return(vec![Value::Inexact(
+                            f64::NEG_INFINITY,
+                        )
+                        .into_ptr(&ctx)]));
                     }
                     Some(Ok(StnComponent::PosNan | StnComponent::NegNan))
                         if lexer.next().is_none() =>
                     {
                         return Ok(LambdaReturn::Return(vec![
-                            Value::Inexact(f64::NAN).into_ptr(&ctx),
+                            Value::Inexact(f64::NAN).into_ptr(&ctx)
                         ]));
                     }
                     _ => break,
@@ -618,7 +620,7 @@ impl<'gc> NativeLambda<'gc> for StringToSymbol {
         let sym = ctx.interner.get_or_intern(s.borrow().as_str());
 
         Ok(LambdaReturn::Return(vec![
-            Value::Symbol(sym.into()).into_ptr(&ctx),
+            Value::Symbol(sym.into()).into_ptr(&ctx)
         ]))
     }
 }
@@ -645,13 +647,10 @@ impl<'gc> NativeLambda<'gc> for SymbolToString {
 
         let str = ctx.interner.resolve(&s.0);
 
-        Ok(LambdaReturn::Return(vec![
-            Value::String(value::String::new_frozen(Gc::new(
-                &ctx,
-                RefLock::new(str.to_string()),
-            )))
-            .into_ptr(&ctx),
-        ]))
+        Ok(LambdaReturn::Return(vec![Value::String(
+            value::String::new_frozen(Gc::new(&ctx, RefLock::new(str.to_string()))),
+        )
+        .into_ptr(&ctx)]))
     }
 }
 
@@ -693,9 +692,10 @@ impl<'gc> NativeLambda<'gc> for ListToString {
             .collect::<Result<_, _>>()?;
         let s = String::from_iter(values);
 
-        Ok(LambdaReturn::Return(vec![
-            Value::String(Gc::new(&ctx, RefLock::new(s)).into()).into_ptr(&ctx),
-        ]))
+        Ok(LambdaReturn::Return(vec![Value::String(
+            Gc::new(&ctx, RefLock::new(s)).into(),
+        )
+        .into_ptr(&ctx)]))
     }
 }
 
@@ -857,9 +857,10 @@ impl<'gc> NativeLambda<'gc> for Utf8ToString {
         let s = String::from_utf8(b)
             .map_err(|_| anyhow::anyhow!("utf8->string: bytes were not valid UTF8"))?;
 
-        Ok(LambdaReturn::Return(vec![
-            Value::String(Gc::new(&ctx, RefLock::new(s)).into()).into_ptr(&ctx),
-        ]))
+        Ok(LambdaReturn::Return(vec![Value::String(
+            Gc::new(&ctx, RefLock::new(s)).into(),
+        )
+        .into_ptr(&ctx)]))
     }
 }
 
@@ -937,9 +938,10 @@ impl<'gc> NativeLambda<'gc> for StringToUtf8 {
             .collect::<String>();
         let bytes = im_rc::Vector::from_iter(s.as_bytes().iter().copied());
 
-        Ok(LambdaReturn::Return(vec![
-            Value::Bytevector(Gc::new(&ctx, gc_arena::Static(bytes)).into()).into_ptr(&ctx),
-        ]))
+        Ok(LambdaReturn::Return(vec![Value::Bytevector(
+            Gc::new(&ctx, gc_arena::Static(bytes)).into(),
+        )
+        .into_ptr(&ctx)]))
     }
 }
 

@@ -59,6 +59,32 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
             thread,
         },
     )?;
+    interp.register_module(
+        &thread,
+        &comp,
+        &mut test_world,
+        stdlib::cxr::Cxr,
+        None,
+        |thread, vp| LibraryDefinitionContext {
+            max_fuel: Some(10_000),
+            value_pointers: vp,
+            additional_features: None,
+            thread,
+        },
+    )?;
+    interp.register_module(
+        &thread,
+        &comp,
+        &mut test_world,
+        stdlib::srfi::list::Srfi1,
+        None,
+        |thread, vp| LibraryDefinitionContext {
+            max_fuel: Some(10_000),
+            value_pointers: vp,
+            additional_features: None,
+            thread,
+        },
+    )?;
     let file_name = format!("{path}.scm");
     let chunk = interp.compiler_context::<anyhow::Error>(
         &thread,

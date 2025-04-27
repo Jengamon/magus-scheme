@@ -1,0 +1,9 @@
+---
+13
+13
+---
+(import (only (srfi 1) list-ref tenth cdddr)
+        (only (scheme base) values define quote))
+(define x '(1 2 3 4 5 6 7 8 9 10 11 12 13))
+(values (list-ref x 12)
+        (tenth (cdddr x)))

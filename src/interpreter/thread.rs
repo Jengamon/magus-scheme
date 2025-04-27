@@ -1078,9 +1078,7 @@ impl<'gc> Thread<'gc> {
                             advance_to_next_inst!(frame);
                         }
                         Bytecode::FetchArg { index } => {
-                            if index < frame.args.len()
-                                && !matches!(*frame.args[index].borrow(), Value::Undefined)
-                            {
+                            if index < frame.args.len() {
                                 self.stack.push(frame.args[index]);
                                 advance_to_next_inst!();
                             } else {

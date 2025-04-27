@@ -122,23 +122,25 @@ impl Syntax for Or {
             // dup
             // jump if 1
             // jump 'success
+            // pop
             // test2
             // dup
             // jump if 1
             // jump 'success
+            // pop
             // ...
             // test_final
             // jump 1
             // push #f
             // 'success
             let mut code = vec![];
-            // at each branch, the jump 'success target value = size of following branches + number of following branches * 3 - 1
-            // (as each branch is followed by a 3 instructions, except for the final branch, which is followed by 2)
+            // at each branch, the jump 'success target value = size of following branches + number of following branches * 4 - 3
+            // (as each branch is followed by a 4 instructions, except for the final branch, which is followed by 2, the first which success targets)
             let jump_targets = (0..args_compiled.len())
                 .map(|idx| {
                     let following = &args_compiled[idx + 1..];
-                    (following.iter().map(|blk| blk.len()).sum::<usize>() + following.len() * 3)
-                        .saturating_sub(1)
+                    (following.iter().map(|blk| blk.len()).sum::<usize>() + following.len() * 4)
+                        .saturating_sub(3)
                 })
                 .collect::<Vec<_>>();
             let num_branches = args_compiled.len();
@@ -151,6 +153,7 @@ impl Syntax for Or {
                         Bytecode::Duplicate,
                         Bytecode::If { jump: 1 },
                         Bytecode::Jump { jump: target },
+                        Bytecode::Pop,
                     ]);
                 }
             }

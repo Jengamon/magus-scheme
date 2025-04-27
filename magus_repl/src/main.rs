@@ -702,6 +702,9 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
                         // consider this line successfully executed
                         prompt.completed_lines += 1;
 
+                        // Clear all interrupts
+                        let _ = rx.try_iter().count();
+
                         let start = Instant::now();
                         execute(
                             src,

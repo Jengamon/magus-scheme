@@ -28,6 +28,15 @@ TODO (future) Work on using BigIntegers in the Frontend
 
 See [readme.rs](./examples/readme.rs) for a very simple example of running a script.
 
+## Optimization Work (TO BE REMOVED/SEPARATED)
+
+Optimization work is cool (and expected by unexpected).
+An example of a function that when from being 23s to do 1/3 of this work (in *release* mode), to 200ms in *debug* mode.
+(Release mode is something like *30-ish ms*). (on my MBP M3)
+
+<!-- i wish the URL was adjusted -->
+<img src="./magus/blob/impl-redo/list-opt.gif"/>
+
 ## IMPL NOTES (TO BE REMOVED/SEPARATED)
 
 ### Hygenic macros

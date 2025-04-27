@@ -16,7 +16,7 @@ pub use predicates::{
     IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull, IsOdd, IsPair,
     IsProcedure, IsString, IsSymbol, IsVector,
 };
-pub use string::{StringCopy, Substring};
+pub use string::{StringCopy, StringLength, Substring};
 pub use structure::{CallWithValues, Cons, Values};
 pub use vector::VectorRef;
 
@@ -1692,6 +1692,7 @@ mod bytevector {
 
 mod string {
     use gc_arena::{Collect, Gc, RefLock};
+    use num::BigInt;
 
     use crate::{
         Value,
@@ -1847,6 +1848,37 @@ mod string {
 
             Ok(LambdaReturn::Return(vec![
                 Value::String(Gc::new(&ctx, RefLock::new(str)).into()).into_ptr(&ctx),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct StringLength;
+
+    impl<'gc> NativeLambda<'gc> for StringLength {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            use num::FromPrimitive;
+            let Value::String(s) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "string-length expects a string as its argument"
+                ))?;
+            };
+
+            Ok(LambdaReturn::Return(vec![
+                Value::Number(Gc::new(
+                    &ctx,
+                    Number::Integer(BigInt::from_usize(s.borrow().chars().count()).unwrap()),
+                ))
+                .into_ptr(&ctx),
             ]))
         }
     }

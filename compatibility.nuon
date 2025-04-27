@@ -197,7 +197,7 @@
     [ "base", "", string-copy!, false, "", "" ],
     [ "base", "", string-fill!, false, "", "" ],
     [ "base", "", string-for-each, false, "", "" ],
-    [ "base", "", string-length, false, "", "" ],
+    [ "base", "procedure", string-length, true, "get the number of characters in a string", "" ],
     [ "base", "", string-map, false, "", "" ],
     [ "base", "", string-ref, false, "", "" ],
     [ "base", "", string-set!, false, "", "" ],

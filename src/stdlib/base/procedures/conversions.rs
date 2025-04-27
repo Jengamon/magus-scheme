@@ -775,7 +775,7 @@ impl<'gc> NativeLambda<'gc> for StringToList {
         };
 
         if end < start {
-            return Err(anyhow::anyhow!("string->list: start must be less than end"))?;
+            return Err(anyhow::anyhow!("string->list: start must be <= end"))?;
         } else if end > s.borrow().chars().count() {
             return Err(anyhow::anyhow!("string->list: end out of range"))?;
         }
@@ -861,7 +861,7 @@ impl<'gc> NativeLambda<'gc> for Utf8ToString {
         };
 
         if end < start {
-            return Err(anyhow::anyhow!("utf8->string: start must be less than end"))?;
+            return Err(anyhow::anyhow!("utf8->string: start must be <= end"))?;
         } else if end > b.vec.len() {
             return Err(anyhow::anyhow!("utf8->string: end out of range"))?;
         }
@@ -947,7 +947,7 @@ impl<'gc> NativeLambda<'gc> for StringToUtf8 {
         };
 
         if end < start {
-            return Err(anyhow::anyhow!("string->utf8: start must be less than end"))?;
+            return Err(anyhow::anyhow!("string->utf8: start must be <= end"))?;
         } else if end > s.borrow().chars().count() {
             return Err(anyhow::anyhow!("string->utf8: end out of range"))?;
         }

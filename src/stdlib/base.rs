@@ -28,8 +28,9 @@ pub use procedures::{
     Features, Gcd, Inexact, IntegerToChar, IsEq, IsEqual, IsEqv, IsEven, IsExact, IsExactInteger,
     IsInexact, IsInteger, IsList, IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, IsVector,
     Lcm, ListCopy, ListSetBang, ListToString, Map, MonotonicAscending, MonotonicDescending,
-    Multiply, NumberToString, Numerator, Raise, RaiseContinuable, StringToList, StringToNumber,
-    StringToSymbol, StringToUtf8, Subtract, SymbolToString, Utf8ToString, Values, VectorRef,
+    Multiply, NumberToString, Numerator, Raise, RaiseContinuable, StringCopy, StringToList,
+    StringToNumber, StringToSymbol, StringToUtf8, Substring, Subtract, SymbolToString,
+    Utf8ToString, Values, VectorRef,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -409,6 +410,8 @@ impl Module for Base {
             "string->utf8",
             "utf8->string",
             "bytevector",
+            "string-copy",
+            "substring",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -495,6 +498,8 @@ impl Module for Base {
             "string->utf8" => lambda!(StringToUtf8),
             "utf8->string" => lambda!(Utf8ToString),
             "bytevector" => lambda!(Bytevector),
+            "string-copy" => lambda!(StringCopy),
+            "substring" => lambda!(Substring),
             _ => None,
         }
     }

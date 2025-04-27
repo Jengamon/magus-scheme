@@ -16,6 +16,7 @@ pub use predicates::{
     IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull, IsOdd, IsPair,
     IsProcedure, IsString, IsSymbol, IsVector,
 };
+pub use string::{StringCopy, Substring};
 pub use structure::{CallWithValues, Cons, Values};
 pub use vector::VectorRef;
 
@@ -1684,6 +1685,168 @@ mod bytevector {
             Ok(LambdaReturn::Return(vec![
                 Value::Bytevector(Gc::new(&ctx, gc_arena::Static(Vector::from_iter(bytes))).into())
                     .into_ptr(&ctx),
+            ]))
+        }
+    }
+}
+
+mod string {
+    use gc_arena::{Collect, Gc, RefLock};
+
+    use crate::{
+        Value,
+        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        value::Number,
+    };
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct StringCopy;
+
+    impl<'gc> NativeLambda<'gc> for StringCopy {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            use num::ToPrimitive;
+            let Value::String(s) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "string-copy expects a string as its first argument"
+                ))?;
+            };
+
+            if args.len() > 3 {
+                return Err(anyhow::anyhow!("string-copy expects 1, 2, or 3 arguments"))?;
+            }
+
+            let maybe_start = args.get(1);
+            let start = if let Some(start) = maybe_start {
+                match *start.borrow() {
+                    Value::Number(n) if matches!(*n, Number::Integer(_)) => {
+                        let Number::Integer(start) = &*n else {
+                            unreachable!()
+                        };
+
+                        start
+                            .to_usize()
+                            .ok_or(anyhow::anyhow!("string-copy: start is too big"))?
+                    }
+                    _ => Err(anyhow::anyhow!(
+                        "string-copy expects an integer as its second argument"
+                    ))?,
+                }
+            } else {
+                0usize
+            };
+
+            let maybe_end = args.get(2);
+            let end = if let Some(end) = maybe_end {
+                match *end.borrow() {
+                    Value::Number(n) if matches!(*n, Number::Integer(_)) => {
+                        let Number::Integer(end) = &*n else {
+                            unreachable!()
+                        };
+
+                        end.to_usize()
+                            .ok_or(anyhow::anyhow!("string-copy: end is too big"))?
+                    }
+                    _ => Err(anyhow::anyhow!(
+                        "string-copy expects an integer as its third argument"
+                    ))?,
+                }
+            } else {
+                s.borrow().chars().count()
+            };
+
+            if end < start {
+                return Err(anyhow::anyhow!("string-copy: start must be <= end"))?;
+            } else if end > s.borrow().chars().count() {
+                return Err(anyhow::anyhow!("string-copy: end out of range"))?;
+            }
+
+            let str = s
+                .borrow()
+                .chars()
+                .skip(start)
+                .take(end - start)
+                .collect::<String>();
+
+            Ok(LambdaReturn::Return(vec![
+                Value::String(Gc::new(&ctx, RefLock::new(str)).into()).into_ptr(&ctx),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Substring;
+
+    impl<'gc> NativeLambda<'gc> for Substring {
+        fn arity(&self) -> Arity {
+            Arity::Exact(3)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            use num::ToPrimitive;
+            let Value::String(s) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "substring expects a string as its first argument"
+                ))?;
+            };
+
+            let start = match *args[1].borrow() {
+                Value::Number(n) if matches!(*n, Number::Integer(_)) => {
+                    let Number::Integer(start) = &*n else {
+                        unreachable!()
+                    };
+
+                    start
+                        .to_usize()
+                        .ok_or(anyhow::anyhow!("substring: start is too big"))?
+                }
+                _ => Err(anyhow::anyhow!(
+                    "substring expects an integer as its second argument"
+                ))?,
+            };
+
+            let end = match *args[2].borrow() {
+                Value::Number(n) if matches!(*n, Number::Integer(_)) => {
+                    let Number::Integer(end) = &*n else {
+                        unreachable!()
+                    };
+
+                    end.to_usize()
+                        .ok_or(anyhow::anyhow!("substring: end is too big"))?
+                }
+                _ => Err(anyhow::anyhow!(
+                    "substring expects an integer as its third argument"
+                ))?,
+            };
+
+            if end < start {
+                return Err(anyhow::anyhow!("substring: start must be <= end"))?;
+            } else if end > s.borrow().chars().count() {
+                return Err(anyhow::anyhow!("substring: end out of range"))?;
+            }
+
+            let str = s
+                .borrow()
+                .chars()
+                .skip(start)
+                .take(end - start)
+                .collect::<String>();
+
+            Ok(LambdaReturn::Return(vec![
+                Value::String(Gc::new(&ctx, RefLock::new(str)).into()).into_ptr(&ctx),
             ]))
         }
     }

@@ -1,4 +1,9 @@
-use std::{borrow::Cow, collections::HashSet, time::Instant};
+use std::{
+    borrow::Cow,
+    collections::HashSet,
+    sync::mpsc::{channel, Receiver},
+    time::Instant,
+};
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
@@ -286,6 +291,9 @@ fn chunk_debug(interpreter: &mut Interpreter, chunk: &ChunkHandle) {
     });
 }
 
+// TODO Create a ThreadObserver struct that holds a thread handle
+// in our main loop
+
 /// Executes a given module
 #[expect(clippy::too_many_arguments)]
 fn execute(
@@ -298,6 +306,7 @@ fn execute(
     thread: &ThreadHandle,
     stashed_env: Option<&ValueHandle>,
     world: &World,
+    termination_recv: &Receiver<()>,
 ) {
     // TODO Return output (either () or the interpreter error)
     // Show what the parser sees
@@ -351,7 +360,13 @@ fn execute(
                         // The shenanigan: id want to keep this private to the magus crate
                         frame_env.borrow_mut(&ctx).reparent(Some(chunk.import_env));
                     }
-                    thread.step(ctx, interner, world, includer, &mut fuel);
+                    while !thread.is_finished() {
+                        if let Ok(()) = termination_recv.try_recv() {
+                            break;
+                        }
+                        thread.step(ctx, interner, world, includer, &mut fuel);
+                        fuel.refill(1_000_000, 1_000_000);
+                    }
                     // dbg!(&thread);
                     let sources = [(interner.get_or_intern_static("repl.scm"), source.as_ref())];
                     if let Some(res) = thread.result() {
@@ -535,6 +550,9 @@ fn compile_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> an
 }
 
 fn execute_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> anyhow::Result<()> {
+    // fake receiver
+    let (_tx, rx) = channel();
+
     let path = path.as_ref();
     let source = std::fs::read_to_string(path).context("failed to read input file")?;
 
@@ -551,6 +569,7 @@ fn execute_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> an
                 &thread,
                 None,
                 &world,
+                &rx,
             );
         }
         Err(errors) => {
@@ -583,6 +602,12 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
         .with_validator(Box::new(SchemeValidator));
     let mut prompt = MagusPrompt::default();
     println!("Type `#q` or `#quit` to exit. Type `#help` for more commands.");
+
+    let (tx, rx) = channel();
+    ctrlc::set_handler(move || {
+        tx.send(()).unwrap();
+    })
+    .expect("failed to set Ctrl-C handler");
 
     // compiler setup
     let (mut interpreter, world, compiler, thread) = repl_stuff()?;
@@ -688,6 +713,7 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
                             &thread,
                             Some(&stashed_env),
                             &world,
+                            &rx,
                         );
                         let end = Instant::now();
                         exec_time = Some(end - start);

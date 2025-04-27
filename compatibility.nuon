@@ -73,7 +73,7 @@
     [ "base", "", define-values, false, "", "" ],
     [ "base", "procedure", denominator, true, "get the denominator of a rational input", "" ],
     [ "base", "", do, false, "", "" ],
-    [ "base", "", dynamic-wind, false, "", "" ],
+    [ "base", "procedure", dynamic-wind, true, "set the dynamic-wind handlers for a lambda's frame", "" ],
     [ "base", "", else, false, "", "" ],
     [ "base", "", eof-object, false, "", "" ],
     [ "base", "", eof-object?, false, "", "" ],

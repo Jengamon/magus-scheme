@@ -107,6 +107,8 @@ pub enum ExecutionKind {
 #[derive(Collect, Clone)]
 #[collect(no_drop)]
 pub struct ThreadFrame<'gc> {
+    // used by parameters
+    id: Gc<'gc, ()>,
     execution: Execution<'gc>,
     // error handler
     // handler: Option<Lambda<'gc>>,
@@ -116,6 +118,7 @@ pub struct ThreadFrame<'gc> {
     exception: Option<SchemeErrorPtr<'gc>>,
     env: StackEnvironmentPtr<'gc>,
     upvalue_index: Option<usize>,
+    wind_frame: bool,
     bottom: usize,
 }
 
@@ -291,12 +294,14 @@ impl<'gc> Thread<'gc> {
         lambda: Lambda<'gc>,
         // error_handler: Option<Lambda<'gc>>,
         args: &[ValuePtr<'gc>],
+        dynamic_wind: DynamicWind<'gc>,
+        // TODO dynamic wind
     ) -> Result<(), LambdaException> {
         // Push args to stack
         for arg in args {
             self.stack.push(*arg);
         }
-        self.call_lambda(ctx, lambda, args.len(), false)?;
+        self.call_lambda(ctx, lambda, args.len(), dynamic_wind, false, false)?;
         // Install error handler (if any)
         // self.frames.last_mut().unwrap().handler = error_handler;
         Ok(())
@@ -335,6 +340,7 @@ impl<'gc> Thread<'gc> {
         }
 
         self.frames.push(ThreadFrame {
+            id: Gc::new(mc, ()),
             execution,
             env: Gc::new(
                 mc,
@@ -342,6 +348,7 @@ impl<'gc> Thread<'gc> {
             ),
             upvalue_index: None,
             args: Box::new([]),
+            wind_frame: false,
             // handler: error_handler,
             dynamic_wind: None,
             exception: None,
@@ -410,6 +417,10 @@ impl<'gc> Thread<'gc> {
         self.frames.iter().map(|f| f.env)
     }
 
+    // fn parent_env(frames: &[ThreadFrame<'gc>]) -> Option<StackEnvironmentPtr<'gc>> {
+    //     frames.get(frames.len() - 2).map(|f| f.env)
+    // }
+
     fn current_env(frames: &[ThreadFrame<'gc>]) -> Option<StackEnvironmentPtr<'gc>> {
         frames.last().map(|f| f.env)
     }
@@ -448,6 +459,11 @@ impl<'gc> Thread<'gc> {
 
         // used later
         let bottom = frame.bottom;
+        let wind_frame = frame.wind_frame;
+        let dynamic_wind = frame.dynamic_wind;
+        let prev_upvalue = frame.upvalue_index;
+        let parent_env = frame.env.borrow().parent();
+        let execution = frame.execution;
         // handle exception frame interaction with non-continuable errors
         if let Some(err) = frame.exception {
             if !err.error_type.is_continuable() {
@@ -476,20 +492,54 @@ impl<'gc> Thread<'gc> {
         // Lambdas would use a "values" function to return more than one value.
         // Native lambdas support this logic natively (if their Return vec len == 1, that value is unwrapped,
         // if 0, return Void, otherwise returns Values)
-        let ret_val = self.stack.pop();
-        // drain any extra value on stack
-        if self.stack.len() >= bottom {
+        // "Wind frames" don't actually return..., so we pop the return value, but ignore it
+        if !wind_frame {
+            let ret_val = self.stack.pop();
+            if self.stack.len() >= bottom {
+                self.stack.drain(bottom..);
+            }
+            // drain any extra value on stack
+            if let Some(ret) = ret_val {
+                self.stack.push(ret);
+            } else {
+                self.stack.push(Value::Void.into_ptr(ctx));
+            }
+        } else if self.stack.len() >= bottom {
             self.stack.drain(bottom..);
         }
-        if let Some(ret) = ret_val {
-            self.stack.push(ret);
+
+        let after_frame = if let Some((_, after_lam)) = dynamic_wind {
+            let (aft_ex, aft_upvalue_id) = Execution::from_lambda(
+                after_lam,
+                match execution {
+                    Execution::Bytecode { fallback, .. } => fallback,
+                    _ => None,
+                },
+            );
+
+            Some(ThreadFrame {
+                id: Gc::new(ctx, ()),
+                bottom: self.stack.len(),
+                wind_frame: true,
+                execution: aft_ex,
+                upvalue_index: aft_upvalue_id.or(prev_upvalue),
+                dynamic_wind: None,
+                args: Box::from([]),
+                exception: None,
+                env: Gc::new(ctx, RefLock::new(StackEnvironment::new(ctx, parent_env))),
+            })
         } else {
-            self.stack.push(Value::Void.into_ptr(ctx));
-        }
+            None
+        };
 
         // TODO If dynamic-wind is present. call the after
         if should_pop {
             self.frames.pop();
+            if let Some(after) = after_frame {
+                self.frames.push(after);
+            }
+        } else if let Some(after) = after_frame {
+            self.frames.insert(self.frames.len() - 1, after);
         }
     }
 
@@ -514,15 +564,20 @@ impl<'gc> Thread<'gc> {
     }
 
     /// Sets up the call to a lambda
+    ///
+    /// If `!is_tail`, `override_wind` has no effect. Otherwise it controls whether `wind_frame` flag is
+    /// inherited.
     fn call_lambda(
         &mut self,
         ctx: &Context<'_, 'gc>,
         lambda: Lambda<'gc>,
         mut args: usize,
+        dynamic_wind: DynamicWind<'gc>,
         is_tail: bool,
+        override_wind: bool,
     ) -> Result<(), LambdaException> {
-        // TODO First argument is lowest on the stack
-        // TODO Remember the Value::Values counts for 1 value!!!, so no special handling
+        // NOTE First argument is lowest on the stack
+        // NOTE Remember the Value::Values counts for 1 value!!!, so no special handling
         // Only as output of the entire system is it special
         if !lambda.arity().is_satisfied(args) {
             return Err(LambdaException::MismatchedArity {
@@ -566,17 +621,9 @@ impl<'gc> Thread<'gc> {
             }),
         );
         let prev_upvalue = self.frames.last().and_then(|f| f.upvalue_index);
-        let new_frame = ThreadFrame {
-            // Ignore voids at the top of the stack when determining the bottom of a frame
-            bottom: self.stack.len(),
-            execution,
-            // handler: None,
-            upvalue_index: upvalue_index.or(prev_upvalue),
-            dynamic_wind: None,
-            args: Box::from(args.as_slice()),
-            exception: None,
-            // "Steal" the last frame environment if we are tail-calling the function
-            env: if !is_tail {
+        // "Steal" the last frame environment if we are tail-calling the function
+        let frame_env = || {
+            if !is_tail {
                 Gc::new(
                     ctx,
                     RefLock::new(StackEnvironment::new(ctx, Self::current_env(&self.frames))),
@@ -585,20 +632,66 @@ impl<'gc> Thread<'gc> {
                 Self::current_env(&self.frames)
                     .map(|env| Gc::new(ctx, RefLock::new(env.borrow().deep_clone(ctx))))
                     .unwrap_or_else(|| Gc::new(ctx, RefLock::new(StackEnvironment::new(ctx, None))))
-            },
+            }
+        };
+        let new_frame = ThreadFrame {
+            id: Gc::new(ctx, ()),
+            // Ignore voids at the top of the stack when determining the bottom of a frame
+            bottom: self.stack.len(),
+            execution,
+            // handler: None,
+            upvalue_index: upvalue_index.or(prev_upvalue),
+            dynamic_wind,
+            args: Box::from(args.as_slice()),
+            wind_frame: false,
+            exception: None,
+            env: frame_env(),
+        };
+        let before_frame = if let Some((before_lam, _)) = dynamic_wind {
+            let (bef_ex, bef_upvalue_id) = Execution::from_lambda(
+                before_lam,
+                match execution {
+                    Execution::Bytecode { fallback, .. } => fallback,
+                    _ => None,
+                },
+            );
+
+            Some(ThreadFrame {
+                id: Gc::new(ctx, ()),
+                bottom: self.stack.len(),
+                wind_frame: true,
+                execution: bef_ex,
+                upvalue_index: bef_upvalue_id.or(prev_upvalue),
+                dynamic_wind: None,
+                args: Box::from([]),
+                exception: None,
+                env: frame_env(),
+            })
+        } else {
+            None
         };
 
         if is_tail {
             if let Some(frame) = self.frames.last_mut() {
                 let old_bottom = frame.bottom;
+                let old_wind = frame.wind_frame;
                 *frame = new_frame;
                 // Inherit old stack bottom
                 frame.bottom = old_bottom;
+                if !override_wind {
+                    frame.wind_frame = old_wind;
+                }
+                if let Some(before) = before_frame {
+                    self.frames.push(before);
+                }
                 return Ok(());
             }
         }
 
         self.frames.push(new_frame);
+        if let Some(before) = before_frame {
+            self.frames.push(before);
+        }
         Ok(())
     }
 
@@ -624,35 +717,11 @@ impl<'gc> Thread<'gc> {
             ..f.clone()
         })
         .collect();
-        // Adjust the last to actually be the continuation (if bytecode frame)
-        // if let Some(Execution::Bytecode { pc, chunk, .. }) =
-        //     frames_copy.last_mut().map(|f| &mut f.execution)
-        // {
-        //     // handle Jumps
-        //     match chunk.code.get(*pc) {
-        //         Some(code) => match code {
-        //             Bytecode::If { .. } => {
-        //                 // don't move the pc, as the If instruction will handle it
-        //             }
-        //             Bytecode::Jump { jump } => {
-        //                 // jump forward (as this is unconditional)
-        //                 *pc += jump;
-        //             }
-        //             _ => {
-        //                 // all other instructions move linearly
-        //                 *pc += 1;
-        //             }
-        //         },
-        //         None => {
-        //             // no instruction here, don't move pc, as the frame will be popped once handled
-        //         }
-        //     }
-        // };
 
         Continuation::new(frames_copy)
     }
 
-    fn handle_continuation(&mut self, c: ContinuationPtr<'gc>) {
+    fn handle_continuation(&mut self, mc: &Mutation<'gc>, c: ContinuationPtr<'gc>) {
         // TODO Make sure to add before and after calls on *top* of the native call for all
         // frames that are left
         // with all befores below all afters , e.g.:
@@ -665,8 +734,40 @@ impl<'gc> Thread<'gc> {
         // TODO handle dynamic-wind and non-empty continuations
         // Don't advance the frame b/c it will be wiped by the continuation
         if c.frames.is_empty() {
+            // For all frames we *left*, add their afters as frames
+            let afters = self
+                .frames
+                .drain(..)
+                .filter_map(|frame| {
+                    let parent_env = frame.env.borrow().parent();
+                    let prev_upvalue = frame.upvalue_index;
+                    if let Some((_, after_lam)) = frame.dynamic_wind {
+                        let (aft_ex, aft_upvalue_id) = Execution::from_lambda(
+                            after_lam,
+                            match frame.execution {
+                                Execution::Bytecode { fallback, .. } => fallback,
+                                _ => None,
+                            },
+                        );
+
+                        Some(ThreadFrame {
+                            id: Gc::new(mc, ()),
+                            bottom: self.stack.len(),
+                            wind_frame: true,
+                            execution: aft_ex,
+                            upvalue_index: aft_upvalue_id.or(prev_upvalue),
+                            dynamic_wind: None,
+                            args: Box::from([]),
+                            exception: None,
+                            env: Gc::new(mc, RefLock::new(StackEnvironment::new(mc, parent_env))),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
             // We just dump execution
-            self.frames.clear();
+            self.frames = afters;
         } else {
             // TODO The above would work but for upvalues (and dynamic-wind handling TODO). Figure out why.
             // "Duh". The continuation at capture might not have an upvalue_index assigned at capture, while the current continuation
@@ -696,7 +797,76 @@ impl<'gc> Thread<'gc> {
             //         }
             //     })
             //     .collect::<Vec<_>>();
-            self.frames = c.frames.to_vec();
+            let afters = self
+                .frames
+                .drain(..)
+                .filter_map(|frame| {
+                    let parent_env = frame.env.borrow().parent();
+                    let prev_upvalue = frame.upvalue_index;
+                    if let Some((_, after_lam)) = frame.dynamic_wind {
+                        let (aft_ex, aft_upvalue_id) = Execution::from_lambda(
+                            after_lam,
+                            match frame.execution {
+                                Execution::Bytecode { fallback, .. } => fallback,
+                                _ => None,
+                            },
+                        );
+
+                        Some(ThreadFrame {
+                            id: Gc::new(mc, ()),
+                            bottom: self.stack.len(),
+                            wind_frame: true,
+                            execution: aft_ex,
+                            upvalue_index: aft_upvalue_id.or(prev_upvalue),
+                            dynamic_wind: None,
+                            args: Box::from([]),
+                            exception: None,
+                            env: Gc::new(mc, RefLock::new(StackEnvironment::new(mc, parent_env))),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            let befores = c
+                .frames
+                .iter()
+                .rev()
+                .filter_map(|frame| {
+                    let parent_env = frame.env.borrow().parent();
+                    let prev_upvalue = frame.upvalue_index;
+                    if let Some((before_lam, _)) = frame.dynamic_wind {
+                        let (bef_ex, bef_upvalue_id) = Execution::from_lambda(
+                            before_lam,
+                            match frame.execution {
+                                Execution::Bytecode { fallback, .. } => fallback,
+                                _ => None,
+                            },
+                        );
+
+                        Some(ThreadFrame {
+                            id: Gc::new(mc, ()),
+                            bottom: self.stack.len(),
+                            wind_frame: true,
+                            execution: bef_ex,
+                            upvalue_index: bef_upvalue_id.or(prev_upvalue),
+                            dynamic_wind: None,
+                            args: Box::from([]),
+                            exception: None,
+                            env: Gc::new(mc, RefLock::new(StackEnvironment::new(mc, parent_env))),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            self.frames = c
+                .frames
+                .iter()
+                .cloned()
+                .chain(befores)
+                .chain(afters)
+                .collect();
             // TODO Handle dynamic-wind and parameters
             // then we create dynamic-wind frames as necessary on top of these frames, where the handler copies the upvalue_index of the frame it comes from.
             // Then the frames we just created, together with the dynamic-wind frames generated from all frames (including the current ones) *replace* the current frames
@@ -1138,6 +1308,7 @@ impl<'gc> Thread<'gc> {
                                         // otherwise, we can continue as normal
                                     }
                                     let pc = *pc;
+                                    let wind_frame = frame.wind_frame;
                                     let code = std::rc::Rc::clone(&chunk.code);
                                     // advance to next inst *before* pushing lambda
                                     advance_to_next_inst!();
@@ -1145,6 +1316,7 @@ impl<'gc> Thread<'gc> {
                                         &ctx,
                                         l,
                                         args,
+                                        None,
                                         pc + match code.get(pc + 1) {
                                             // make sure true branches can also be properly registered as tail calls
                                             // because a jump unconditionally executes, the actual total movement is
@@ -1152,6 +1324,7 @@ impl<'gc> Thread<'gc> {
                                             Some(Bytecode::Jump { jump }) => jump + 2,
                                             _ => 1,
                                         } >= code.len(),
+                                        !wind_frame,
                                     ) {
                                         make_error!(SchemeErrorType::LambdaException(err));
                                         advance_to_next_inst!(undo self.frames.last_mut());
@@ -1173,7 +1346,7 @@ impl<'gc> Thread<'gc> {
                                             continue;
                                         }
                                     }
-                                    self.handle_continuation(c);
+                                    self.handle_continuation(&ctx, c);
                                 }
                                 _ => {
                                     make_error!(SchemeErrorType::NonCallable);
@@ -1362,7 +1535,7 @@ impl<'gc> Thread<'gc> {
                                     .push(Value::Values(Gc::new(&ctx, vals)).into_ptr(&ctx));
                             }
                             if let Some(cont) = error.and_then(|e| e.error_type.continuation()) {
-                                self.handle_continuation(cont);
+                                self.handle_continuation(&ctx, cont);
                             } else {
                                 self.handle_frame_end(&ctx, true);
                             }
@@ -1375,7 +1548,7 @@ impl<'gc> Thread<'gc> {
                                 // |args| <= 1, so this is correct
                                 self.stack.extend(args.first());
                             }
-                            self.handle_continuation(cont);
+                            self.handle_continuation(&ctx, cont);
                         }
                         Ok(LambdaReturn::Raise {
                             error,
@@ -1419,12 +1592,18 @@ impl<'gc> Thread<'gc> {
                             } else {
                                 lambda
                             };
-                            if let Err(err) = self.call_lambda(&ctx, lambda, args_len, false) {
+                            let wind_frame = frame.wind_frame;
+                            if let Err(err) = self.call_lambda(
+                                &ctx,
+                                lambda,
+                                args_len,
+                                dynamic_wind,
+                                false,
+                                !wind_frame,
+                            ) {
                                 make_error!(SchemeErrorType::LambdaException(err));
                                 continue;
                             };
-                            // Set dynamic wind
-                            self.frames.last_mut().unwrap().dynamic_wind = dynamic_wind;
                         }
                         Ok(LambdaReturn::CallHandler {
                             lambda,
@@ -1451,12 +1630,18 @@ impl<'gc> Thread<'gc> {
                             } else {
                                 lambda
                             };
-                            if let Err(err) = self.call_lambda(&ctx, lambda, args_len, false) {
+                            let wind_frame = frame.wind_frame;
+                            if let Err(err) = self.call_lambda(
+                                &ctx,
+                                lambda,
+                                args_len,
+                                dynamic_wind,
+                                false,
+                                !wind_frame,
+                            ) {
                                 make_error!(SchemeErrorType::LambdaException(err));
                                 continue;
                             };
-                            // Set dynamic wind
-                            self.frames.last_mut().unwrap().dynamic_wind = dynamic_wind;
                         }
                         Ok(LambdaReturn::TailCall {
                             lambda,
@@ -1476,12 +1661,18 @@ impl<'gc> Thread<'gc> {
                             } else {
                                 lambda
                             };
-                            if let Err(err) = self.call_lambda(&ctx, lambda, args_len, true) {
+                            let wind_frame = frame.wind_frame;
+                            if let Err(err) = self.call_lambda(
+                                &ctx,
+                                lambda,
+                                args_len,
+                                dynamic_wind,
+                                true,
+                                !wind_frame,
+                            ) {
                                 make_error!(SchemeErrorType::LambdaException(err));
                                 continue;
                             };
-                            // Set dynamic wind
-                            self.frames.last_mut().unwrap().dynamic_wind = dynamic_wind;
                             // self.handle_frame_end(&ctx, true);
                         }
                         Err(e) => {

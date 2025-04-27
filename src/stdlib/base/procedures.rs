@@ -1,7 +1,7 @@
 // TODO Split, if this file gets too large, into separate files
 pub use bytevector::{Bytevector, MakeBytevector};
 pub use comparison::{Ascending, Descending, Equal, MonotonicAscending, MonotonicDescending};
-pub use control::{Apply, CallCc, Features};
+pub use control::{Apply, CallCc, DynamicWind, Features};
 pub use conversions::{
     CharToInteger, Exact, Inexact, IntegerToChar, ListToString, NumberToString, StringToList,
     StringToNumber, StringToSymbol, StringToUtf8, SymbolToString, Utf8ToString,
@@ -304,6 +304,63 @@ mod control {
             );
 
             Ok(LambdaReturn::Return(vec![list]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct DynamicWind;
+
+    impl<'gc> NativeLambda<'gc> for DynamicWind {
+        fn arity(&self) -> Arity {
+            Arity::Exact(3)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            if ctx.stack.is_empty() {
+                let Value::Lambda(before) = *args[0].borrow() else {
+                    return Err(anyhow::anyhow!(
+                        "dynamic-wind expects a 0-arity lambda as its first argument"
+                    ))?;
+                };
+                if !before.arity().is_satisfied(0) {
+                    return Err(anyhow::anyhow!(
+                        "dynamic-wind expects a 0-arity lambda as its first argument"
+                    ))?;
+                }
+                let Value::Lambda(thunk) = *args[1].borrow() else {
+                    return Err(anyhow::anyhow!(
+                        "dynamic-wind expects a 0-arity lambda as its second argument"
+                    ))?;
+                };
+                if !thunk.arity().is_satisfied(0) {
+                    return Err(anyhow::anyhow!(
+                        "dynamic-wind expects a 0-arity lambda as its second argument"
+                    ))?;
+                }
+                let Value::Lambda(after) = *args[2].borrow() else {
+                    return Err(anyhow::anyhow!(
+                        "dynamic-wind expects a 0-arity lambda as its third argument"
+                    ))?;
+                };
+                if !after.arity().is_satisfied(0) {
+                    return Err(anyhow::anyhow!(
+                        "dynamic-wind expects a 0-arity lambda as its third argument"
+                    ))?;
+                }
+
+                Ok(LambdaReturn::Call {
+                    lambda: thunk,
+                    args: vec![],
+                    dynamic_wind: Some((before, after)),
+                })
+            } else {
+                Ok(LambdaReturn::Return(vec![*ctx.stack.first().unwrap()]))
+            }
         }
     }
 }

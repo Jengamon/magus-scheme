@@ -124,7 +124,7 @@ pub enum Value<'gc> {
     // So this a blob of bytecode that is to be evaluated in a surrounding chunk's environment,
     // (just a blob and a memoize slot)
     Promise(PromisePtr<'gc>),
-    Parameter(Parameter<'gc>),
+    Parameter(ParameterPtr<'gc>),
     // TODO Impl native parameter objects
     //
     // These parameter objects should add something to a frame that is handled at the same time as dynamic-wind
@@ -182,7 +182,7 @@ impl Value<'_> {
             Value::Lambda(lptr) => matches!(other, Value::Lambda(optr) if lptr == optr),
             Value::Continuation(c) => matches!(other, Value::Continuation(oc) if c == oc),
             Value::Promise(p) => matches!(other, Value::Promise(op) if Gc::ptr_eq(p, op)),
-            Value::Parameter(p) => matches!(other, Value::Parameter(op) if p == op),
+            Value::Parameter(p) => matches!(other, Value::Parameter(op) if Gc::ptr_eq(p, op)),
             Value::Error(e) => matches!(other, Value::Error(oe) if Gc::ptr_eq(e, oe)),
         }
     }
@@ -259,7 +259,7 @@ impl PartialEq for Value<'_> {
             Value::Lambda(lptr) => matches!(other, Value::Lambda(optr) if lptr == optr),
             Value::Continuation(c) => matches!(other, Value::Continuation(oc) if c == oc),
             Value::Promise(p) => matches!(other, Value::Promise(op) if Gc::ptr_eq(*p, *op)),
-            Value::Parameter(p) => matches!(other, Value::Parameter(op) if p == op),
+            Value::Parameter(p) => matches!(other, Value::Parameter(op) if Gc::ptr_eq(*p, *op)),
             Value::Error(e) => matches!(other, Value::Error(oe) if Gc::ptr_eq(*e, *oe)),
         }
     }
@@ -959,26 +959,17 @@ impl Promise<'_> {
 /// A dynamically bound value location with a
 /// default value, and possibly a conversion lambda
 pub struct Parameter<'gc> {
-    id: Gc<'gc, ()>,
     pub(crate) init: ValuePtr<'gc>,
     pub(crate) convert: Option<Lambda<'gc>>,
+    // TODO an fxhash::FxHashMap of usize (which are the addresses of ThreadFrame::id) to ValuePtr
+    // to find the value of a parameter we climb up the stack of frame in existence, and if not found *then* we use init
+    // (to find the "raw value", it ofc can require a lambda to *actually* figure out)
 }
-impl PartialEq for Parameter<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        Gc::ptr_eq(self.id, other.id)
-    }
-}
-impl Eq for Parameter<'_> {}
-impl std::fmt::Pointer for Parameter<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:p}", self.id)
-    }
-}
+pub type ParameterPtr<'gc> = Gc<'gc, RefLock<Parameter<'gc>>>;
 
 impl<'gc> Parameter<'gc> {
     pub fn new(mc: &Mutation<'gc>, init: ValuePtr<'gc>) -> Self {
         Self {
-            id: Gc::new(mc, ()),
             init,
             convert: None,
         }
@@ -986,7 +977,6 @@ impl<'gc> Parameter<'gc> {
 
     pub fn with_convert(mc: &Mutation<'gc>, init: ValuePtr<'gc>, convert: Lambda<'gc>) -> Self {
         Self {
-            id: Gc::new(mc, ()),
             init,
             convert: Some(convert),
         }

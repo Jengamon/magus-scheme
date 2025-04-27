@@ -52,6 +52,16 @@ pub enum ValueType {
     Error,
 }
 
+impl ValueType {
+    /// Types that can contain ValuePtr, and thus can be self-recursive data structures
+    pub fn can_recurse(self) -> bool {
+        matches!(
+            self,
+            Self::Vector | Self::Record | Self::Cons | Self::Parameter | Self::Promise
+        )
+    }
+}
+
 // Type that stores all possible values!
 #[derive(Collect, Clone, Copy, Debug)]
 #[collect(no_drop)]
@@ -509,7 +519,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K, ModeWrite> {
             Value::InputPort(_) => todo!(),
             Value::OutputPort(_) => todo!(),
             // TODO this needs special handling, b/c a cons might recurse into itself
-            Value::Cons(ref cons) if cons.is_circular(self.value_ptr) => {
+            Value::Cons(ref cons) if cons.is_circular(self.value_ptr, None) => {
                 write!(
                     f,
                     "{}",
@@ -672,7 +682,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K, ModeDisplay> {
             Value::InputPort(_) => todo!(),
             Value::OutputPort(_) => todo!(),
             // TODO this needs special handling, b/c a cons might recurse into itself
-            Value::Cons(ref cons) if cons.is_circular(self.value_ptr) => {
+            Value::Cons(ref cons) if cons.is_circular(self.value_ptr, None) => {
                 write!(
                     f,
                     "{}",
@@ -853,7 +863,7 @@ impl<'gc> Vector<'gc> {
 
             match *val.borrow() {
                 Value::Cons(cell) => {
-                    if cell.is_circular_impl(val, stack) {
+                    if cell.is_circular(val, Some(stack)) {
                         return true;
                     }
                 }
@@ -1003,114 +1013,81 @@ impl<'gc> ConsCell<'gc> {
         }
     }
 
-    fn is_circular_impl(&self, self_ptr: ValuePtr<'gc>, stack: &mut Vec<ValuePtr<'gc>>) -> bool {
-        stack.push(self_ptr);
-        if let Some(val) = self.car {
-            if stack.contains(&val) {
-                return true;
-            }
-
-            match *val.borrow() {
-                Value::Cons(cell) => {
-                    if cell.is_circular_impl(val, stack) {
-                        return true;
-                    }
-                }
-                Value::Vector(vec) => {
-                    if vec.is_circular_impl(val, stack) {
-                        return true;
-                    }
-                }
-                _ => {}
-            }
-        }
-        if let Some(val) = self.cdr {
-            if stack.contains(&val) {
-                return true;
-            }
-
-            match *val.borrow() {
-                Value::Cons(cell) => {
-                    if cell.is_circular_impl(val, stack) {
-                        return true;
-                    }
-                }
-                Value::Vector(vec) => {
-                    if vec.is_circular_impl(val, stack) {
-                        return true;
-                    }
-                }
-                _ => {}
-            }
-        }
-        assert!(Gc::ptr_eq(stack.pop().unwrap(), self_ptr));
-        false
-    }
-
-    /// Returns if a cons cell is circular (self-referential)
+    /// Returns if a cons cell can look like a list
     ///
     /// # Parameters
     /// - `self_ptr`: [`ValuePtr`] pointing to this [`ConsCell`]
-    pub fn is_circular(&self, self_ptr: ValuePtr<'gc>) -> bool {
-        let mut stack = vec![];
-        self.is_circular_impl(self_ptr, &mut stack)
-    }
-
-    fn is_list_impl(
+    pub fn is_circular(
         &self,
         self_ptr: ValuePtr<'gc>,
-        null_ptr: ValuePtr<'gc>,
-        stack: &mut Vec<ValuePtr<'gc>>,
+        addtl_stack: Option<&[ValuePtr<'gc>]>,
     ) -> bool {
-        if let Some(val) = self.cdr {
-            match *val.borrow() {
-                Value::Cons(_) if Gc::ptr_eq(val, null_ptr) => return true,
-                // only non-self recursive values are considered lists (for now)
-                // (and probably ever)
-                Value::Cons(cell) if stack.iter().all(|ptr| !Gc::ptr_eq(*ptr, self_ptr)) => {
-                    stack.push(self_ptr);
-                    if !cell.is_list_impl(val, null_ptr, stack) {
-                        return false;
-                    }
-                    assert!(Gc::ptr_eq(stack.pop().unwrap(), self_ptr));
-                }
-                _ => return false,
-            }
+        let mut stack = fxhash::FxHashSet::from_iter([(&raw const *self_ptr.borrow()).addr()]);
+
+        if let Some(addtl_stack) = addtl_stack {
+            stack.extend(
+                addtl_stack
+                    .iter()
+                    .map(|ptr| (&raw const *ptr.borrow()).addr()),
+            )
         }
-        true
+
+        macro_rules! check_ptr {
+            ($ptr:expr) => {{
+                if stack.contains(&(&raw const *($ptr).borrow()).addr()) {
+                    return true;
+                }
+
+                if ($ptr).borrow().value_type().can_recurse() {
+                    stack.insert((&raw const *($ptr).borrow()).addr());
+                }
+            }};
+        }
+
+        let mut current = *self;
+        while let Some(vp) = current.cdr {
+            if let Some(car) = current.car {
+                check_ptr!(car);
+            }
+            check_ptr!(vp);
+
+            let Value::Cons(c) = *vp.borrow() else {
+                return false;
+            };
+            current = c;
+        }
+        if let Some(car) = current.car {
+            check_ptr!(car);
+        }
+
+        false
     }
 
-    /// Returns if a cons cell is a valid list
+    /// Returns if a cons cell can look like a list
     ///
     /// # Parameters
     /// - `self_ptr`: [`ValuePtr`] pointing to this [`ConsCell`]
     pub fn is_list(&self, self_ptr: ValuePtr<'gc>, null_ptr: ValuePtr<'gc>) -> bool {
-        let mut stack = vec![];
-        self.is_list_impl(self_ptr, null_ptr, &mut stack)
-    }
+        let mut stack = fxhash::FxHashSet::from_iter([(&raw const *self_ptr.borrow()).addr()]);
 
-    fn is_listable_impl(
-        &self,
-        self_ptr: ValuePtr<'gc>,
-        null_ptr: ValuePtr<'gc>,
-        stack: &mut Vec<ValuePtr<'gc>>,
-    ) -> bool {
-        // Check for memoized is_list field first
-        if let Some(val) = self.cdr {
-            match *val.borrow() {
-                Value::Cons(_) if Gc::ptr_eq(val, null_ptr) => return true,
-                // only non-self recursive values are considered lists (for now)
-                // (and probably ever)
-                Value::Cons(cell) if stack.iter().all(|ptr| !Gc::ptr_eq(*ptr, self_ptr)) => {
-                    stack.push(self_ptr);
-                    if cell.is_listable_impl(val, null_ptr, stack) {
-                        return true;
-                    }
-                    assert!(Gc::ptr_eq(stack.pop().unwrap(), self_ptr));
-                }
-                _ => return false,
+        let mut current = *self;
+        while let Some(vp) = current.cdr {
+            if Gc::ptr_eq(vp, null_ptr) {
+                break;
             }
+
+            if stack.contains(&(&raw const *vp.borrow()).addr()) {
+                // Cyclical structure is *not* a list
+                return false;
+            }
+            stack.insert((&raw const *vp.borrow()).addr());
+
+            let Value::Cons(c) = *vp.borrow() else {
+                return false;
+            };
+            current = c;
         }
+
         true
     }
 
@@ -1119,8 +1096,8 @@ impl<'gc> ConsCell<'gc> {
     /// # Parameters
     /// - `self_ptr`: [`ValuePtr`] pointing to this [`ConsCell`]
     pub fn is_listable(&self, self_ptr: ValuePtr<'gc>, null_ptr: ValuePtr<'gc>) -> bool {
-        let mut stack = vec![];
-        self.is_listable_impl(self_ptr, null_ptr, &mut stack)
+        self.cdr
+            .is_none_or(|ptr| Gc::ptr_eq(null_ptr, ptr) || !Gc::ptr_eq(self_ptr, ptr))
     }
 
     /// Get the values of a list (permissively treating improper lists as proper but skipping
@@ -1141,18 +1118,23 @@ impl<'gc> ConsCell<'gc> {
         if Gc::ptr_eq(self_ptr, null_ptr) {
             vec![]
         } else {
-            let car = self.car.unwrap_or(null_ptr);
-            let cdr = if let Some(v) = self.cdr {
-                match *v.borrow() {
-                    _ if Gc::ptr_eq(v, null_ptr) => vec![],
-                    Value::Cons(c) => c.list_values(v, null_ptr),
-                    _ => vec![],
-                }
-            } else {
-                vec![]
-            };
+            // We *know* we are a valid list, so use that info to optimize
+            let mut list_values = vec![self.car.unwrap_or(null_ptr)];
 
-            std::iter::once(car).chain(cdr).collect::<Vec<_>>()
+            let mut current = *self;
+            while let Some(cdr) = current.cdr {
+                if Gc::ptr_eq(null_ptr, cdr) {
+                    break;
+                }
+
+                let Value::Cons(c) = *cdr.borrow() else { break };
+
+                list_values.push(c.car.unwrap_or(null_ptr));
+
+                current = c;
+            }
+
+            list_values
         }
     }
 

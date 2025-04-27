@@ -2465,8 +2465,6 @@ impl<'gc> Compiler<'gc> {
 
         let mut imported = FxHashSet::default();
         let mut export_sets = HashSet::new();
-        // TODO Supporting IncludeLibraryDeclarations means this should be a while let loop, and it
-        // should pop from a Vec (we will reverse the declarations once in the vec?)
         let mut decls = VecDeque::from_iter(library_decls);
 
         #[expect(clippy::too_many_arguments)]
@@ -2512,16 +2510,25 @@ impl<'gc> Compiler<'gc> {
             if !thread.borrow().is_finished() {
                 // we ran outta fuel
                 Err(DefineLibraryError::OutOfFuel(name.to_string(ecc.interner)))
-            } else if let Some(Err(e)) = thread.borrow().result() {
-                // Rendered to string b/c DefineLibraryError is currently not using the 'gc lifetime
-                // TODO Should it?
-                Err(DefineLibraryError::InterpError(Box::from(
-                    e.display(ecc.interner, []).to_string().as_str(),
-                )))
             } else {
-                // reset thread before continuing
-                thread.borrow_mut(mc).reset();
-                Ok(())
+                // .. borrowck sometime we fightin
+                let mut thread_mut = thread.borrow_mut(mc);
+                let ret = if let Some(Err(e)) = thread_mut.result() {
+                    // Rendered to string b/c DefineLibraryError is currently not using the 'gc lifetime
+                    let err = DefineLibraryError::InterpError(Box::from(
+                        e.display(ecc.interner, []).to_string().as_str(),
+                    ));
+                    Err(err)
+                } else {
+                    // reset thread before continuing
+                    thread_mut.reset();
+                    Ok(())
+                };
+                if ret.is_err() {
+                    // reset thread on interp error
+                    thread_mut.reset_error();
+                }
+                ret
             }
         }
 

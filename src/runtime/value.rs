@@ -208,32 +208,37 @@ impl PartialEq for Value<'_> {
             Value::Cons(ConsCell {
                 car: Some(car),
                 cdr: Some(cdr),
+                ..
             }) => {
-                matches!(other, Value::Cons(ConsCell { car: Some(ocar), cdr: Some(ocdr)}) if Gc::ptr_eq(*car, *ocar) && Gc::ptr_eq(*cdr, *ocdr))
+                matches!(other, Value::Cons(ConsCell { car: Some(ocar), cdr: Some(ocdr), ..}) if Gc::ptr_eq(*car, *ocar) && Gc::ptr_eq(*cdr, *ocdr))
             }
             Value::Cons(ConsCell {
                 car: None,
                 cdr: Some(cdr),
+                ..
             }) => {
-                matches!(other, Value::Cons(ConsCell { car:None, cdr: Some(ocdr)}) if Gc::ptr_eq(*cdr, *ocdr))
+                matches!(other, Value::Cons(ConsCell { car:None, cdr: Some(ocdr), ..}) if Gc::ptr_eq(*cdr, *ocdr))
             }
             Value::Cons(ConsCell {
                 car: Some(car),
                 cdr: None,
+                ..
             }) => {
-                matches!(other, Value::Cons(ConsCell { car: Some(ocar), cdr: None}) if Gc::ptr_eq(*car, *ocar) )
+                matches!(other, Value::Cons(ConsCell { car: Some(ocar), cdr: None, ..}) if Gc::ptr_eq(*car, *ocar) )
             }
             // *technically* is wrong, but as long as there is no way to manufacture ConsCell w/ (None None),
             // this is essentially correct
             Value::Cons(ConsCell {
                 car: None,
                 cdr: None,
+                ..
             }) => {
                 matches!(
                     other,
                     Value::Cons(ConsCell {
                         car: None,
-                        cdr: None
+                        cdr: None,
+                        ..
                     })
                 )
             }
@@ -987,6 +992,10 @@ pub struct ConsCell<'gc> {
 }
 
 impl<'gc> ConsCell<'gc> {
+    pub fn new(car: Option<ValuePtr<'gc>>, cdr: Option<ValuePtr<'gc>>) -> Self {
+        Self { car, cdr }
+    }
+
     pub fn empty() -> Self {
         Self {
             car: None,
@@ -1086,6 +1095,7 @@ impl<'gc> ConsCell<'gc> {
         null_ptr: ValuePtr<'gc>,
         stack: &mut Vec<ValuePtr<'gc>>,
     ) -> bool {
+        // Check for memoized is_list field first
         if let Some(val) = self.cdr {
             match *val.borrow() {
                 Value::Cons(_) if Gc::ptr_eq(val, null_ptr) => return true,

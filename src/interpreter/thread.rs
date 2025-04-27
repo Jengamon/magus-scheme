@@ -1029,7 +1029,7 @@ impl<'gc> Thread<'gc> {
                             let car = self.stack.pop();
                             let cdr = self.stack.pop();
                             self.stack
-                                .push(Value::Cons(ConsCell { car, cdr }).into_ptr(&ctx));
+                                .push(Value::Cons(ConsCell::new(car, cdr)).into_ptr(&ctx));
                             advance_to_next_inst!();
                         }
                         Bytecode::MakeVector { length } => {

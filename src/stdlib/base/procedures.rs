@@ -2301,11 +2301,8 @@ mod structure {
         ) -> Result<crate::runtime::lambda::LambdaReturn<'gc>, crate::runtime::lambda::LambdaError>
         {
             Ok(crate::runtime::lambda::LambdaReturn::Return(vec![
-                Value::Cons(crate::value::ConsCell {
-                    car: Some(args[0]),
-                    cdr: Some(args[1]),
-                })
-                .into_ptr(&ctx),
+                Value::Cons(crate::value::ConsCell::new(Some(args[0]), Some(args[1])))
+                    .into_ptr(&ctx),
             ]))
         }
     }

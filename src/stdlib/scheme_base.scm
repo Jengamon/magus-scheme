@@ -7,7 +7,7 @@
 ; are in this module
 (import (magus impl))
 (export list not memq memv member abs square boolean? boolean=?
-    zero? positive? negative? length assq assv make-list)
+    zero? positive? negative? length assq assv make-list list-ref)
 (begin
   (define (list . in) in)
   (define (not x) (if x #f #t))
@@ -55,6 +55,15 @@
     (if (> n 0)
         (make-list-iter '() n (if (null? fill) 0 (car fill)))
         '()))
+  (define (list-ref list k)
+      (define (list-ref-impl list idx)
+          (if (not (pair? list)) (raise (string-append "list-ref: index " (number->string k) " out of bounds")))
+          (if (= idx 0)
+              (car list)
+              (list-ref-impl (cdr list) (- idx 1))))
+      (if (not (pair? list)) (raise "list-ref expects a pair as its first argument"))
+      (if (not (and (exact-integer? k) (>= k 0))) (raise "list-ref expects an exact nonnegative integer as its second argument"))
+          (list-ref-impl list k))
   (define (memq x lst)
       (define (memq-iter a lst)
           (if (null? lst)

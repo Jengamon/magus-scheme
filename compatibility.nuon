@@ -7,8 +7,8 @@
         description,
         notes
     ];
-    [ "base", "procedure", *, true, "Returns product of arguments (1 if no args)", "" ],
-    [ "base", "procedure", +, true, "Returns sum of arguments (0 if no args)", "" ],
+    [ "base", "procedure", *, true, "returns product of arguments (1 if no args)", "" ],
+    [ "base", "procedure", +, true, "returns sum of arguments (0 if no args)", "" ],
     [ "base", "procedure", -, true, "negation or subtraction of args from first argument", "" ],
     [ "base", "", "...", false, "", "" ],
     [ "base", "procedure", /, true, "reciprocation or division of args from first argument", "" ],
@@ -89,7 +89,7 @@
     [ "base", "procedure", exact-integer-sqrt, true, "Return two integers (*s*, *r*) such that the argument *k* satisfies both `k = s^2 + r` and `k < (s + 1)^2`", "" ],
     [ "base", "", exact-integer?, false, "", "" ],
     [ "base", "procedure", exact?, true, "test if a value is an exact number", "" ],
-    [ "base", "", expt, false, "", "" ],
+    [ "base", "procedure", expt, true, "return a number raised to the given power", "" ],
     [ "base", "procedure", features, true, "return list of features the implementation supports", "" ],
     [ "base", "", file-error?, false, "", "" ],
     [ "base", "", floor, false, "", "" ],

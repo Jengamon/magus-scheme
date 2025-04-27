@@ -453,7 +453,80 @@ mod math {
             // So if our *second* argument is a non-negative exact integer, we preserve exactness,
             // otherwise we return an inexact b/c figuring out how to do roots is not what I wanna do.
             // (If the value is negative and the power even, we don't support it yet as we don't support complex numbers)
-            todo!("expt")
+            let num = match *args[0].borrow() {
+                Value::Number(n) => Either::Left(n),
+                Value::Inexact(i) => Either::Right(i),
+                _ => Err(anyhow::anyhow!(
+                    "expt expects a number as its first argument"
+                ))?,
+            };
+
+            let pow = match *args[1].borrow() {
+                Value::Number(n) => Either::Left(n),
+                Value::Inexact(i) => Either::Right(i),
+                _ => Err(anyhow::anyhow!(
+                    "expt expects a number as its second argument"
+                ))?,
+            };
+
+            match pow {
+                Either::Left(pow) => {
+                    // power is an exact number
+                    let val = if let Number::Integer(pi) = &*pow {
+                        // pow is an exact integer
+                        if pi >= &BigInt::ZERO {
+                            use num::traits::Pow;
+                            // pow is a non-negative exact integer, we will return an exact number (if num is exact)
+                            match num {
+                                Either::Left(n) => match &*n {
+                                    Number::Integer(i) => Value::Number(Gc::new(
+                                        &ctx,
+                                        Number::Integer(Pow::pow(i, &pi.to_biguint().unwrap())),
+                                    )),
+                                    Number::Rational(n) => Value::Number(Gc::new(
+                                        &ctx,
+                                        Number::from_rational(Pow::pow(
+                                            n,
+                                            &pi.to_biguint().unwrap(),
+                                        )),
+                                    )),
+                                },
+                                Either::Right(num) => {
+                                    let pow = pow.to_inexact();
+                                    Value::Inexact(num.powf(pow))
+                                }
+                            }
+                        } else {
+                            let pow = pow.to_inexact();
+                            let num = match num {
+                                Either::Left(n) => n.to_inexact(),
+                                Either::Right(n) => n,
+                            };
+                            Value::Inexact(num.powf(pow))
+                        }
+                    } else {
+                        let pow = pow.to_inexact();
+                        let num = match num {
+                            Either::Left(n) => n.to_inexact(),
+                            Either::Right(n) => n,
+                        };
+                        Value::Inexact(num.powf(pow))
+                    };
+
+                    Ok(LambdaReturn::Return(vec![val.into_ptr(&ctx)]))
+                }
+                Either::Right(i) => {
+                    // power is an inexact number
+                    let num = match num {
+                        Either::Left(n) => n.to_inexact(),
+                        Either::Right(n) => n,
+                    };
+
+                    Ok(LambdaReturn::Return(vec![
+                        Value::Inexact(num.powf(i)).into_ptr(&ctx),
+                    ]))
+                }
+            }
         }
     }
 

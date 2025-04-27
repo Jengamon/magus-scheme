@@ -221,6 +221,8 @@ pub enum Arity {
     Exact(usize),
     /// Require at least a certain number of arguments
     AtLeast(usize),
+    /// Require a bounded number of arguments [min, max]
+    Bounded { min: usize, max: usize },
 }
 
 impl Arity {
@@ -228,6 +230,7 @@ impl Arity {
         match self {
             Self::Exact(exact) => exact == len,
             Self::AtLeast(minimum) => minimum <= len,
+            Self::Bounded { min, max } => min <= len && max >= len,
         }
     }
 
@@ -235,6 +238,7 @@ impl Arity {
         match self {
             Self::Exact(exact) => exact,
             Self::AtLeast(min) => min,
+            Self::Bounded { min, .. } => min,
         }
     }
 }
@@ -244,6 +248,7 @@ impl fmt::Display for Arity {
         match self {
             Arity::Exact(exact) => write!(f, "{exact}"),
             Arity::AtLeast(min) => write!(f, ">={min}"),
+            Arity::Bounded { min, max } => write!(f, "[{min}..{max}]"),
         }
     }
 }

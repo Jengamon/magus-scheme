@@ -66,19 +66,13 @@ pub struct NumberToString;
 
 impl<'gc> NativeLambda<'gc> for NumberToString {
     fn arity(&self) -> Arity {
-        Arity::AtLeast(1)
+        Arity::Bounded { min: 1, max: 2 }
     }
     fn run(
         &mut self,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[crate::ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
-        if args.len() > 2 {
-            return Err(anyhow::anyhow!(
-                "number->string expects either 1 or 2 arguments"
-            ))?;
-        }
-
         // TODO Support complex numbers
         let num = match *args[0].borrow() {
             Value::Number(n) => Either::Left(n),
@@ -156,7 +150,7 @@ pub struct StringToNumber;
 
 impl<'gc> NativeLambda<'gc> for StringToNumber {
     fn arity(&self) -> Arity {
-        Arity::AtLeast(1)
+        Arity::Bounded { min: 1, max: 2 }
     }
 
     fn run(
@@ -166,11 +160,6 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
         use logos::Logos;
         use num::ToPrimitive;
-        if args.len() > 2 {
-            return Err(anyhow::anyhow!(
-                "string->number expects either 1 or 2 arguments"
-            ))?;
-        }
 
         let Value::String(string) = *args[0].borrow() else {
             return Err(anyhow::anyhow!(
@@ -716,7 +705,7 @@ pub struct StringToList;
 
 impl<'gc> NativeLambda<'gc> for StringToList {
     fn arity(&self) -> Arity {
-        Arity::AtLeast(1)
+        Arity::Bounded { min: 1, max: 3 }
     }
 
     fn run(
@@ -730,10 +719,6 @@ impl<'gc> NativeLambda<'gc> for StringToList {
                 "string->list expects a string as its first argument"
             ))?;
         };
-
-        if args.len() > 3 {
-            return Err(anyhow::anyhow!("string->list expects 1, 2, or 3 arguments"))?;
-        }
 
         let maybe_start = args.get(1);
         let start = if let Some(start) = maybe_start {
@@ -802,7 +787,7 @@ pub struct Utf8ToString;
 
 impl<'gc> NativeLambda<'gc> for Utf8ToString {
     fn arity(&self) -> Arity {
-        Arity::AtLeast(1)
+        Arity::Bounded { min: 1, max: 3 }
     }
 
     fn run(
@@ -816,10 +801,6 @@ impl<'gc> NativeLambda<'gc> for Utf8ToString {
                 "utf8->string expects a bytevector as its first argument"
             ))?;
         };
-
-        if args.len() > 3 {
-            return Err(anyhow::anyhow!("utf8->string expects 1, 2, or 3 arguments"))?;
-        }
 
         let maybe_start = args.get(1);
         let start = if let Some(start) = maybe_start {
@@ -888,7 +869,7 @@ pub struct StringToUtf8;
 
 impl<'gc> NativeLambda<'gc> for StringToUtf8 {
     fn arity(&self) -> Arity {
-        Arity::AtLeast(1)
+        Arity::Bounded { min: 1, max: 3 }
     }
 
     fn run(
@@ -902,10 +883,6 @@ impl<'gc> NativeLambda<'gc> for StringToUtf8 {
                 "string->utf8 expects a string as its first argument"
             ))?;
         };
-
-        if args.len() > 3 {
-            return Err(anyhow::anyhow!("string->utf8 expects 1, 2, or 3 arguments"))?;
-        }
 
         let maybe_start = args.get(1);
         let start = if let Some(start) = maybe_start {

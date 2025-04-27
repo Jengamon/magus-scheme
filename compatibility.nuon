@@ -192,7 +192,7 @@
     [ "base", "procedure", string->symbol, true, "convert a string to a symbol", "" ],
     [ "base", "procedure", "string->utf8", true, "convert a string into a bytevector", "" ],
     [ "base", "", string->vector, false, "", "" ],
-    [ "base", "", string-append, false, "", "" ],
+    [ "base", "procedure", string-append, true, "append its string arguments into a single string", "" ],
     [ "base", "procedure", string-copy, true, "produce a copy of a string (with optional bounds)", "" ],
     [ "base", "", string-copy!, false, "", "" ],
     [ "base", "", string-fill!, false, "", "" ],

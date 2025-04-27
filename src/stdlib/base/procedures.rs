@@ -16,7 +16,7 @@ pub use predicates::{
     IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull, IsOdd, IsPair,
     IsProcedure, IsString, IsSymbol, IsVector,
 };
-pub use string::{StringCopy, StringLength, Substring};
+pub use string::{StringAppend, StringCopy, StringLength, Substring};
 pub use structure::{CallWithValues, Cons, Values};
 pub use vector::VectorRef;
 
@@ -1706,7 +1706,7 @@ mod string {
 
     impl<'gc> NativeLambda<'gc> for StringCopy {
         fn arity(&self) -> Arity {
-            Arity::AtLeast(1)
+            Arity::Bounded { min: 1, max: 3 }
         }
 
         fn run(
@@ -1720,10 +1720,6 @@ mod string {
                     "string-copy expects a string as its first argument"
                 ))?;
             };
-
-            if args.len() > 3 {
-                return Err(anyhow::anyhow!("string-copy expects 1, 2, or 3 arguments"))?;
-            }
 
             let maybe_start = args.get(1);
             let start = if let Some(start) = maybe_start {
@@ -1879,6 +1875,38 @@ mod string {
                     Number::Integer(BigInt::from_usize(s.borrow().chars().count()).unwrap()),
                 ))
                 .into_ptr(&ctx),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct StringAppend;
+
+    impl<'gc> NativeLambda<'gc> for StringAppend {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(0)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let mut appended = String::new();
+
+            for arg in args {
+                let Value::String(s) = *arg.borrow() else {
+                    return Err(anyhow::anyhow!(
+                        "string-append expects strings as its arguments"
+                    ))?;
+                };
+
+                appended.push_str(s.borrow().as_str());
+            }
+
+            Ok(LambdaReturn::Return(vec![
+                Value::String(Gc::new(&ctx, RefLock::new(appended)).into()).into_ptr(&ctx),
             ]))
         }
     }

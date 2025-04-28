@@ -25,13 +25,13 @@ pub use macros::{DefineSyntax, SyntaxRules};
 pub use procedures::{
     Add, Apply, Ascending, Bytevector, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr,
     CharToInteger, Cons, Denominator, Descending, Divide, DynamicWind, Equal, Exact,
-    ExactIntegerSqrt, Expt, Features, Gcd, Inexact, IntegerToChar, IsEq, IsEqual, IsEqv, IsEven,
-    IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull, IsOdd, IsPair, IsProcedure,
-    IsString, IsSymbol, IsVector, Lcm, ListCopy, ListSetBang, ListToString, MakeBytevector, Map,
-    MonotonicAscending, MonotonicDescending, Multiply, NumberToString, Numerator, Raise,
-    RaiseContinuable, StringAppend, StringCopy, StringLength, StringRef, StringToList,
-    StringToNumber, StringToSymbol, StringToUtf8, Substring, Subtract, SymbolToString,
-    Utf8ToString, Values, VectorRef,
+    ExactIntegerSqrt, Expt, Features, Gcd, Inexact, IntegerToChar, IsBytevector, IsEq, IsEqual,
+    IsEqv, IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull, IsOdd, IsPair,
+    IsProcedure, IsString, IsSymbol, IsVector, Lcm, ListCopy, ListSetBang, ListToString,
+    MakeBytevector, Map, MonotonicAscending, MonotonicDescending, Multiply, NumberToString,
+    Numerator, Raise, RaiseContinuable, StringAppend, StringConstructor, StringCopy, StringLength,
+    StringRef, StringToList, StringToNumber, StringToSymbol, StringToUtf8, Substring, Subtract,
+    SymbolToString, Utf8ToString, Values, VectorRef,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -418,6 +418,8 @@ impl Module for Base {
             "make-bytevector",
             "dynamic-wind",
             "string-ref",
+            "string",
+            "bytevector?",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -511,6 +513,8 @@ impl Module for Base {
             "make-bytevector" => lambda!(MakeBytevector),
             "dynamic-wind" => lambda!(DynamicWind),
             "string-ref" => lambda!(StringRef),
+            "string" => lambda!(StringConstructor),
+            "bytevector?" => lambda!(IsBytevector),
             _ => None,
         }
     }

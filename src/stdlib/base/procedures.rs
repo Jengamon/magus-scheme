@@ -13,10 +13,10 @@ pub use math::{
     Add, Denominator, Divide, ExactIntegerSqrt, Expt, Gcd, Lcm, Multiply, Numerator, Subtract,
 };
 pub use predicates::{
-    IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull, IsOdd, IsPair,
-    IsProcedure, IsString, IsSymbol, IsVector,
+    IsBytevector, IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull, IsOdd,
+    IsPair, IsProcedure, IsString, IsSymbol, IsVector,
 };
-pub use string::{StringAppend, StringCopy, StringLength, StringRef, Substring};
+pub use string::{StringAppend, StringConstructor, StringCopy, StringLength, StringRef, Substring};
 pub use structure::{CallWithValues, Cons, Values};
 pub use vector::VectorRef;
 
@@ -1825,6 +1825,44 @@ mod string {
         value::Number,
     };
 
+    /// Referred to as `string` in Scheme
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct StringConstructor;
+
+    impl<'gc> NativeLambda<'gc> for StringConstructor {
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(0)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let mut string_chars = vec![];
+
+            for arg in args {
+                let Value::Char(c) = *arg.borrow() else {
+                    return Err(anyhow::anyhow!("string expects chars as its arguments"))?;
+                };
+
+                string_chars.push(c);
+            }
+
+            Ok(LambdaReturn::Return(vec![
+                Value::String(
+                    Gc::new(
+                        &ctx,
+                        RefLock::new(string_chars.into_iter().collect::<String>()),
+                    )
+                    .into(),
+                )
+                .into_ptr(&ctx),
+            ]))
+        }
+    }
+
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct StringCopy;
@@ -2396,6 +2434,26 @@ mod predicates {
             let is_vector = matches!(*args[0].borrow(), Value::Vector(_));
 
             Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, is_vector)]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IsBytevector;
+
+    impl<'gc> NativeLambda<'gc> for IsBytevector {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let is_bytevector = matches!(*args[0].borrow(), Value::Bytevector(_));
+
+            Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, is_bytevector)]))
         }
     }
 }

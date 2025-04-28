@@ -215,8 +215,8 @@ impl Syntax for SetBang {
                 }
                 Arg::Rest { scope: 0 } => {
                     // But treat as defining something (so that upvalues are treated like define, and change the object)
-                    compiler.define_variable(name);
-                    compiler.argument_scope_mut(0).unwrap().request_name(name);
+                    // compiler.define_variable(name);
+                    // compiler.argument_scope_mut(0).unwrap().request_name(name);
 
                     // Treat as normal ref
                     return Ok(SyntaxReturn::Code(
@@ -230,7 +230,7 @@ impl Syntax for SetBang {
                 }
                 _ => {
                     // But treat as defining something (so that upvalues are treated like define, and change the object)
-                    compiler.define_variable(name);
+                    // compiler.define_variable(name);
                     compiler.argument_scope_mut(0).unwrap().request_name(name);
 
                     // Treat as normal ref

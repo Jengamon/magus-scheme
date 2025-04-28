@@ -1,0 +1,12 @@
+---
+4
+5
+6
+1
+2
+3
+---
+(import (only (scheme base) define lambda set! + values))
+(define c ((lambda () (define x 3) (lambda () (set! x (+ x 1)) x))))
+(define c2 ((lambda (x) (lambda () (set! x (+ x 1)) x)) 0))
+(values (c) (c) (c) (c2) (c2) (c2))

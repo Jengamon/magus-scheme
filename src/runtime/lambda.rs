@@ -259,6 +259,11 @@ impl fmt::Display for Arity {
 pub enum Lambda<'gc> {
     Native(NativeLambdaPtr<'gc>),
     Compiled(CompiledLambdaPtr<'gc>),
+    // these are variants that only show up at runtime
+    ClosureCompiled {
+        compiled: CompiledLambdaPtr<'gc>,
+        env: StackEnvironmentPtr<'gc>,
+    },
 }
 
 impl Lambda<'_> {
@@ -266,6 +271,7 @@ impl Lambda<'_> {
         match self {
             Self::Native(n) => n.borrow().arity(),
             Self::Compiled(c) => c.arity,
+            Self::ClosureCompiled { compiled, .. } => compiled.arity,
         }
     }
 
@@ -273,6 +279,7 @@ impl Lambda<'_> {
     pub fn needs_label(self) -> bool {
         match self {
             Self::Compiled(c) => c.upvalue_id.is_none(),
+            Self::ClosureCompiled { compiled, .. } => compiled.upvalue_id.is_none(),
             _ => false,
         }
     }
@@ -281,6 +288,7 @@ impl Lambda<'_> {
     pub fn get_label(self) -> Option<usize> {
         match self {
             Self::Compiled(c) => c.upvalue_id,
+            Self::ClosureCompiled { compiled, .. } => compiled.upvalue_id,
             _ => None,
         }
     }
@@ -292,6 +300,10 @@ impl<'gc> Lambda<'gc> {
         match self {
             Self::Native(_) => self,
             Self::Compiled(c) => Self::Compiled(c.label(mc, upvalue_id)),
+            Self::ClosureCompiled { compiled, env } => Self::ClosureCompiled {
+                compiled: compiled.label(mc, upvalue_id),
+                env,
+            },
         }
     }
 }
@@ -301,6 +313,13 @@ impl PartialEq for Lambda<'_> {
         match (self, other) {
             (Lambda::Native(sp), Lambda::Native(op)) => Gc::ptr_eq(*sp, *op),
             (Lambda::Compiled(sp), Lambda::Compiled(op)) => Gc::ptr_eq(*sp, *op),
+            (
+                Lambda::ClosureCompiled { compiled, env },
+                Lambda::ClosureCompiled {
+                    compiled: ocompiled,
+                    env: oenv,
+                },
+            ) => Gc::ptr_eq(*compiled, *ocompiled) && Gc::ptr_eq(*env, *oenv),
             _ => false,
         }
     }
@@ -321,7 +340,9 @@ impl std::fmt::Pointer for Lambda<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Native(np) => write!(f, "{:p}", *np),
-            Self::Compiled(cp) => write!(f, "{:p}", *cp),
+            Self::Compiled(cp) | Self::ClosureCompiled { compiled: cp, .. } => {
+                write!(f, "{:p}", *cp)
+            }
         }
     }
 }

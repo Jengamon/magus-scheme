@@ -1831,33 +1831,33 @@ impl<'gc> Compiler<'gc> {
                 // If the name is defined in a parent scope that is *not* the global scope,
                 // then make it an upvalue
 
-                if !is_local {
-                    if let Some(scope) = self
-                        .scopes
-                        .iter_mut()
-                        .rev()
-                        // *ignore* the current scope, as these upvalues have not been created yet.
-                        .skip(1)
-                        .find(|s| s.variables_defined.borrow().contains_key(spur))
-                    {
-                        // Some parent scope defined this name, use it's already assigned upvalue, or defined a new upvalue
-                        let upvalue_index =
-                            if let Some(v) = &scope.variables_defined.borrow().get(spur).unwrap() {
-                                *v
-                            } else {
-                                let upvalue_index = ctx.add_upvalue();
-                                scope
-                                    .variables_defined
-                                    .borrow_mut()
-                                    .insert(*spur, Some(upvalue_index));
-                                upvalue_index
-                            };
+                // if !is_local {
+                //     if let Some(scope) = self
+                //         .scopes
+                //         .iter_mut()
+                //         .rev()
+                //         // *ignore* the current scope, as these upvalues have not been created yet.
+                //         .skip(1)
+                //         .find(|s| s.variables_defined.borrow().contains_key(spur))
+                //     {
+                //         // Some parent scope defined this name, use it's already assigned upvalue, or defined a new upvalue
+                //         let upvalue_index =
+                //             if let Some(v) = &scope.variables_defined.borrow().get(spur).unwrap() {
+                //                 *v
+                //             } else {
+                //                 let upvalue_index = ctx.add_upvalue();
+                //                 scope
+                //                     .variables_defined
+                //                     .borrow_mut()
+                //                     .insert(*spur, Some(upvalue_index));
+                //                 upvalue_index
+                //             };
 
-                        return Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
-                            index: upvalue_index,
-                        }])));
-                    }
-                }
+                //         return Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
+                //             index: upvalue_index,
+                //         }])));
+                //     }
+                // }
 
                 match self.is_argument(*spur) {
                     Some(Arg::Index { index, scope: 0 })

@@ -47,9 +47,9 @@ impl<'gc> Execution<'gc> {
     fn from_lambda(
         lambda: Lambda<'gc>,
         prev_fallback: ImportFallback<'gc>,
-    ) -> (Self, Option<usize>) {
+    ) -> (Self, Option<usize>, Option<StackEnvironmentPtr<'gc>>) {
         match lambda {
-            Lambda::Native(gc) => (Self::Native { native: gc }, None),
+            Lambda::Native(gc) => (Self::Native { native: gc }, None, None),
             Lambda::Compiled(gc) => (
                 Self::Bytecode {
                     chunk: gc.chunk,
@@ -58,6 +58,17 @@ impl<'gc> Execution<'gc> {
                     fallback: gc.chunk.fallback.or(prev_fallback),
                 },
                 Some(gc.upvalue_id.expect("cannot use unlabeled lambda")),
+                None,
+            ),
+            Lambda::ClosureCompiled { compiled, env } => (
+                Self::Bytecode {
+                    chunk: compiled.chunk,
+                    arity: compiled.arity,
+                    pc: 0,
+                    fallback: compiled.chunk.fallback.or(prev_fallback),
+                },
+                Some(compiled.upvalue_id.expect("cannot use unlabeled lambda")),
+                Some(env),
             ),
         }
     }
@@ -507,6 +518,7 @@ impl<'gc> Thread<'gc> {
         let wind_frame = frame.wind_frame;
         let dynamic_wind = frame.dynamic_wind;
         let prev_upvalue = frame.upvalue_index;
+        let frame_env = frame.env;
         let parent_env = frame.env.borrow().parent();
         let execution = frame.execution;
         // handle exception frame interaction with non-continuable errors
@@ -545,6 +557,16 @@ impl<'gc> Thread<'gc> {
             }
             // drain any extra value on stack
             if let Some(ret) = ret_val {
+                let ret = if let Value::Lambda(Lambda::Compiled(cl)) = *ret.borrow() {
+                    // Capture the current env as a closure
+                    Value::Lambda(Lambda::ClosureCompiled {
+                        compiled: cl,
+                        env: frame_env,
+                    })
+                    .into_ptr(ctx)
+                } else {
+                    ret
+                };
                 self.stack.push(ret);
             } else {
                 self.stack.push(Value::Void.into_ptr(ctx));
@@ -554,13 +576,15 @@ impl<'gc> Thread<'gc> {
         }
 
         let after_frame = if let Some((_, after_lam)) = dynamic_wind {
-            let (aft_ex, aft_upvalue_id) = Execution::from_lambda(
+            let (aft_ex, aft_upvalue_id, aft_env) = Execution::from_lambda(
                 after_lam,
                 match execution {
                     Execution::Bytecode { fallback, .. } => fallback,
                     _ => None,
                 },
             );
+
+            let parent_env = aft_env.or(parent_env);
 
             Some(ThreadFrame {
                 id: Gc::new(ctx, ()),
@@ -659,7 +683,7 @@ impl<'gc> Thread<'gc> {
                 }
             }
         }
-        let (execution, upvalue_index) = Execution::from_lambda(
+        let (execution, upvalue_index, closed_env) = Execution::from_lambda(
             lambda,
             self.frames.last().and_then(|f| match f.execution {
                 Execution::Bytecode { fallback, .. } => fallback,
@@ -669,13 +693,11 @@ impl<'gc> Thread<'gc> {
         let prev_upvalue = self.frames.last().and_then(|f| f.upvalue_index);
         // "Steal" the last frame environment if we are tail-calling the function
         let frame_env = || {
+            let basis = closed_env.or(Self::current_env(&self.frames));
             if !is_tail {
-                Gc::new(
-                    ctx,
-                    RefLock::new(StackEnvironment::new(ctx, Self::current_env(&self.frames))),
-                )
+                Gc::new(ctx, RefLock::new(StackEnvironment::new(ctx, basis)))
             } else {
-                Self::current_env(&self.frames)
+                basis
                     .map(|env| Gc::new(ctx, RefLock::new(env.borrow().deep_clone(ctx))))
                     .unwrap_or_else(|| Gc::new(ctx, RefLock::new(StackEnvironment::new(ctx, None))))
             }
@@ -702,13 +724,17 @@ impl<'gc> Thread<'gc> {
             rest_args,
         };
         let before_frame = if let Some((before_lam, _)) = dynamic_wind {
-            let (bef_ex, bef_upvalue_id) = Execution::from_lambda(
+            let (bef_ex, bef_upvalue_id, bef_env) = Execution::from_lambda(
                 before_lam,
                 match execution {
                     Execution::Bytecode { fallback, .. } => fallback,
                     _ => None,
                 },
             );
+
+            let env = bef_env
+                .map(|b| Gc::new(ctx, RefLock::new(StackEnvironment::new(ctx, Some(b)))))
+                .unwrap_or_else(frame_env);
 
             Some(ThreadFrame {
                 id: Gc::new(ctx, ()),
@@ -719,7 +745,7 @@ impl<'gc> Thread<'gc> {
                 dynamic_wind: None,
                 args: Box::from([]),
                 exception: None,
-                env: frame_env(),
+                env,
                 rest_args: None,
             })
         } else {
@@ -797,13 +823,15 @@ impl<'gc> Thread<'gc> {
                     let parent_env = frame.env.borrow().parent();
                     let prev_upvalue = frame.upvalue_index;
                     if let Some((_, after_lam)) = frame.dynamic_wind {
-                        let (aft_ex, aft_upvalue_id) = Execution::from_lambda(
+                        let (aft_ex, aft_upvalue_id, aft_env) = Execution::from_lambda(
                             after_lam,
                             match frame.execution {
                                 Execution::Bytecode { fallback, .. } => fallback,
                                 _ => None,
                             },
                         );
+
+                        let parent_env = aft_env.or(parent_env);
 
                         Some(ThreadFrame {
                             id: Gc::new(mc, ()),
@@ -860,13 +888,15 @@ impl<'gc> Thread<'gc> {
                     let parent_env = frame.env.borrow().parent();
                     let prev_upvalue = frame.upvalue_index;
                     if let Some((_, after_lam)) = frame.dynamic_wind {
-                        let (aft_ex, aft_upvalue_id) = Execution::from_lambda(
+                        let (aft_ex, aft_upvalue_id, aft_env) = Execution::from_lambda(
                             after_lam,
                             match frame.execution {
                                 Execution::Bytecode { fallback, .. } => fallback,
                                 _ => None,
                             },
                         );
+
+                        let parent_env = aft_env.or(parent_env);
 
                         Some(ThreadFrame {
                             id: Gc::new(mc, ()),
@@ -893,13 +923,15 @@ impl<'gc> Thread<'gc> {
                     let parent_env = frame.env.borrow().parent();
                     let prev_upvalue = frame.upvalue_index;
                     if let Some((before_lam, _)) = frame.dynamic_wind {
-                        let (bef_ex, bef_upvalue_id) = Execution::from_lambda(
+                        let (bef_ex, bef_upvalue_id, bef_env) = Execution::from_lambda(
                             before_lam,
                             match frame.execution {
                                 Execution::Bytecode { fallback, .. } => fallback,
                                 _ => None,
                             },
                         );
+
+                        let parent_env = bef_env.or(parent_env);
 
                         Some(ThreadFrame {
                             id: Gc::new(mc, ()),

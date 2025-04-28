@@ -120,6 +120,9 @@ pub struct ThreadFrame<'gc> {
     upvalue_index: Option<usize>,
     wind_frame: bool,
     bottom: usize,
+
+    // because rest can be set!, add an override
+    rest_args: Option<ValuePtr<'gc>>,
 }
 
 impl ThreadFrame<'_> {
@@ -386,6 +389,7 @@ impl<'gc> Thread<'gc> {
             dynamic_wind: None,
             exception: None,
             bottom: self.stack.len(),
+            rest_args: None,
         });
     }
 
@@ -568,6 +572,7 @@ impl<'gc> Thread<'gc> {
                 args: Box::from([]),
                 exception: None,
                 env: Gc::new(ctx, RefLock::new(StackEnvironment::new(ctx, parent_env))),
+                rest_args: None,
             })
         } else {
             None
@@ -638,7 +643,7 @@ impl<'gc> Thread<'gc> {
                 });
             }
         };
-        let args: Vec<_> = self.stack.drain(self.stack.len() - args..).collect();
+        let mut args: Vec<_> = self.stack.drain(self.stack.len() - args..).collect();
         // Handle the previous frame return here
         if is_tail {
             // Exiting the current frame
@@ -675,6 +680,13 @@ impl<'gc> Thread<'gc> {
                     .unwrap_or_else(|| Gc::new(ctx, RefLock::new(StackEnvironment::new(ctx, None))))
             }
         };
+        let (args, rest_args) = if let Arity::AtLeast(base) = lambda.arity() {
+            // we just copy the painters so that we can still just chuck args at native lambdas
+            let cons = ConsCell::from_iter(ctx, ctx.null_value, args[base..].iter().copied());
+            (args, Some(cons))
+        } else {
+            (args, None)
+        };
         let new_frame = ThreadFrame {
             id: Gc::new(ctx, ()),
             // Ignore voids at the top of the stack when determining the bottom of a frame
@@ -687,6 +699,7 @@ impl<'gc> Thread<'gc> {
             wind_frame: false,
             exception: None,
             env: frame_env(),
+            rest_args,
         };
         let before_frame = if let Some((before_lam, _)) = dynamic_wind {
             let (bef_ex, bef_upvalue_id) = Execution::from_lambda(
@@ -707,6 +720,7 @@ impl<'gc> Thread<'gc> {
                 args: Box::from([]),
                 exception: None,
                 env: frame_env(),
+                rest_args: None,
             })
         } else {
             None
@@ -801,6 +815,7 @@ impl<'gc> Thread<'gc> {
                             args: Box::from([]),
                             exception: None,
                             env: Gc::new(mc, RefLock::new(StackEnvironment::new(mc, parent_env))),
+                            rest_args: None,
                         })
                     } else {
                         None
@@ -863,6 +878,7 @@ impl<'gc> Thread<'gc> {
                             args: Box::from([]),
                             exception: None,
                             env: Gc::new(mc, RefLock::new(StackEnvironment::new(mc, parent_env))),
+                            rest_args: None,
                         })
                     } else {
                         None
@@ -895,6 +911,7 @@ impl<'gc> Thread<'gc> {
                             args: Box::from([]),
                             exception: None,
                             env: Gc::new(mc, RefLock::new(StackEnvironment::new(mc, parent_env))),
+                            rest_args: None,
                         })
                     } else {
                         None
@@ -1016,9 +1033,7 @@ impl<'gc> Thread<'gc> {
 
             // handle execution
             match &mut frame.execution {
-                Execution::Bytecode {
-                    chunk, pc, arity, ..
-                } => {
+                Execution::Bytecode { chunk, pc, .. } => {
                     // If error is set, kill this frame (bytecode shouldn't run if actively erroring)
                     if self.error.is_some() {
                         self.handle_frame_end(&ctx, true);
@@ -1127,13 +1142,8 @@ impl<'gc> Thread<'gc> {
                             }
                         }
                         Bytecode::FetchRest => {
-                            if let Arity::AtLeast(base) = *arity {
-                                let cons = ConsCell::from_iter(
-                                    &ctx,
-                                    ctx.null_value,
-                                    frame.args[base..].iter().copied(),
-                                );
-                                self.stack.push(cons);
+                            if let Some(rest) = frame.rest_args {
+                                self.stack.push(rest);
                                 advance_to_next_inst!();
                             } else {
                                 make_error!(SchemeErrorType::InvalidRest);
@@ -1482,6 +1492,49 @@ impl<'gc> Thread<'gc> {
                             self.upvalues[index] = value;
 
                             advance_to_next_inst!();
+                        }
+                        Bytecode::ArgSetBang { index } => {
+                            // Pop the top of stack and store in env as a given symbol
+                            let Some(value) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+                            if index < frame.args.len() {
+                                // scan through upvalues for something that ptr_eq our arg
+                                if let Some(ptr) = self
+                                    .upvalues
+                                    .iter()
+                                    .find(|ptr| Gc::ptr_eq(**ptr, frame.args[index]))
+                                {
+                                    // handle as upvalue
+                                    *ptr.borrow_mut(&ctx) = *value.borrow();
+                                } else {
+                                    frame.args[index] = value;
+                                }
+                                advance_to_next_inst!();
+                            } else {
+                                make_error!(SchemeErrorType::InvalidArg(index));
+                            }
+                        }
+                        Bytecode::RestSetBang => {
+                            // Pop the top of stack and store in env as a given symbol
+                            let Some(value) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+                            if let Some(rest) = frame.rest_args {
+                                // Scan for upvalue
+                                if let Some(ptr) =
+                                    self.upvalues.iter().find(|ptr| Gc::ptr_eq(**ptr, rest))
+                                {
+                                    *ptr.borrow_mut(&ctx) = *value.borrow();
+                                } else {
+                                    frame.rest_args = Some(value);
+                                }
+                                advance_to_next_inst!();
+                            } else {
+                                make_error!(SchemeErrorType::InvalidRest);
+                            }
                         }
                         Bytecode::SetBang { symbol } => {
                             // Pop the top of stack and store in env as a given symbol

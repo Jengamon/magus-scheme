@@ -71,6 +71,10 @@ pub enum Bytecode {
     /// Pop the value on the stack and set! a given symbol using that value
     /// (error if the symbol is not already defined in the environment)
     SetBang { symbol: lasso::Spur },
+    /// set! done to an argument
+    ArgSetBang { index: usize },
+    /// set! done to the rest argument
+    RestSetBang,
     /// Set the value of an upvalue if it exists
     SetBangUpvalue { index: usize },
     /// Branching instruction
@@ -120,6 +124,8 @@ impl Bytecode {
             Self::Call { .. } => 4,
             Self::Define { .. } => 2,
             Self::SetBang { .. } => 2,
+            Self::ArgSetBang { .. } => 2,
+            Self::RestSetBang => 2,
             Self::SetBangUpvalue { .. } => 2,
             Self::If { .. } => 2,
             Self::Jump { .. } => 2,
@@ -157,6 +163,8 @@ impl fmt::Display for Bytecode {
             Bytecode::FillHole { id } => write!(f, "FILL {id}"),
             Bytecode::Define { symbol } => write!(f, "DEFN {}", symbol.into_inner()),
             Bytecode::SetBang { symbol } => write!(f, "SET! {}", symbol.into_inner()),
+            Self::ArgSetBang { index } => write!(f, "AST! {index}"),
+            Self::RestSetBang => write!(f, "RST!"),
             Bytecode::SetBangUpvalue { index } => write!(f, "SETU {}", index),
             Bytecode::If { jump } => write!(f, "JMIF {jump}"),
             Bytecode::Jump { jump } => write!(f, "JUMP {jump}"),

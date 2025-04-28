@@ -1,0 +1,15 @@
+---
+4
+4
+42
+---
+; scopes are *hard*
+(import (only (scheme base) define lambda set! values))
+(define (x) (y 3))
+(define (y a) 4)
+(define v1 (x))
+(define (z y) (set! y y) (x))
+(define v2 (z (lambda (_) 42)))
+(define (z b) (set! y b) (x))
+(define v3 (z (lambda (_) 42)))
+(values v1 v2 v3)

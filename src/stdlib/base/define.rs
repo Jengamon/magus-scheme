@@ -198,6 +198,36 @@ impl Syntax for SetBang {
                         upvalue_index
                     }
                 }
+                Arg::Index { scope: 0, index } => {
+                    // But treat as defining something (so that upvalues are treated like define, and change the object)
+                    // compiler.define_variable(name);
+                    // compiler.argument_scope_mut(0).unwrap().request_name(name);
+
+                    // Treat as normal ref
+                    return Ok(SyntaxReturn::Code(
+                        compiler
+                            .compile_code(ctx, value)?
+                            .into_bytecode()
+                            .into_iter()
+                            .chain([Bytecode::ArgSetBang { index }, Bytecode::PushVoid])
+                            .collect(),
+                    ));
+                }
+                Arg::Rest { scope: 0 } => {
+                    // But treat as defining something (so that upvalues are treated like define, and change the object)
+                    compiler.define_variable(name);
+                    compiler.argument_scope_mut(0).unwrap().request_name(name);
+
+                    // Treat as normal ref
+                    return Ok(SyntaxReturn::Code(
+                        compiler
+                            .compile_code(ctx, value)?
+                            .into_bytecode()
+                            .into_iter()
+                            .chain([Bytecode::RestSetBang, Bytecode::PushVoid])
+                            .collect(),
+                    ));
+                }
                 _ => {
                     // But treat as defining something (so that upvalues are treated like define, and change the object)
                     compiler.define_variable(name);

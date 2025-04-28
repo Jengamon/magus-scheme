@@ -13,7 +13,7 @@ mod procedures {
     use crate::{
         Value, ValuePtr,
         runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
-        value::ModeWrite,
+        value::{ModeDisplay, ModeWrite},
     };
 
     #[derive(Debug, Collect)]
@@ -27,13 +27,24 @@ mod procedures {
 
         fn run(
             &mut self,
-            _ctx: NativeLambdaContext<'_, 'gc>,
+            ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
             if args.len() > 2 {
                 return Err(anyhow::anyhow!("display expects either 1 or 2 arguments"))?;
             }
-            todo!()
+
+            println!(
+                "{}",
+                Value::resolve_into::<_, ModeDisplay>(
+                    args[0],
+                    ctx.interner.clone(),
+                    ctx.thread_ctx.null_value
+                )
+            );
+
+            // rn just ignore ports, and just dump to stdout
+            Ok(LambdaReturn::Return(vec![]))
         }
     }
 

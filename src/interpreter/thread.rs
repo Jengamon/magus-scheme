@@ -643,7 +643,7 @@ impl<'gc> Thread<'gc> {
                 });
             }
         };
-        let mut args: Vec<_> = self.stack.drain(self.stack.len() - args..).collect();
+        let args: Vec<_> = self.stack.drain(self.stack.len() - args..).collect();
         // Handle the previous frame return here
         if is_tail {
             // Exiting the current frame
@@ -1204,24 +1204,6 @@ impl<'gc> Thread<'gc> {
                             // push the value to stack
                             //
                             // if-chaining would be *posh* here
-                            match current_env.unwrap().borrow().get(symbol) {
-                                Ok(val) => {
-                                    if !matches!(*val.read(|v| v.borrow()), Value::Undefined) {
-                                        self.stack.push(*val.get().borrow());
-                                        advance_to_next_inst!();
-                                    } else {
-                                        make_error!(SchemeErrorType::EnvLoad(Box::from(
-                                            interner.resolve(&symbol),
-                                        )));
-                                    }
-                                    continue;
-                                }
-                                Err(GetError::NameNotFound(_)) => {}
-                                Err(GetError::TooFar) => {
-                                    make_error!(SchemeErrorType::TooMuchRecursion);
-                                    continue;
-                                }
-                            }
 
                             if let Some(fallback) = Self::fallback_handling(&self.frames, symbol) {
                                 self.stack.push(fallback);
@@ -1233,6 +1215,25 @@ impl<'gc> Thread<'gc> {
                                 };
                                 *pc += 1;
                             } else {
+                                match current_env.unwrap().borrow().get(symbol) {
+                                    Ok(val) => {
+                                        if !matches!(*val.read(|v| v.borrow()), Value::Undefined) {
+                                            self.stack.push(*val.get().borrow());
+                                            advance_to_next_inst!(self.frames.last_mut());
+                                        } else {
+                                            make_error!(SchemeErrorType::EnvLoad(Box::from(
+                                                interner.resolve(&symbol),
+                                            )));
+                                        }
+                                        continue;
+                                    }
+                                    Err(GetError::NameNotFound(_)) => {}
+                                    Err(GetError::TooFar) => {
+                                        make_error!(SchemeErrorType::TooMuchRecursion);
+                                        continue;
+                                    }
+                                }
+
                                 make_error!(SchemeErrorType::EnvLoad(Box::from(
                                     interner.resolve(&symbol),
                                 )));

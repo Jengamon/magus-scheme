@@ -13,8 +13,8 @@ pub use math::{
     Add, Denominator, Divide, ExactIntegerSqrt, Expt, Gcd, Lcm, Multiply, Numerator, Subtract,
 };
 pub use predicates::{
-    IsBytevector, IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull, IsOdd,
-    IsPair, IsProcedure, IsString, IsSymbol, IsVector,
+    IsBytevector, IsChar, IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull,
+    IsOdd, IsPair, IsProcedure, IsString, IsSymbol, IsVector,
 };
 pub use string::{StringAppend, StringConstructor, StringCopy, StringLength, StringRef, Substring};
 pub use structure::{CallWithValues, Cons, Values};
@@ -2454,6 +2454,26 @@ mod predicates {
             let is_bytevector = matches!(*args[0].borrow(), Value::Bytevector(_));
 
             Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, is_bytevector)]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct IsChar;
+
+    impl<'gc> NativeLambda<'gc> for IsChar {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let is_char = matches!(*args[0].borrow(), Value::Char(_));
+
+            Ok(LambdaReturn::Return(vec![bool_ctx!(ctx, is_char)]))
         }
     }
 }

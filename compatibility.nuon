@@ -56,7 +56,7 @@
     [ "base", "", char=?, false, "", "" ],
     [ "base", "", char>=?, false, "", "" ],
     [ "base", "", char>?, false, "", "" ],
-    [ "base", "", char?, false, "", "" ],
+    [ "base", "procedure", char?, true, "tests if a value is a character", "" ],
     [ "base", "", close-input-port, false, "", "" ],
     [ "base", "", close-output-port, false, "", "" ],
     [ "base", "", close-port, false, "", "" ],

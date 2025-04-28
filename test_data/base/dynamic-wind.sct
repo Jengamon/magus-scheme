@@ -1,0 +1,8 @@
+---
+1
+0
+---
+(import (only (scheme base) dynamic-wind call/cc lambda set! define values quote))
+(define x 'haha)
+(values (call/cc (lambda (k) (dynamic-wind (lambda () (set! x 1)) (lambda () (k x) x) (lambda () (set! x 0)))))
+        x)

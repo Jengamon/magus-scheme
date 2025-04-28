@@ -5,7 +5,7 @@ use std::{ops::Deref, sync::Arc};
 use anyhow::Context as _;
 use gc_arena::{Collect, Gc, Mutation, RefLock, Rootable};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
-use thread::ThreadPtr;
+use thread::{ThreadConfig, ThreadPtr};
 
 use crate::{
     ExternalCompilerContext, LibraryName, World, bytecode,
@@ -507,6 +507,19 @@ impl Interpreter {
         let knob = Arc::new(());
         self.arena.mutate_root(|mc, arena| {
             let new_thread = thread::Thread::default();
+            let key = arena
+                .stash
+                .threads
+                .insert(Gc::new(mc, RefLock::new(new_thread)));
+            self.thread_knobs.insert(key, knob.clone());
+            ThreadHandle { key, _knob: knob }
+        })
+    }
+
+    pub fn new_thread_with_config(&mut self, config: ThreadConfig) -> ThreadHandle {
+        let knob = Arc::new(());
+        self.arena.mutate_root(|mc, arena| {
+            let new_thread = thread::Thread::with_config(config);
             let key = arena
                 .stash
                 .threads

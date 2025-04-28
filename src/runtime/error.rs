@@ -61,6 +61,8 @@ pub enum SchemeErrorType<'gc> {
     /// Bytecode uses rest parameter where no rest argument can exist
     #[error("referenced nonexistent rest parameter")]
     InvalidRest,
+    #[error("attempted to redefine an imported symbol")]
+    ImportedSymbol,
     /// Attempted to call a non-callable
     #[error("attempt to call non-callable")]
     NonCallable,

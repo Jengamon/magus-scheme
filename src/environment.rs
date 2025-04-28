@@ -151,6 +151,25 @@ impl<'gc, V: Collect<'gc>> Environment<'gc, V> {
         }
     }
 
+    pub(crate) fn is_defined(&self, symbol: lasso::Spur) -> Option<usize> {
+        self.is_defined_internal(symbol, 0)
+    }
+
+    fn is_defined_internal(&self, symbol: lasso::Spur, level: usize) -> Option<usize> {
+        if self.inner.borrow().values.contains_key(&Symbol(symbol)) {
+            Some((&raw const *self).addr())
+        } else if let Some(parent) = self.parent {
+            if level >= Self::MAX_RECURSION {
+                // we simply say a symbol is undefined if recursion gets to this point
+                None
+            } else {
+                parent.borrow().is_defined_internal(symbol, level + 1)
+            }
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn parent(&self) -> Option<EnvironmentPtr<'gc, V>> {
         self.parent
     }

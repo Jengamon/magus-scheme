@@ -223,12 +223,31 @@ impl<'gc> Iterator for StackExpander<'gc> {
     }
 }
 
+#[derive(Debug, Collect)]
+#[collect(require_static)]
+pub struct ThreadConfig {
+    /// Should a thread raise an error if an imported symbol is overriden in global scope?
+    ///
+    /// If true (default), imports are effectively immutable.
+    /// (one can create a local lambda scope to allow for "redefinition" if this flag is enabled)
+    reject_import_defines: bool,
+}
+
+impl Default for ThreadConfig {
+    fn default() -> Self {
+        Self {
+            reject_import_defines: true,
+        }
+    }
+}
+
 pub type ThreadPtr<'gc> = Gc<'gc, RefLock<Thread<'gc>>>;
 pub type Stack<'gc> = Vec<ValuePtr<'gc>>;
 /// Runs all code
 #[derive(Debug, Collect)]
 #[collect(no_drop)]
 pub struct Thread<'gc> {
+    config: ThreadConfig,
     stack: Stack<'gc>,
     frames: Vec<ThreadFrame<'gc>>,
     error: Option<SchemeErrorPtr<'gc>>,
@@ -277,6 +296,20 @@ impl<'gc> Thread<'gc> {
 
     pub fn new_empty() -> Self {
         Self {
+            config: ThreadConfig::default(),
+            frames: vec![],
+            upvalues: Vec::new(),
+            stack: vec![],
+            error: None,
+            holes: fxhash::FxHashMap::default(),
+            upvalue_mapping: Default::default(),
+            next_upvalue_index: 0,
+        }
+    }
+
+    pub fn with_config(config: ThreadConfig) -> Self {
+        Self {
+            config,
             frames: vec![],
             upvalues: Vec::new(),
             stack: vec![],
@@ -405,6 +438,14 @@ impl<'gc> Thread<'gc> {
                 in_progress: None,
             })
         })
+    }
+
+    pub fn config(&self) -> &ThreadConfig {
+        &self.config
+    }
+
+    pub fn config_mut(&mut self) -> &mut ThreadConfig {
+        &mut self.config
     }
 
     // Defined on &mut rather than &self for lambda denial
@@ -1392,6 +1433,17 @@ impl<'gc> Thread<'gc> {
                                 make_error!(SchemeErrorType::NoValue(inst));
                                 continue;
                             };
+                            let is_import_symbol = chunk
+                                .import_env
+                                .borrow()
+                                .is_defined(symbol)
+                                .is_some_and(|addr| {
+                                    addr == (&raw const *chunk.import_env.borrow()).addr()
+                                });
+                            if is_import_symbol && self.config.reject_import_defines {
+                                make_error!(SchemeErrorType::ImportedSymbol);
+                                continue;
+                            }
                             if current_env
                                 .unwrap()
                                 .borrow_mut(&ctx)

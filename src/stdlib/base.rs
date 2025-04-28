@@ -29,9 +29,9 @@ pub use procedures::{
     IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull, IsOdd, IsPair, IsProcedure,
     IsString, IsSymbol, IsVector, Lcm, ListCopy, ListSetBang, ListToString, MakeBytevector, Map,
     MonotonicAscending, MonotonicDescending, Multiply, NumberToString, Numerator, Raise,
-    RaiseContinuable, StringAppend, StringCopy, StringLength, StringToList, StringToNumber,
-    StringToSymbol, StringToUtf8, Substring, Subtract, SymbolToString, Utf8ToString, Values,
-    VectorRef,
+    RaiseContinuable, StringAppend, StringCopy, StringLength, StringRef, StringToList,
+    StringToNumber, StringToSymbol, StringToUtf8, Substring, Subtract, SymbolToString,
+    Utf8ToString, Values, VectorRef,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -417,6 +417,7 @@ impl Module for Base {
             "string-append",
             "make-bytevector",
             "dynamic-wind",
+            "string-ref",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -509,6 +510,7 @@ impl Module for Base {
             "string-append" => lambda!(StringAppend),
             "make-bytevector" => lambda!(MakeBytevector),
             "dynamic-wind" => lambda!(DynamicWind),
+            "string-ref" => lambda!(StringRef),
             _ => None,
         }
     }

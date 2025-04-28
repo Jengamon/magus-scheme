@@ -199,7 +199,7 @@
     [ "base", "", string-for-each, false, "", "" ],
     [ "base", "procedure", string-length, true, "get the number of characters in a string", "" ],
     [ "base", "", string-map, false, "", "" ],
-    [ "base", "", string-ref, false, "", "" ],
+    [ "base", "procedure", string-ref, true, "get the k-th character of a list", "" ],
     [ "base", "", string-set!, false, "", "" ],
     [ "base", "", string<=?, false, "", "" ],
     [ "base", "", string<?, false, "", "" ],

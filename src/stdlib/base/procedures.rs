@@ -16,7 +16,7 @@ pub use predicates::{
     IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull, IsOdd, IsPair,
     IsProcedure, IsString, IsSymbol, IsVector,
 };
-pub use string::{StringAppend, StringCopy, StringLength, Substring};
+pub use string::{StringAppend, StringCopy, StringLength, StringRef, Substring};
 pub use structure::{CallWithValues, Cons, Values};
 pub use vector::VectorRef;
 
@@ -2033,6 +2033,56 @@ mod string {
             Ok(LambdaReturn::Return(vec![
                 Value::String(Gc::new(&ctx, RefLock::new(appended)).into()).into_ptr(&ctx),
             ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct StringRef;
+
+    impl<'gc> NativeLambda<'gc> for StringRef {
+        fn arity(&self) -> Arity {
+            Arity::Exact(2)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            use num::ToPrimitive;
+            let Value::String(s) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "string-ref expects a string for its first argument"
+                ))?;
+            };
+            let Value::Number(k) = *args[1].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "string-ref expects an exact non-negative integer for its second argument"
+                ))?;
+            };
+            let Number::Integer(i) = &*k else {
+                return Err(anyhow::anyhow!(
+                    "string-ref expects an exact non-negative integer for its second argument"
+                ))?;
+            };
+            if i < &BigInt::ZERO {
+                return Err(anyhow::anyhow!(
+                    "string-ref expects an exact non-negative integer for its second argument"
+                ))?;
+            }
+
+            let idx = i
+                .to_usize()
+                .ok_or(anyhow::anyhow!("string-ref: index too big"))?;
+
+            let c = s
+                .borrow()
+                .chars()
+                .nth(idx)
+                .ok_or(anyhow::anyhow!("string-ref: index {idx} out of range"))?;
+
+            Ok(LambdaReturn::Return(vec![Value::Char(c).into_ptr(&ctx)]))
         }
     }
 }

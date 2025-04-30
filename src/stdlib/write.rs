@@ -22,7 +22,7 @@ mod procedures {
 
     impl<'gc> NativeLambda<'gc> for DisplayLam {
         fn arity(&self) -> Arity {
-            Arity::AtLeast(1)
+            Arity::Bounded { min: 1, max: 2 }
         }
 
         fn run(
@@ -34,7 +34,7 @@ mod procedures {
                 return Err(anyhow::anyhow!("display expects either 1 or 2 arguments"))?;
             }
 
-            println!(
+            print!(
                 "{}",
                 Value::resolve_into::<_, ModeDisplay>(
                     args[0],
@@ -54,7 +54,7 @@ mod procedures {
 
     impl<'gc> NativeLambda<'gc> for WriteLam {
         fn arity(&self) -> Arity {
-            Arity::AtLeast(1)
+            Arity::Bounded { min: 1, max: 2 }
         }
 
         fn run(
@@ -62,11 +62,7 @@ mod procedures {
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
-            if args.len() > 2 {
-                return Err(anyhow::anyhow!("write expects either 1 or 2 arguments"))?;
-            }
-
-            eprintln!(
+            eprint!(
                 "{}",
                 Value::resolve_into::<_, ModeWrite>(
                     args[0],
@@ -79,9 +75,30 @@ mod procedures {
             Ok(LambdaReturn::Return(vec![]))
         }
     }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Newline;
+
+    impl<'gc> NativeLambda<'gc> for Newline {
+        fn arity(&self) -> Arity {
+            Arity::Bounded { min: 0, max: 1 }
+        }
+
+        fn run(
+            &mut self,
+            _ctx: NativeLambdaContext<'_, 'gc>,
+            _args: &[ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            // Ignore port for now
+            println!();
+
+            Ok(LambdaReturn::Return(vec![]))
+        }
+    }
 }
 
-pub use procedures::{DisplayLam, WriteLam};
+pub use procedures::{DisplayLam, Newline, WriteLam};
 
 // #[derive(Default)]
 pub struct Write;
@@ -91,7 +108,7 @@ pub struct Write;
 
 impl Module for Write {
     fn all_symbols(&self, interner: &mut lasso::Rodeo) -> std::collections::HashSet<lasso::Spur> {
-        ["write", "display"]
+        ["write", "display", "newline"]
             .into_iter()
             .map(|s| interner.get_or_intern_static(s))
             .collect()
@@ -117,6 +134,7 @@ impl Module for Write {
         match symbol {
             "display" => lambda!(DisplayLam),
             "write" => lambda!(WriteLam),
+            "newline" => lambda!(Newline),
             _ => None,
         }
     }

@@ -331,7 +331,7 @@ fn execute(
 
     match chunk {
         Ok(chunk) => {
-            let mut fuel = Fuel::with(1_000_000);
+            let mut fuel = Fuel::with(1_000);
             chunk_debug(interpreter, &chunk);
             interpreter.run(thread, |ctx, arena, interner| {
                 let thread = ctx.thread;
@@ -365,7 +365,7 @@ fn execute(
                             break;
                         }
                         thread.step(ctx, interner, world, includer, &mut fuel);
-                        fuel.refill(1_000_000, 1_000_000);
+                        fuel.refill(1_000, 1_000);
                     }
                     // dbg!(&thread);
                     let sources = [(interner.get_or_intern_static("repl.scm"), source.as_ref())];

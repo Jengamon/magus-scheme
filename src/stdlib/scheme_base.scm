@@ -7,7 +7,8 @@
 ; are in this module
 (import (magus impl))
 (export list not memq memv member abs square boolean? boolean=?
-    zero? positive? negative? length assq assv make-list list-ref)
+    zero? positive? negative? length assq assv make-list list-ref
+    floor-quotient floor-remainder)
 (begin
   (define (list . in) in)
   (define (not x) (if x #f #t))
@@ -34,6 +35,10 @@
       ; something that is neither exact nor inexact is not a number!
       ; We do this cuz we don't support number? and friends yet
       (if (or (inexact? n) (exact? n)) (< n 0) #f))
+  (define (floor-quotient a b)
+      (call-with-values (lambda () (floor/ a b)) (lambda (q r) q)))
+  (define (floor-remainder a b)
+      (call-with-values (lambda () (floor/ a b)) (lambda (q r) r)))
   (define (boolean? b) (if (or (eq? b #f) (eq? b #t)) #t #f))
   (define (boolean=? . lst)
     (define (boolean=-iter v lst)

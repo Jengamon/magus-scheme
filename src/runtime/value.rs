@@ -954,7 +954,7 @@ impl Promise<'_> {
     }
 }
 
-#[derive(Debug, Collect, Clone, Copy)]
+#[derive(Debug, Collect, Clone)]
 #[collect(no_drop)]
 /// A dynamically bound value location with a
 /// default value, and possibly a conversion lambda
@@ -968,14 +968,14 @@ pub struct Parameter<'gc> {
 pub type ParameterPtr<'gc> = Gc<'gc, RefLock<Parameter<'gc>>>;
 
 impl<'gc> Parameter<'gc> {
-    pub fn new(mc: &Mutation<'gc>, init: ValuePtr<'gc>) -> Self {
+    pub fn new(init: ValuePtr<'gc>) -> Self {
         Self {
             init,
             convert: None,
         }
     }
 
-    pub fn with_convert(mc: &Mutation<'gc>, init: ValuePtr<'gc>, convert: Lambda<'gc>) -> Self {
+    pub fn with_convert(init: ValuePtr<'gc>, convert: Lambda<'gc>) -> Self {
         Self {
             init,
             convert: Some(convert),

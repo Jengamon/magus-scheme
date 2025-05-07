@@ -88,7 +88,8 @@ fn quote_program<'gc>(
         }
         ProgramData::Labeled { label, item } => {
             qctx.labels.insert(*label);
-            let code = if !qctx.expanded.contains(&(&raw const *item).addr()) {
+
+            if !qctx.expanded.contains(&(&raw const *item).addr()) {
                 qctx.expanded.insert((&raw const *item).addr());
                 let mut code = quote_program(*item, qctx)?;
                 code.extend([
@@ -98,8 +99,7 @@ fn quote_program<'gc>(
                 code
             } else {
                 vec![Bytecode::MakeQuoteHole { id: *label }]
-            };
-            code
+            }
         }
         ProgramData::LabelRef(label) => {
             qctx.requested_labels.insert(*label);

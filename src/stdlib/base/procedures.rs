@@ -10,7 +10,8 @@ pub use equality::{IsEq, IsEqual, IsEqv};
 pub use error::{Raise, RaiseContinuable};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr, ListCopy, ListSetBang, Map};
 pub use math::{
-    Add, Denominator, Divide, ExactIntegerSqrt, Expt, Gcd, Lcm, Multiply, Numerator, Subtract,
+    Add, Denominator, Divide, ExactIntegerSqrt, Expt, FloorSlash, Gcd, Lcm, Multiply, Numerator,
+    Subtract,
 };
 pub use predicates::{
     IsBytevector, IsChar, IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull,
@@ -851,13 +852,80 @@ mod math {
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct FloorSlash;
-    #[derive(Debug, Collect)]
-    #[collect(require_static)]
-    pub struct FloorQuotient;
-    #[derive(Debug, Collect)]
-    /// Also known as `modulo`
-    #[collect(require_static)]
-    pub struct FloorRemainder;
+
+    impl<'gc> NativeLambda<'gc> for FloorSlash {
+        fn arity(&self) -> Arity {
+            Arity::Exact(2)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let n1 = match *args[0].borrow() {
+                Value::Number(n) => Either::Left(n),
+                Value::Inexact(f) => Either::Right(f),
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "floor/ expects a number as its first argument"
+                    ))?;
+                }
+            };
+
+            let n2 = match *args[1].borrow() {
+                Value::Number(n) => Either::Left(n),
+                Value::Inexact(f) => Either::Right(f),
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "floor/ expects a number as its second argument"
+                    ))?;
+                }
+            };
+
+            let (n, r) = match (n1, n2) {
+                (Either::Left(n1), Either::Left(n2)) => match &*n1 / &*n2 {
+                    Number::Integer(i) => (
+                        Either::Left(Number::Integer(i)),
+                        Either::Left(Number::Integer(BigInt::ZERO)),
+                    ),
+                    Number::Rational(r) => {
+                        let n_q = Number::from_rational(r.floor());
+                        (
+                            Either::Left(n_q.clone()),
+                            Either::Left(&*n1 - &(&*n2 * &n_q)),
+                        )
+                    }
+                },
+                (Either::Left(n1), Either::Right(n2)) => {
+                    let n1 = n1.to_inexact();
+                    let n_q = (n1 / n2).floor();
+                    (Either::Right(n_q), Either::Right(n1 - n2 * n_q))
+                }
+                (Either::Right(n1), Either::Left(n2)) => {
+                    let n2 = n2.to_inexact();
+                    let n_q = (n1 / n2).floor();
+                    (Either::Right(n_q), Either::Right(n1 - n2 * n_q))
+                }
+                (Either::Right(n1), Either::Right(n2)) => {
+                    let n_q = (n1 / n2).floor();
+                    (Either::Right(n_q), Either::Right(n1 - n2 * n_q))
+                }
+            };
+
+            macro_rules! make_value {
+                ($val:expr) => {
+                    match $val {
+                        Either::Left(n) => Value::Number(Gc::new(&ctx, n)).into_ptr(&ctx),
+                        Either::Right(f) => Value::Inexact(f).into_ptr(&ctx),
+                    }
+                };
+            }
+
+            Ok(LambdaReturn::Return(vec![make_value!(n), make_value!(r)]))
+        }
+    }
+
     /// Returns 2 numbers: n_q = trunc(n1/n2) and it's remainder (n_r = n1 - n2n_q)
     // trunc(x) = { if x < 0: ceil(x); else: floor(x)
     #[derive(Debug, Collect)]

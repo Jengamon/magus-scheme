@@ -267,6 +267,7 @@ pub struct Thread<'gc> {
     error: Option<SchemeErrorPtr<'gc>>,
     // used in the creation of self-referential datastructures and recursive structures
     holes: fxhash::FxHashMap<usize, ValuePtr<'gc>>,
+    quote_holes: fxhash::FxHashMap<usize, ValuePtr<'gc>>,
     // Upvalues for executing code
     upvalues: Vec<ValuePtr<'gc>>,
     // Mapping for lambdas to upvalue
@@ -316,6 +317,7 @@ impl<'gc> Thread<'gc> {
             stack: vec![],
             error: None,
             holes: fxhash::FxHashMap::default(),
+            quote_holes: fxhash::FxHashMap::default(),
             upvalue_mapping: Default::default(),
             next_upvalue_index: 0,
         }
@@ -324,13 +326,7 @@ impl<'gc> Thread<'gc> {
     pub fn with_config(config: ThreadConfig) -> Self {
         Self {
             config,
-            frames: vec![],
-            upvalues: Vec::new(),
-            stack: vec![],
-            error: None,
-            holes: fxhash::FxHashMap::default(),
-            upvalue_mapping: Default::default(),
-            next_upvalue_index: 0,
+            ..Self::new_empty()
         }
     }
 
@@ -1345,6 +1341,34 @@ impl<'gc> Thread<'gc> {
                             } else {
                                 // If the hole doesn't exist, make it
                                 self.holes.insert(id, value);
+                            }
+                            advance_to_next_inst!();
+                        }
+                        Bytecode::MakeQuoteHole { id } => {
+                            // make a hole (or refer to one in existence)
+                            let val = if let Some(v) = self.quote_holes.get(&id) {
+                                *v
+                            } else {
+                                // create an undefined value
+                                let val = Gc::new(&ctx, RefLock::new(Value::Undefined));
+                                self.quote_holes.insert(id, val);
+                                val
+                            };
+                            self.stack.push(val);
+                            advance_to_next_inst!();
+                        }
+                        Bytecode::FillQuoteHole { id } => {
+                            // get the value at the top of the stack, and make the requisite hole if defined equal to the value
+                            let Some(value) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+
+                            if let Some(hole_ptr) = self.quote_holes.get(&id) {
+                                *hole_ptr.borrow_mut(&ctx) = *value.borrow();
+                            } else {
+                                // If the hole doesn't exist, make it
+                                self.quote_holes.insert(id, value);
                             }
                             advance_to_next_inst!();
                         }

@@ -59,6 +59,11 @@ pub enum Bytecode {
     MakeHole { id: usize },
     /// Pop the top of the stack as the value of a hole, and clear the hole.
     FillHole { id: usize },
+    // Holes are the way to make self-referential datatypes
+    /// Creates a hole for self-reference
+    MakeQuoteHole { id: usize },
+    /// Pop the top of the stack as the value of a hole, and clear the hole.
+    FillQuoteHole { id: usize },
 
     // NOTE These are the "definitive forms" that are
     // theoretically all that's needed to implement the
@@ -117,6 +122,8 @@ impl Bytecode {
             Self::MakePair => 1,
             Self::MakeHole { .. } => 1,
             Self::FillHole { .. } => 1,
+            Self::MakeQuoteHole { .. } => 1,
+            Self::FillQuoteHole { .. } => 1,
             Self::MakeVector { .. } => 1,
             Self::ListToVector => 1,
             Self::Reference { .. } => 1,
@@ -161,6 +168,8 @@ impl fmt::Display for Bytecode {
             Bytecode::Splice => write!(f, "SPLI"),
             Bytecode::MakeHole { id } => write!(f, "HOLE {id}"),
             Bytecode::FillHole { id } => write!(f, "FILL {id}"),
+            Bytecode::MakeQuoteHole { id } => write!(f, "QHLE {id}"),
+            Bytecode::FillQuoteHole { id } => write!(f, "QFLL {id}"),
             Bytecode::Define { symbol } => write!(f, "DEFN {}", symbol.into_inner()),
             Bytecode::SetBang { symbol } => write!(f, "SET! {}", symbol.into_inner()),
             Self::ArgSetBang { index } => write!(f, "AST! {index}"),

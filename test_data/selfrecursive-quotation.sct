@@ -1,0 +1,5 @@
+---
+1
+---
+(import (only (scheme base) quote list) (only (scheme cxr) caaar))
+(caaar (list #0='((1) #0#)))

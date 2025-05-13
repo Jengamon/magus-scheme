@@ -2,6 +2,7 @@
   (import (scheme base))
   (export riemann range-1 range sum)
   (begin
+    ; trapezoidal riemann sum (b_1 = 1, b_2 = x)
     (define (riemann x) (/ (* x (+ x 1)) 2))
     (define (range-1 x)
       (define (range-1-iter x lst)

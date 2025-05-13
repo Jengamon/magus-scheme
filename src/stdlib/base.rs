@@ -21,6 +21,7 @@ pub use boolean::{And, Or};
 pub use conditionals::If;
 pub use define::{Define, SetBang};
 pub use exception::WithExceptionHandler;
+pub use include::{Include, IncludeCi};
 pub use macros::{DefineSyntax, SyntaxRules};
 pub use procedures::{
     Add, Apply, Ascending, Bytevector, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr,
@@ -41,6 +42,7 @@ mod boolean;
 mod conditionals;
 mod define;
 mod exception;
+mod include;
 mod macros;
 mod procedures;
 mod quote;
@@ -48,14 +50,14 @@ mod quote;
 // helper function for compiling a lambda
 pub fn lambda_helper<'gc>(
     compiler: &mut Compiler<'gc>,
-    ctx: &mut SyntaxContext<'_, 'gc>,
+    ctx: &mut SyntaxContext<'_, '_, 'gc>,
     import_env: StackEnvironmentPtr<'gc>,
     formals: &Formals,
     body: impl IntoIterator<Item = ProgramPtr<'gc>>,
 ) -> anyhow::Result<ChunkPtr<'gc>> {
     compiler.hygenic(ctx, import_env, |ctx, compiler, import_env| {
         compiler.define_parameters(
-            ctx.interner,
+            ctx.ecc.interner,
             formals.non_rest_params(),
             formals.rest_param(),
         )?;
@@ -120,7 +122,7 @@ pub struct Begin;
 impl Syntax for Begin {
     fn evaluate<'gc>(
         &self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         compiler: &mut Compiler<'gc>,
         _import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
@@ -157,7 +159,7 @@ pub struct Lambda;
 impl Syntax for Lambda {
     fn evaluate<'gc>(
         &self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         compiler: &mut Compiler<'gc>,
         import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
@@ -166,7 +168,7 @@ impl Syntax for Lambda {
             return Err(anyhow::anyhow!("lambda needs at least 1 argument"));
         }
         let arg_list = args[0];
-        let formals = Formals::convert(arg_list, ctx.interner)?;
+        let formals = Formals::convert(arg_list, ctx.ecc.interner)?;
         // Make a new hygenic env
         let chunk = lambda_helper(
             compiler,
@@ -199,7 +201,7 @@ pub struct CondExpand {
 impl CondExpand {
     #[expect(clippy::type_complexity)]
     fn parse<'gc>(
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         args: &[ProgramPtr<'gc>],
         else_sym: lasso::Spur,
     ) -> anyhow::Result<(
@@ -211,7 +213,7 @@ impl CondExpand {
         let mut last_non_else_index = None;
         for (idx, p) in args.iter().enumerate() {
             if let ProgramData::List { head, body } = &p.data {
-                if let Some(s) = head.into_symbol(ctx.interner) {
+                if let Some(s) = head.into_symbol(ctx.ecc.interner) {
                     if s == else_sym {
                         // This is the else decl, add to else stuff, then break (so that this *has* to be the last one)
                         let decls = body.clone();
@@ -222,8 +224,8 @@ impl CondExpand {
                 // The head this the requirement, the body the declarationss
                 last_non_else_index = Some(idx);
                 let head = FeatureRequirement::convert(
-                    head.into_program(ctx.mc, ctx.interner, p.source),
-                    ctx.interner,
+                    head.into_program(ctx.mc, ctx.ecc.interner, p.source),
+                    ctx.ecc.interner,
                 )?;
                 let decls = body.clone();
                 branches.push((head, decls));
@@ -248,22 +250,22 @@ impl CondExpand {
 impl Syntax for CondExpand {
     fn evaluate<'gc>(
         &self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         compiler: &mut Compiler<'gc>,
         _import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
     ) -> anyhow::Result<SyntaxReturn<'gc>> {
         // // A cond-expand consists of at least 1 clause of form (FeatureRequirement <programs>...)
         // // followed by up to one (else <programs>...)
-        let else_sym = ctx.interner.get_or_intern_static("else");
+        let else_sym = ctx.ecc.interner.get_or_intern_static("else");
 
         let (branches, else_branch) = Self::parse(ctx, args, else_sym)?;
 
-        let features = Compiler::features(self.additional_features.as_ref(), ctx.interner);
+        let features = Compiler::features(self.additional_features.as_ref(), ctx.ecc.interner);
         let mut branch_satisfied = false;
         let mut programs_to_execute = vec![];
         for (req, cond_programs) in branches.into_iter() {
-            if req.is_satisfied(compiler, ctx.world, &features) {
+            if req.is_satisfied(compiler, ctx.ecc.world, &features) {
                 branch_satisfied = true;
                 programs_to_execute = cond_programs;
                 // Ignore the remaining clauses
@@ -316,12 +318,6 @@ impl Syntax for CondExpand {
         programs_to_check
     }
 }
-
-#[derive(Debug)]
-pub struct Include;
-
-#[derive(Debug)]
-pub struct IncludeCi;
 
 /// (scheme base) module
 #[derive(Default, Clone)]
@@ -422,6 +418,8 @@ impl Module for Base {
             "bytevector?",
             "char?",
             "floor/",
+            "include",
+            "include-ci",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -539,6 +537,8 @@ impl Module for Base {
             "cond-expand" => Some(Arc::new(CondExpand {
                 additional_features: Arc::clone(&self.additional_features),
             })),
+            "include" => Some(Arc::new(Include)),
+            "include-ci" => Some(Arc::new(IncludeCi)),
             _ => None,
         }
     }

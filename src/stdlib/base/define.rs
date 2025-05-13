@@ -14,7 +14,7 @@ pub struct Define;
 impl Syntax for Define {
     fn evaluate<'gc>(
         &self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         compiler: &mut Compiler<'gc>,
         import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
@@ -23,7 +23,7 @@ impl Syntax for Define {
             return Err(anyhow::anyhow!("define must be given 2 or more arguments"));
         }
 
-        let formals = Formals::convert(args[0], ctx.interner)?;
+        let formals = Formals::convert(args[0], ctx.ecc.interner)?;
 
         match formals {
             Formals::Empty => Err(anyhow::anyhow!("define must be given a name to define"))?,
@@ -142,7 +142,7 @@ pub struct SetBang;
 impl Syntax for SetBang {
     fn evaluate<'gc>(
         &self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         compiler: &mut Compiler<'gc>,
         _import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],

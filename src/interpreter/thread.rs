@@ -1532,7 +1532,9 @@ impl<'gc> Thread<'gc> {
                                     addr == (&raw const *chunk.import_env.borrow()).addr()
                                 });
                             if is_import_symbol && self.config.reject_import_defines {
-                                make_error!(SchemeErrorType::ImportedSymbol);
+                                make_error!(SchemeErrorType::ImportedSymbol(Box::from(
+                                    interner.resolve(&symbol)
+                                )));
                                 continue;
                             }
                             if current_env

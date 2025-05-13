@@ -489,7 +489,7 @@ impl Interpreter {
                         &library_name,
                         &mut ecc,
                         false,
-                        &library_def,
+                        library_def,
                         library_decls,
                     )?;
                     Ok::<_, anyhow::Error>(())

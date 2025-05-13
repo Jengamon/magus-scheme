@@ -190,17 +190,17 @@ pub trait ParseProgram {
     ) -> Result<Vec<ProgramPtr<'gc>>, Self::Error>;
 }
 
-pub struct SyntaxContext<'a, 'gc> {
+pub struct SyntaxContext<'a, 'b, 'gc> {
     pub mc: &'a Mutation<'gc>,
-    pub interner: &'a mut lasso::Rodeo,
-    pub world: &'a World,
-    constants: &'a mut Vec<Constant>,
-    lambdas: &'a mut Vec<Lambda<'gc>>,
-    promises: &'a mut Vec<PromisePtr<'gc>>,
-    upvalues: &'a mut usize,
+    pub ecc: &'b mut ExternalCompilerContext<'a>,
+    pub library_def: LibraryDefinitionContext<'a, 'gc>,
+    constants: &'b mut Vec<Constant>,
+    lambdas: &'b mut Vec<Lambda<'gc>>,
+    promises: &'b mut Vec<PromisePtr<'gc>>,
+    upvalues: &'b mut usize,
 }
 
-impl<'gc> SyntaxContext<'_, 'gc> {
+impl<'gc> SyntaxContext<'_, '_, 'gc> {
     /// Add a constant to the current compile context
     pub fn add_constant(&mut self, c: Constant) -> usize {
         if let Some(p) = self.constants.iter().position(|constant| constant == &c) {
@@ -287,7 +287,7 @@ impl<'gc> SyntaxContext<'_, 'gc> {
     }
 }
 
-impl<'gc> std::ops::Deref for SyntaxContext<'_, 'gc> {
+impl<'gc> std::ops::Deref for SyntaxContext<'_, '_, 'gc> {
     type Target = Mutation<'gc>;
     fn deref(&self) -> &Self::Target {
         self.mc
@@ -302,7 +302,7 @@ pub trait Transformer<'gc>: std::fmt::Debug {
     /// - `args`: external representation corresponding to passed in syntax
     fn evaluate(
         &self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         compiler: &mut Compiler<'gc>,
         import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
@@ -364,7 +364,7 @@ pub trait Syntax: std::fmt::Debug {
     /// - `args`: external representation corresponding to passed in syntax
     fn evaluate<'gc>(
         &self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         compiler: &mut Compiler<'gc>,
         import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
@@ -687,7 +687,7 @@ struct PrivateTransformer {
 impl Syntax for PrivateTransformer {
     fn evaluate<'gc>(
         &self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         compiler: &mut Compiler<'gc>,
         import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
@@ -1457,6 +1457,7 @@ pub struct ExternalCompilerContext<'a> {
 }
 
 /// Context struct for library definition parameters
+#[derive(Clone, Copy)]
 pub struct LibraryDefinitionContext<'a, 'gc> {
     /// Maximum amount of fuel used *per* library definition. `None` means to run to completion (unlimited).
     pub max_fuel: Option<i32>,
@@ -1579,10 +1580,11 @@ impl<'gc> Compiler<'gc> {
     /// - `value_pointers`: the pointers to the values used to represent `'()`, `#t`, and `#f`
     /// - `max_fuel`: amount of fuel given to *each* `define-library` statement for any necessary code. `None` means to run to completion
     /// - `programs`: pointers to the members of a program
-    pub fn compile_no_import(
+    pub fn compile_no_import<'a>(
         &mut self,
-        mc: &Mutation<'gc>,
-        ecc: &mut ExternalCompilerContext<'_>,
+        mc: &'a Mutation<'gc>,
+        ecc: &mut ExternalCompilerContext<'a>,
+        library_def: LibraryDefinitionContext<'a, 'gc>,
         programs: impl IntoIterator<Item = ProgramPtr<'gc>>,
     ) -> Result<ChunkPtr<'gc>, CompileError> {
         // compile code loop
@@ -1590,10 +1592,10 @@ impl<'gc> Compiler<'gc> {
         let mut lambdas = Vec::new();
         let mut promises = Vec::new();
         let mut upvalues = 0;
-        let mut context = SyntaxContext {
+        let mut context = SyntaxContext::<'a, '_, 'gc> {
             mc,
-            interner: ecc.interner,
-            world: ecc.world,
+            ecc,
+            library_def,
             constants: &mut constants,
             lambdas: &mut lambdas,
             promises: &mut promises,
@@ -1647,11 +1649,11 @@ impl<'gc> Compiler<'gc> {
     /// - `value_pointers`: the pointers to the values used to represent `'()`, `#t`, and `#f`
     /// - `max_fuel`: amount of fuel given to *each* `define-library` statement for any necessary code. `None` means to run to completion
     /// - `programs`: pointers to the members of a program
-    pub fn compile(
+    pub fn compile<'a>(
         &mut self,
-        mc: &Mutation<'gc>,
-        ecc: &mut ExternalCompilerContext<'_>,
-        library_def: &LibraryDefinitionContext<'_, 'gc>,
+        mc: &'a Mutation<'gc>,
+        ecc: &mut ExternalCompilerContext<'a>,
+        library_def: &LibraryDefinitionContext<'a, 'gc>,
         programs: impl IntoIterator<Item = ProgramPtr<'gc>>,
     ) -> Result<ChunkPtr<'gc>, CompileError> {
         self.stash.cleanup();
@@ -1720,7 +1722,7 @@ impl<'gc> Compiler<'gc> {
                         .collect::<Result<Vec<_>, _>>()?;
 
                     // manually match and ignore OoF errors
-                    match self.define_library(mc, &name, ecc, true, library_def, library_decls) {
+                    match self.define_library(mc, &name, ecc, true, *library_def, library_decls) {
                         Ok(_) => {}
                         Err(e) => return Err(e.into()),
                     }
@@ -1729,7 +1731,7 @@ impl<'gc> Compiler<'gc> {
             }
         }
 
-        self.compile_no_import(mc, ecc, programs)
+        self.compile_no_import(mc, ecc, *library_def, programs)
     }
 
     /// Compile code in the current context
@@ -1737,7 +1739,7 @@ impl<'gc> Compiler<'gc> {
     /// Is meant for the implementations of macros ([`Syntax`])
     pub fn compile_code(
         &mut self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         program: ProgramPtr<'gc>,
     ) -> Result<SyntaxReturn<'gc>, CompileError> {
         macro_rules! simple_constant {
@@ -1772,7 +1774,7 @@ impl<'gc> Compiler<'gc> {
             }
             ProgramData::String(spur) => {
                 let index =
-                    ctx.add_constant(Constant::String(Arc::from(ctx.interner.resolve(spur))));
+                    ctx.add_constant(Constant::String(Arc::from(ctx.ecc.interner.resolve(spur))));
                 Ok(SyntaxReturn::Code(Box::from([Bytecode::PushConst {
                     index,
                 }])))
@@ -1898,7 +1900,7 @@ impl<'gc> Compiler<'gc> {
             ProgramData::List { head, body } => {
                 // At this point, import and define-library don't have a special meaning anymore, so just interpret them as
                 // their corresponding symbols
-                let head_symbol = head.into_symbol(ctx.interner);
+                let head_symbol = head.into_symbol(ctx.ecc.interner);
                 if let Some(mcr) = head_symbol.and_then(|sym| self.get_macro(sym)) {
                     if *self.rec_counter.borrow() > Self::MAX_RECURSION {
                         return Err(CompileError::TooRecursive);
@@ -2389,13 +2391,13 @@ impl<'gc> Compiler<'gc> {
     /// - `from_code`: will reserved names (null and names beginning with `scheme`, `srfi`, `magus`) be allowed through?
     /// - `library_def`: [`LibraryDefinitionContext`]
     /// - `library_decls`: library declarations
-    pub fn define_library(
+    pub fn define_library<'a>(
         &mut self,
-        mc: &Mutation<'gc>,
+        mc: &'a Mutation<'gc>,
         name: &LibraryName,
-        ecc: &mut ExternalCompilerContext<'_>,
+        ecc: &mut ExternalCompilerContext<'a>,
         from_code: bool,
-        library_def: &LibraryDefinitionContext<'_, 'gc>,
+        library_def: LibraryDefinitionContext<'a, 'gc>,
         library_decls: impl IntoIterator<Item = LibraryDeclaration<'gc>>,
     ) -> Result<(), DefineLibraryError> {
         // The '() module is private from Scheme code
@@ -2444,12 +2446,12 @@ impl<'gc> Compiler<'gc> {
         let mut decls = VecDeque::from_iter(library_decls);
 
         #[expect(clippy::too_many_arguments)]
-        fn execute_code<'gc>(
-            mc: &Mutation<'gc>,
+        fn execute_code<'a, 'gc>(
+            mc: &'a Mutation<'gc>,
             code: &[ProgramPtr<'gc>],
             name: &LibraryName,
-            ecc: &mut ExternalCompilerContext<'_>,
-            library_def: &LibraryDefinitionContext<'_, 'gc>,
+            ecc: &mut ExternalCompilerContext<'a>,
+            library_def: LibraryDefinitionContext<'a, 'gc>,
             lib_compiler: &mut Compiler<'gc>,
             global_env: StackEnvironmentPtr<'gc>,
             fuel: &mut Fuel,
@@ -2457,7 +2459,7 @@ impl<'gc> Compiler<'gc> {
             // this is the "fun" one. we use the repl substitution trick to make `global_env` our global environment
             // when using thread. But first, we gotta compile in our compiler.
             let chunk = lib_compiler
-                .compile_no_import(mc, ecc, code.iter().copied())
+                .compile_no_import(mc, ecc, library_def, code.iter().copied())
                 .map_err(Box::new)?;
 
             let thread = library_def.thread;
@@ -2985,11 +2987,15 @@ impl<'gc> Compiler<'gc> {
     }
 
     /// Helper for a hygenic context
-    pub fn hygenic<T>(
-        &mut self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+    pub fn hygenic<'a, T>(
+        &'a mut self,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         import_env: StackEnvironmentPtr<'gc>,
-        f: impl FnOnce(&mut SyntaxContext<'_, 'gc>, &mut Compiler<'gc>, StackEnvironmentPtr<'gc>) -> T,
+        f: impl FnOnce(
+            &mut SyntaxContext<'_, '_, 'gc>,
+            &mut Compiler<'gc>,
+            StackEnvironmentPtr<'gc>,
+        ) -> T,
     ) -> T {
         let new_env = self.new_environment(ctx, import_env);
         self.hygenic_with_env(ctx, Some(new_env), f)
@@ -2998,9 +3004,13 @@ impl<'gc> Compiler<'gc> {
     /// Helper for a hygenic context in a given environment
     pub fn hygenic_with_env<T>(
         &mut self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         env_spec: Option<EnvironmentSpec>,
-        f: impl FnOnce(&mut SyntaxContext<'_, 'gc>, &mut Compiler<'gc>, StackEnvironmentPtr<'gc>) -> T,
+        f: impl FnOnce(
+            &mut SyntaxContext<'_, '_, 'gc>,
+            &mut Compiler<'gc>,
+            StackEnvironmentPtr<'gc>,
+        ) -> T,
     ) -> T {
         let checkpoint = self.checkpoint();
         let old_env = self.current_environment();

@@ -6,20 +6,20 @@ use crate::{
     environment::StackEnvironmentPtr,
 };
 
-struct QuoteContext<'a, 'b, 'gc> {
-    compiler: &'a mut Compiler<'gc>,
-    ctx: &'a mut SyntaxContext<'b, 'gc>,
-    labels: &'a mut HashSet<usize>,
-    requested_labels: &'a mut HashSet<usize>,
+struct QuoteContext<'a, 'b, 'c, 'gc> {
+    compiler: &'c mut Compiler<'gc>,
+    ctx: &'c mut SyntaxContext<'a, 'b, 'gc>,
+    labels: &'c mut HashSet<usize>,
+    requested_labels: &'c mut HashSet<usize>,
 
     /// contains the raw addresses of gc pointers that quotation has expanded
-    expanded: &'a mut HashSet<usize>,
+    expanded: &'c mut HashSet<usize>,
 }
 
 fn list_quote_prelude<'gc>(
     head: &ListHead<'gc>,
     body: &[ProgramPtr<'gc>],
-    qctx: &mut QuoteContext<'_, '_, 'gc>,
+    qctx: &mut QuoteContext<'_, '_, '_, 'gc>,
 ) -> Vec<Bytecode> {
     if let ListHead::Program(p) = head {
         Some(*p)
@@ -54,7 +54,7 @@ fn list_quote_prelude<'gc>(
 // and the label check becomes: requested - labeled (difference)
 fn quote_program<'gc>(
     ptr: ProgramPtr<'gc>,
-    qctx: &mut QuoteContext<'_, '_, 'gc>,
+    qctx: &mut QuoteContext<'_, '_, '_, 'gc>,
 ) -> anyhow::Result<Vec<Bytecode>> {
     macro_rules! constant_eval {
         ($e:expr => $f:ident) => {
@@ -75,7 +75,7 @@ fn quote_program<'gc>(
         ProgramData::Inexact(f) => constant_eval!(*f => Inexact),
         ProgramData::Bytevector(bv) => constant_eval!(Arc::from(bv.as_ref()) => Bytevector),
         ProgramData::String(s) => {
-            constant_eval!(Arc::from(qctx.ctx.interner.resolve(s)) => String)
+            constant_eval!(Arc::from(qctx.ctx.ecc.interner.resolve(s)) => String)
         }
         ProgramData::Symbol(s) => {
             constant_eval!(*s => Symbol)
@@ -138,13 +138,14 @@ fn quote_program<'gc>(
                     data.extend(quote_program(*p, qctx)?);
                 }
                 ListHead::Import => {
-                    let import = qctx.ctx.interner.get_or_intern_static("import");
+                    let import = qctx.ctx.ecc.interner.get_or_intern_static("import");
                     data.push(Bytecode::PushConst {
                         index: qctx.ctx.add_constant(Constant::Symbol(import)),
                     });
                 }
                 ListHead::DefineLibrary => {
-                    let define_library = qctx.ctx.interner.get_or_intern_static("define-library");
+                    let define_library =
+                        qctx.ctx.ecc.interner.get_or_intern_static("define-library");
                     data.push(Bytecode::PushConst {
                         index: qctx.ctx.add_constant(Constant::Symbol(define_library)),
                     });
@@ -177,7 +178,7 @@ pub struct Quote;
 impl Syntax for Quote {
     fn evaluate<'gc>(
         &self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         compiler: &mut Compiler<'gc>,
         _import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
@@ -210,7 +211,7 @@ pub struct Quasiquote;
 
 fn quasiquote_program<'gc>(
     ptr: ProgramPtr<'gc>,
-    qctx: &mut QuoteContext<'_, '_, 'gc>,
+    qctx: &mut QuoteContext<'_, '_, '_, 'gc>,
     level: &mut usize,
     in_list: bool,
 ) -> anyhow::Result<Vec<Bytecode>> {
@@ -224,9 +225,13 @@ fn quasiquote_program<'gc>(
         };
     }
 
-    let quasiquote = qctx.ctx.interner.get_or_intern_static("quasiquote");
-    let unquote = qctx.ctx.interner.get_or_intern_static("unquote");
-    let unquote_splicing = qctx.ctx.interner.get_or_intern_static("unquote-splicing");
+    let quasiquote = qctx.ctx.ecc.interner.get_or_intern_static("quasiquote");
+    let unquote = qctx.ctx.ecc.interner.get_or_intern_static("unquote");
+    let unquote_splicing = qctx
+        .ctx
+        .ecc
+        .interner
+        .get_or_intern_static("unquote-splicing");
 
     Ok(match &ptr.data {
         // constant data is always "evaluated"/quoted no matter the level
@@ -352,14 +357,14 @@ fn quasiquote_program<'gc>(
                         data.extend(quasiquote_program(*p, qctx, level, true)?);
                     }
                     ListHead::Import => {
-                        let import = qctx.ctx.interner.get_or_intern_static("import");
+                        let import = qctx.ctx.ecc.interner.get_or_intern_static("import");
                         data.push(Bytecode::PushConst {
                             index: qctx.ctx.add_constant(Constant::Symbol(import)),
                         });
                     }
                     ListHead::DefineLibrary => {
                         let define_library =
-                            qctx.ctx.interner.get_or_intern_static("define-library");
+                            qctx.ctx.ecc.interner.get_or_intern_static("define-library");
                         data.push(Bytecode::PushConst {
                             index: qctx.ctx.add_constant(Constant::Symbol(define_library)),
                         });
@@ -461,7 +466,7 @@ fn quasiquote_program<'gc>(
 impl Syntax for Quasiquote {
     fn evaluate<'gc>(
         &self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         compiler: &mut Compiler<'gc>,
         _import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],

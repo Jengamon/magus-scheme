@@ -31,7 +31,7 @@ mod syntax {
     impl Syntax for Delay {
         fn evaluate<'gc>(
             &self,
-            ctx: &mut crate::SyntaxContext<'_, 'gc>,
+            ctx: &mut crate::SyntaxContext<'_, '_, 'gc>,
             compiler: &mut crate::compiler::Compiler<'gc>,
             import_env: crate::environment::StackEnvironmentPtr<'gc>,
             args: &[crate::compiler::ProgramPtr<'gc>],
@@ -42,7 +42,7 @@ mod syntax {
 
             let promise_lambda =
                 compiler.hygenic(ctx, import_env, |ctx, compiler, import_env| {
-                    compiler.define_parameters(ctx.interner, vec![], None)?;
+                    compiler.define_parameters(ctx.ecc.interner, vec![], None)?;
 
                     if compiler.is_definition(args[0]) {
                         // Reject non-value delay
@@ -98,7 +98,7 @@ mod syntax {
     impl Syntax for DelayForce {
         fn evaluate<'gc>(
             &self,
-            ctx: &mut crate::SyntaxContext<'_, 'gc>,
+            ctx: &mut crate::SyntaxContext<'_, '_, 'gc>,
             compiler: &mut crate::compiler::Compiler<'gc>,
             import_env: crate::environment::StackEnvironmentPtr<'gc>,
             args: &[crate::compiler::ProgramPtr<'gc>],
@@ -110,7 +110,7 @@ mod syntax {
             let delay_index = {
                 let promise_lambda =
                     compiler.hygenic(ctx, import_env, |ctx, compiler, import_env| {
-                        compiler.define_parameters(ctx.interner, vec![], None)?;
+                        compiler.define_parameters(ctx.ecc.interner, vec![], None)?;
 
                         if compiler.is_definition(args[0]) {
                             // Reject non-value delay

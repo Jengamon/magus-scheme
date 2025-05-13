@@ -32,7 +32,7 @@ pub struct And;
 impl Syntax for And {
     fn evaluate<'gc>(
         &self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         compiler: &mut Compiler<'gc>,
         _import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
@@ -97,7 +97,7 @@ pub struct Or;
 impl Syntax for Or {
     fn evaluate<'gc>(
         &self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         compiler: &mut Compiler<'gc>,
         _import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],

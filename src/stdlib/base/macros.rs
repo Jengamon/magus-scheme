@@ -19,7 +19,7 @@ pub struct DefineSyntax;
 impl Syntax for DefineSyntax {
     fn evaluate<'gc>(
         &self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         compiler: &mut Compiler<'gc>,
         _import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
@@ -211,7 +211,7 @@ struct Bindings<'gc> {
 impl<'gc> Transformer<'gc> for SyntaxRulesImpl {
     fn evaluate(
         &self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         compiler: &mut Compiler<'gc>,
         import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
@@ -244,7 +244,7 @@ pub struct SyntaxRules;
 impl Syntax for SyntaxRules {
     fn evaluate<'gc>(
         &self,
-        ctx: &mut SyntaxContext<'_, 'gc>,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
         compiler: &mut Compiler<'gc>,
         _import_env: StackEnvironmentPtr<'gc>,
         args: &[ProgramPtr<'gc>],
@@ -262,9 +262,9 @@ impl Syntax for SyntaxRules {
                                 .all(|bp| matches!(bp.data, ProgramData::Symbol(_))) =>
                     {
                         let head_symbol = match head {
-                            ListHead::Import => ctx.interner.get_or_intern_static("import"),
+                            ListHead::Import => ctx.ecc.interner.get_or_intern_static("import"),
                             ListHead::DefineLibrary => {
-                                ctx.interner.get_or_intern_static("define-library")
+                                ctx.ecc.interner.get_or_intern_static("define-library")
                             }
                             ListHead::Program(p) => match &p.data {
                                 ProgramData::Symbol(s) => *s,
@@ -293,8 +293,10 @@ impl Syntax for SyntaxRules {
                         .all(|bp| matches!(bp.data, ProgramData::Symbol(_))) =>
             {
                 let head_symbol = match head {
-                    ListHead::Import => ctx.interner.get_or_intern_static("import"),
-                    ListHead::DefineLibrary => ctx.interner.get_or_intern_static("define-library"),
+                    ListHead::Import => ctx.ecc.interner.get_or_intern_static("import"),
+                    ListHead::DefineLibrary => {
+                        ctx.ecc.interner.get_or_intern_static("define-library")
+                    }
                     ListHead::Program(p) => match &p.data {
                         ProgramData::Symbol(s) => *s,
                         _ => unreachable!(),
@@ -307,10 +309,14 @@ impl Syntax for SyntaxRules {
                 let literal_symbols = std::iter::once(head_symbol)
                     .chain(body_symbols)
                     .collect::<Vec<_>>();
-                (ctx.interner.get_or_intern_static("..."), literal_symbols, 1)
+                (
+                    ctx.ecc.interner.get_or_intern_static("..."),
+                    literal_symbols,
+                    1,
+                )
             }
             Some(ProgramData::EmptyList) => {
-                (ctx.interner.get_or_intern_static("..."), Vec::new(), 1)
+                (ctx.ecc.interner.get_or_intern_static("..."), Vec::new(), 1)
             }
             _ => anyhow::bail!(
                 "syntax-rules must start with a symbol and a symbol list or a symbol list"

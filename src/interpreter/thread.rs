@@ -504,7 +504,11 @@ impl<'gc> Thread<'gc> {
     /// `should_pop` can be set to false in the case of tail calls
     // TODO Add an Option return value to indicate the frame that should be clobbered by tail calls (
     // once dynamic_wind handlers enter the fray)
-    fn handle_frame_end(&mut self, ctx: &Context<'_, 'gc>, should_pop: bool) {
+    fn handle_frame_end(
+        &mut self,
+        ctx: &Context<'_, 'gc>,
+        should_pop: bool,
+    ) -> Option<ThreadFrame<'gc>> {
         let Some(frame) = self.frames.last_mut() else {
             unreachable!("[ICE] no frame present");
         };
@@ -601,12 +605,8 @@ impl<'gc> Thread<'gc> {
         // TODO If dynamic-wind is present. call the after
         if should_pop {
             self.frames.pop();
-            if let Some(after) = after_frame {
-                self.frames.push(after);
-            }
-        } else if let Some(after) = after_frame {
-            self.frames.insert(self.frames.len() - 1, after);
         }
+        after_frame
     }
 
     fn make_backtrace(frames: &[ThreadFrame<'gc>]) -> Vec<StackFrame<'gc>> {
@@ -665,10 +665,12 @@ impl<'gc> Thread<'gc> {
         };
         let args: Vec<_> = self.stack.drain(self.stack.len() - args..).collect();
         // Handle the previous frame return here
-        if is_tail {
+        let old_after = if is_tail {
             // Exiting the current frame
-            self.handle_frame_end(ctx, false);
-        }
+            self.handle_frame_end(ctx, false)
+        } else {
+            None
+        };
         while let Some(v) = self.stack.last() {
             match *v.borrow() {
                 Value::Void => {
@@ -761,6 +763,9 @@ impl<'gc> Thread<'gc> {
                 if let Some(before) = before_frame {
                     self.frames.push(before);
                 }
+                if let Some(after) = old_after {
+                    self.frames.push(after);
+                }
                 return Ok(());
             }
         }
@@ -768,6 +773,9 @@ impl<'gc> Thread<'gc> {
         self.frames.push(new_frame);
         if let Some(before) = before_frame {
             self.frames.push(before);
+        }
+        if let Some(after) = old_after {
+            self.frames.push(after);
         }
         Ok(())
     }
@@ -1064,12 +1072,16 @@ impl<'gc> Thread<'gc> {
                 Execution::Bytecode { chunk, pc, .. } => {
                     // If error is set, kill this frame (bytecode shouldn't run if actively erroring)
                     if self.error.is_some() {
-                        self.handle_frame_end(&ctx, true);
+                        if let Some(after) = self.handle_frame_end(&ctx, true) {
+                            self.frames.push(after);
+                        }
                         continue;
                     }
                     // If framepointer is oob, then that means execution of this frame is finished
                     if chunk.code.len() <= *pc {
-                        self.handle_frame_end(&ctx, true);
+                        if let Some(after) = self.handle_frame_end(&ctx, true) {
+                            self.frames.push(after);
+                        }
                         continue;
                     }
                     macro_rules! advance_to_next_inst {
@@ -1706,8 +1718,8 @@ impl<'gc> Thread<'gc> {
                             }
                             if let Some(cont) = error.and_then(|e| e.error_type.continuation()) {
                                 self.handle_continuation(&ctx, cont);
-                            } else {
-                                self.handle_frame_end(&ctx, true);
+                            } else if let Some(after) = self.handle_frame_end(&ctx, true) {
+                                self.frames.push(after);
                             }
                         }
                         Ok(LambdaReturn::Continue { cont, args }) => {
@@ -1735,14 +1747,18 @@ impl<'gc> Thread<'gc> {
                                     interner.clone(),
                                     ctx.null_value
                                 )));
-                                self.handle_frame_end(&ctx, true);
+                                if let Some(after) = self.handle_frame_end(&ctx, true) {
+                                    self.frames.push(after);
+                                }
                             }
                         }
                         Ok(LambdaReturn::Propagate(err)) => {
                             // TODO Check if same error
                             // If not, store the current error in the new error irritants
                             self.error = Some(err);
-                            self.handle_frame_end(&ctx, true);
+                            if let Some(after) = self.handle_frame_end(&ctx, true) {
+                                self.frames.push(after);
+                            }
                         }
                         Ok(LambdaReturn::Call {
                             lambda,
@@ -1856,7 +1872,9 @@ impl<'gc> Thread<'gc> {
                                 }
                                 LambdaError::NonContinuable(e) => {
                                     make_error!(SchemeErrorType::Rust(std::rc::Rc::new(e)));
-                                    self.handle_frame_end(&ctx, true);
+                                    if let Some(after) = self.handle_frame_end(&ctx, true) {
+                                        self.frames.push(after);
+                                    }
                                 }
                             }
                         }

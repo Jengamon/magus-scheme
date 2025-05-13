@@ -35,12 +35,15 @@ Chunk {
         PushVoid,
         Reference {
             symbol: Spur(8),
+            enable_fallback: true,
         },
         Reference {
             symbol: Spur(8),
+            enable_fallback: true,
         },
         Reference {
             symbol: Spur(10),
+            enable_fallback: false,
         },
         Call {
             args: 2,
@@ -57,6 +60,7 @@ Chunk {
         },
         Reference {
             symbol: Spur(12),
+            enable_fallback: false,
         },
         Call {
             args: 2,

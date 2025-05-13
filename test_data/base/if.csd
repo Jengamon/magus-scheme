@@ -107,6 +107,7 @@ Chunk {
         },
         Reference {
             symbol: Spur(9),
+            enable_fallback: false,
         },
         Call {
             args: 2,
@@ -119,6 +120,7 @@ Chunk {
         },
         Reference {
             symbol: Spur(10),
+            enable_fallback: false,
         },
         Call {
             args: 1,
@@ -131,6 +133,7 @@ Chunk {
         },
         Reference {
             symbol: Spur(11),
+            enable_fallback: false,
         },
         Call {
             args: 1,

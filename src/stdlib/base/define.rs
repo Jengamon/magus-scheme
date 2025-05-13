@@ -73,6 +73,9 @@ impl Syntax for Define {
                 } else {
                     Formals::List(Box::from(&syms[1..]))
                 };
+
+                // Inform the compiler that a name is being defined in scope
+                compiler.define_variable(name);
                 let chunk = lambda_helper(
                     compiler,
                     ctx,
@@ -81,8 +84,6 @@ impl Syntax for Define {
                     args.iter().skip(1).copied(),
                 );
 
-                // Inform the compiler that a name is being defined in scope
-                compiler.define_variable(name);
                 let index =
                     ctx.add_lambda(Gc::new(ctx, CompiledLambda::new(formals.arity(), chunk?)));
 
@@ -107,6 +108,9 @@ impl Syntax for Define {
                     pre_dot: Box::from(&pre_dot[1..]),
                     dot,
                 };
+
+                // Inform the compiler that a name is being defined in scope
+                compiler.define_variable(name);
                 let chunk = lambda_helper(
                     compiler,
                     ctx,
@@ -115,8 +119,6 @@ impl Syntax for Define {
                     args.iter().skip(1).copied(),
                 );
 
-                // Inform the compiler that a name is being defined in scope
-                compiler.define_variable(name);
                 let index =
                     ctx.add_lambda(Gc::new(ctx, CompiledLambda::new(formals.arity(), chunk?)));
 

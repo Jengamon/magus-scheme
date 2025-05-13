@@ -964,7 +964,7 @@ impl<'gc> Thread<'gc> {
     fn fallback_handling(
         frames: &[ThreadFrame<'gc>],
         symbol: lasso::Spur,
-    ) -> Option<ValuePtr<'gc>> {
+    ) -> Option<(ValuePtr<'gc>, usize)> {
         frames
             .iter()
             .rev()
@@ -981,7 +981,7 @@ impl<'gc> Thread<'gc> {
             })
             // .inspect(|fb| eprintln!("FBFB: {:?}", fb.keys()))
             .find_map(|fb| fb.get(&Static(symbol)).copied())
-            .filter(|&fallback| !matches!(*fallback.borrow(), Value::Undefined))
+            .filter(|&fallback| !matches!(*fallback.0.borrow(), Value::Undefined))
     }
 
     // fn error_handler(&self) -> Option<Lambda<'gc>> {
@@ -1053,7 +1053,7 @@ impl<'gc> Thread<'gc> {
             //     }
             // }
 
-            let current_env = Self::current_env(&self.frames);
+            let current_env = Self::current_env(&self.frames).unwrap();
             let Some(frame) = self.frames.last_mut() else {
                 // Nothing to do.
                 return;
@@ -1226,46 +1226,58 @@ impl<'gc> Thread<'gc> {
                                 todo!("TODO Handle if upvalue misreferenced miscompilation")
                             }
                         }
-                        Bytecode::Reference { symbol } => {
+                        Bytecode::Reference {
+                            symbol,
+                            enable_fallback,
+                        } => {
                             // read a symbol from the environment
                             // if it is undefined (None or Some(Value::Undefined)), error, otherwise
                             // push the value to stack
                             //
                             // if-chaining would be *posh* here
 
-                            if let Some(fallback) = Self::fallback_handling(&self.frames, symbol) {
-                                self.stack.push(fallback);
-                                let Some(frame) = self.frames.last_mut() else {
-                                    unreachable!()
-                                };
-                                let Execution::Bytecode { pc, .. } = &mut frame.execution else {
-                                    unreachable!()
-                                };
-                                *pc += 1;
-                            } else {
-                                match current_env.unwrap().borrow().get(symbol) {
-                                    Ok(val) => {
-                                        if !matches!(*val.read(|v| v.borrow()), Value::Undefined) {
-                                            self.stack.push(*val.get().borrow());
+                            // only search through fallback if it was enabled by the compiler
+                            if enable_fallback {
+                                if let Some((fallback, fb_depth)) =
+                                    Self::fallback_handling(&self.frames, symbol)
+                                {
+                                    if let Ok(env_depth) = current_env.borrow().depth(symbol) {
+                                        if fb_depth <= env_depth {
+                                            self.stack.push(fallback);
                                             advance_to_next_inst!(self.frames.last_mut());
-                                        } else {
-                                            make_error!(SchemeErrorType::EnvLoad(Box::from(
-                                                interner.resolve(&symbol),
-                                            )));
+                                            continue;
                                         }
-                                        continue;
-                                    }
-                                    Err(GetError::NameNotFound(_)) => {}
-                                    Err(GetError::TooFar) => {
-                                        make_error!(SchemeErrorType::TooMuchRecursion);
+                                        // fall through on the else case
+                                    } else {
+                                        self.stack.push(fallback);
+                                        advance_to_next_inst!(self.frames.last_mut());
                                         continue;
                                     }
                                 }
-
-                                make_error!(SchemeErrorType::EnvLoad(Box::from(
-                                    interner.resolve(&symbol),
-                                )));
                             }
+
+                            match current_env.borrow().get(symbol) {
+                                Ok(val) => {
+                                    if !matches!(*val.read(|v| v.borrow()), Value::Undefined) {
+                                        self.stack.push(*val.get().borrow());
+                                        advance_to_next_inst!(self.frames.last_mut());
+                                    } else {
+                                        make_error!(SchemeErrorType::EnvLoad(Box::from(
+                                            interner.resolve(&symbol),
+                                        )));
+                                    }
+                                    continue;
+                                }
+                                Err(GetError::NameNotFound(_)) => {}
+                                Err(GetError::TooFar) => {
+                                    make_error!(SchemeErrorType::TooMuchRecursion);
+                                    continue;
+                                }
+                            }
+
+                            make_error!(SchemeErrorType::EnvLoad(Box::from(
+                                interner.resolve(&symbol),
+                            )));
                         }
                         Bytecode::MakePair => {
                             // dbg!(&self.stack);
@@ -1512,7 +1524,6 @@ impl<'gc> Thread<'gc> {
                                 continue;
                             }
                             if current_env
-                                .unwrap()
                                 .borrow_mut(&ctx)
                                 .define(&ctx, symbol, value, false)
                                 .is_err()
@@ -1600,7 +1611,6 @@ impl<'gc> Thread<'gc> {
                                 continue;
                             };
                             if current_env
-                                .unwrap()
                                 .borrow_mut(&ctx)
                                 .rebind(&ctx, symbol, value, interner)
                                 .is_err()
@@ -1913,6 +1923,7 @@ mod tests {
                 [
                     Reference {
                         symbol: interner.get_or_intern_static("cowl"),
+                        enable_fallback: false,
                     },
                     PushConst { index: 0 },
                     Define {
@@ -1920,6 +1931,7 @@ mod tests {
                     },
                     Reference {
                         symbol: interner.get_or_intern_static("ram"),
+                        enable_fallback: false,
                     },
                     // This triggers an error! yay~ todo moke this to a lambda actually
                     // Reference {

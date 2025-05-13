@@ -69,6 +69,7 @@ Chunk {
                         },
                         Reference {
                             symbol: Spur(8),
+                            enable_fallback: false,
                         },
                         Call {
                             args: 2,
@@ -161,6 +162,7 @@ Chunk {
                                         },
                                         Reference {
                                             symbol: Spur(8),
+                                            enable_fallback: false,
                                         },
                                         Call {
                                             args: 2,
@@ -214,6 +216,7 @@ Chunk {
                         },
                         Reference {
                             symbol: Spur(8),
+                            enable_fallback: false,
                         },
                         Call {
                             args: 2,
@@ -306,6 +309,7 @@ Chunk {
                                         },
                                         Reference {
                                             symbol: Spur(8),
+                                            enable_fallback: false,
                                         },
                                         Call {
                                             args: 2,
@@ -398,6 +402,7 @@ Chunk {
                                                         },
                                                         Reference {
                                                             symbol: Spur(8),
+                                                            enable_fallback: false,
                                                         },
                                                         Call {
                                                             args: 2,
@@ -451,6 +456,7 @@ Chunk {
                                         },
                                         Reference {
                                             symbol: Spur(8),
+                                            enable_fallback: false,
                                         },
                                         Call {
                                             args: 2,
@@ -511,6 +517,7 @@ Chunk {
                         FetchRest,
                         Reference {
                             symbol: Spur(8),
+                            enable_fallback: false,
                         },
                         Call {
                             args: 5,
@@ -603,6 +610,7 @@ Chunk {
                                         },
                                         Reference {
                                             symbol: Spur(8),
+                                            enable_fallback: false,
                                         },
                                         Call {
                                             args: 2,
@@ -695,6 +703,7 @@ Chunk {
                                                         },
                                                         Reference {
                                                             symbol: Spur(8),
+                                                            enable_fallback: false,
                                                         },
                                                         Call {
                                                             args: 2,
@@ -748,6 +757,7 @@ Chunk {
                                         },
                                         Reference {
                                             symbol: Spur(8),
+                                            enable_fallback: false,
                                         },
                                         Call {
                                             args: 2,
@@ -840,6 +850,7 @@ Chunk {
                                                         },
                                                         Reference {
                                                             symbol: Spur(8),
+                                                            enable_fallback: false,
                                                         },
                                                         Call {
                                                             args: 2,
@@ -932,6 +943,7 @@ Chunk {
                                                                         },
                                                                         Reference {
                                                                             symbol: Spur(8),
+                                                                            enable_fallback: false,
                                                                         },
                                                                         Call {
                                                                             args: 2,
@@ -985,6 +997,7 @@ Chunk {
                                                         },
                                                         Reference {
                                                             symbol: Spur(8),
+                                                            enable_fallback: false,
                                                         },
                                                         Call {
                                                             args: 2,
@@ -1045,6 +1058,7 @@ Chunk {
                                         FetchRest,
                                         Reference {
                                             symbol: Spur(8),
+                                            enable_fallback: false,
                                         },
                                         Call {
                                             args: 5,
@@ -1092,6 +1106,7 @@ Chunk {
                     code: [
                         Reference {
                             symbol: Spur(14),
+                            enable_fallback: false,
                         },
                         FetchArg {
                             index: 0,
@@ -1104,18 +1119,21 @@ Chunk {
                         },
                         Reference {
                             symbol: Spur(8),
+                            enable_fallback: false,
                         },
                         Call {
                             args: 3,
                         },
                         Reference {
                             symbol: Spur(13),
+                            enable_fallback: false,
                         },
                         Call {
                             args: 2,
                         },
                         Reference {
                             symbol: Spur(14),
+                            enable_fallback: false,
                         },
                     ],
                     labels: {

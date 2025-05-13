@@ -1848,9 +1848,14 @@ impl<'gc> Compiler<'gc> {
                     {
                         Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchRest])))
                     }
-                    _ => Ok(SyntaxReturn::Code(Box::from([Bytecode::Reference {
-                        symbol: *spur,
-                    }]))),
+                    _ => {
+                        Ok(SyntaxReturn::Code(Box::from([Bytecode::Reference {
+                            symbol: *spur,
+                            // enable searching through fallback iif we can find the name at compile time
+                            // to prevent unimported name conflicts finding the wrong value
+                            enable_fallback: self.is_bound_variable(spur),
+                        }])))
+                    }
                 }
             }
             ProgramData::Bool(b) => Ok(SyntaxReturn::Code(Box::from([Bytecode::PushBool {
@@ -1919,8 +1924,10 @@ impl<'gc> Compiler<'gc> {
                             .collect(),
                         // head_symbol is Some(spur) where spur is the symbol we want
                         ListHead::DefineLibrary | ListHead::Import => {
+                            let head_symbol = head_symbol.unwrap();
                             vec![Bytecode::Reference {
-                                symbol: head_symbol.unwrap(),
+                                symbol: head_symbol,
+                                enable_fallback: self.is_bound_variable(&head_symbol),
                             }]
                         }
                     };
@@ -2167,17 +2174,17 @@ impl<'gc> Compiler<'gc> {
                 if chunk
                     .code
                     .iter()
-                    .any(|c| matches!(c, Bytecode::Reference { symbol: sym } if sym == &symbol))
+                    .any(|c| matches!(c, Bytecode::Reference { symbol: sym, .. } if sym == &symbol))
                 {
                     // self-referential fix
                     let self_ref = Value::Undefined.into_ptr(mc);
                     let fallback = if let Some(f) = chunk.fallback {
                         let mut new_fallback = f.as_ref().clone();
-                        new_fallback.insert(Static(symbol), self_ref);
+                        new_fallback.insert(Static(symbol), (self_ref, 0));
                         new_fallback
                     } else {
                         let mut new_fallback = ImportFallbackMap::default();
-                        new_fallback.insert(Static(symbol), self_ref);
+                        new_fallback.insert(Static(symbol), (self_ref, 0));
                         new_fallback
                     };
                     let new_chunk = Chunk::with_fallback(
@@ -2249,6 +2256,7 @@ impl<'gc> Compiler<'gc> {
                                 .borrow_mut(mc)
                                 .define(mc, mapped_symbol, value, true)
                                 .map_err(|_| ImportError::FailedToDefine(mapped_symbol))?;
+                            self.define_variable(mapped_symbol);
                         }
                         ExportItem::Macro(syntax) => {
                             self.define_macro(mapped_symbol, syntax);
@@ -2304,6 +2312,7 @@ impl<'gc> Compiler<'gc> {
                                 .borrow_mut(mc)
                                 .define(mc, mapped_symbol, value, true)
                                 .map_err(|_| ImportError::FailedToDefine(mapped_symbol))?;
+                            self.define_variable(mapped_symbol);
                         }
                     }
                 } else if let Some(syntax) = modl.syntax(interner, symbol) {
@@ -2328,6 +2337,7 @@ impl<'gc> Compiler<'gc> {
                         .entry(library_name.clone())
                         .or_default()
                         .insert(Static(symbol), NativeItem::Value(value));
+                    self.define_variable(mapped_symbol);
                 } else {
                     Err(ImportError::NameNotFound {
                         name: Box::from(interner.resolve(&mapped_symbol)),
@@ -2633,7 +2643,7 @@ impl<'gc> Compiler<'gc> {
                                     if let Bytecode::Define { symbol } = c {
                                         s.insert(*symbol);
                                         Some(None)
-                                    } else if let Bytecode::Reference { symbol } = c {
+                                    } else if let Bytecode::Reference { symbol, .. } = c {
                                         if !s.contains(symbol) {
                                             Some(Some(*symbol))
                                         } else {
@@ -2721,7 +2731,11 @@ impl<'gc> Compiler<'gc> {
                         let mut map = ImportFallbackMap::default();
                         for dependant in dependants {
                             if let Ok(val) = global_env.borrow().get(dependant) {
-                                map.insert(Static(dependant), *val.get().borrow());
+                                let depth = global_env.borrow().depth(dependant).unwrap();
+                                map.insert(
+                                    Static(dependant),
+                                    (*val.get().borrow(), depth + self.environments.len()),
+                                );
                             }
                         }
 
@@ -2850,7 +2864,10 @@ impl<'gc> Compiler<'gc> {
                 if &Some(upvalue_index) == v {
                     *v = None;
                     return Some(vec![
-                        Bytecode::Reference { symbol: *name },
+                        Bytecode::Reference {
+                            symbol: *name,
+                            enable_fallback: true,
+                        },
                         Bytecode::SetUpvalue {
                             index: upvalue_index,
                         },
@@ -2922,7 +2939,10 @@ impl<'gc> Compiler<'gc> {
                 .flat_map(|(vn, upv)| {
                     if let Some(upv) = upv {
                         vec![
-                            Bytecode::Reference { symbol: *vn },
+                            Bytecode::Reference {
+                                symbol: *vn,
+                                enable_fallback: true,
+                            },
                             Bytecode::SetUpvalue { index: *upv },
                             Bytecode::Pop,
                         ]
@@ -2933,7 +2953,10 @@ impl<'gc> Compiler<'gc> {
                         .and_then(|pos| argument_scope.upvalues.borrow().get(&Some(pos)).copied())
                     {
                         vec![
-                            Bytecode::Reference { symbol: *vn },
+                            Bytecode::Reference {
+                                symbol: *vn,
+                                enable_fallback: true,
+                            },
                             Bytecode::SetUpvalue { index: up_index },
                             Bytecode::Pop,
                         ]
@@ -2943,7 +2966,10 @@ impl<'gc> Compiler<'gc> {
                         .and_then(|_| argument_scope.upvalues.borrow().get(&None).copied())
                     {
                         vec![
-                            Bytecode::Reference { symbol: *vn },
+                            Bytecode::Reference {
+                                symbol: *vn,
+                                enable_fallback: true,
+                            },
                             Bytecode::SetUpvalue { index: up_index },
                             Bytecode::Pop,
                         ]
@@ -3050,6 +3076,15 @@ impl<'gc> Compiler<'gc> {
                         .map(|index| Arg::Index { scope, index })
                 }
             })
+    }
+
+    /// Checks if a name is bound to *any* variable name
+    pub fn is_bound_variable(&self, symbol: &lasso::Spur) -> bool {
+        self.global_variables_defined.contains(symbol)
+            || self
+                .scopes
+                .last()
+                .is_some_and(|sc| sc.variables_defined.borrow().contains_key(symbol))
     }
 
     // if this fails, the variable is either undefined by the script,

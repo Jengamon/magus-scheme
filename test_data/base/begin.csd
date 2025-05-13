@@ -65,18 +65,21 @@ Chunk {
                         },
                         Reference {
                             symbol: Spur(10),
+                            enable_fallback: false,
                         },
                         PushConst {
                             index: 1,
                         },
                         Reference {
                             symbol: Spur(9),
+                            enable_fallback: false,
                         },
                         Call {
                             args: 2,
                         },
                         Reference {
                             symbol: Spur(10),
+                            enable_fallback: false,
                         },
                     ],
                     labels: {

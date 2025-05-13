@@ -25,21 +25,25 @@ Chunk {
     code: [
         Reference {
             symbol: Spur(4),
+            enable_fallback: false,
         },
         Reference {
             symbol: Spur(8),
+            enable_fallback: false,
         },
         PushConst {
             index: 0,
         },
         Reference {
             symbol: Spur(7),
+            enable_fallback: false,
         },
         Call {
             args: 2,
         },
         Reference {
             symbol: Spur(8),
+            enable_fallback: false,
         },
     ],
     labels: {

@@ -1,0 +1,18 @@
+error: `x` does not exist in environment
+
+Backtrace:
+ - (173, 182) test_data/fallback_testing.sct.scm <<code>>: (+ x (f))
+ - <<synthesized>> <<code>>
+---
+---
+; make sure fallback handing doesn't mean that scopes get messed up
+(define-library (fb)
+  (import (scheme base))
+  (export fb)
+  (begin
+    (define x 4)
+    (define (fb f) (+ x (f)))))
+(import (fb) (only (scheme base) define lambda))
+; the datum below would make this test succeed with the value `7`
+#;(define x 3)
+(fb (lambda () x))

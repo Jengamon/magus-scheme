@@ -45,7 +45,10 @@ pub enum Bytecode {
     ListToVector,
     /// Look up the symbol in the stack environment, and push the result to
     /// stack (if not found or not a symbol, errors)
-    Reference { symbol: lasso::Spur },
+    Reference {
+        symbol: lasso::Spur,
+        enable_fallback: bool,
+    },
     /// Pop the top value (must be a callable)
     /// Call the given lambda, making it a tail call if possible (there are
     /// no more instructions in the current context to execute)
@@ -163,7 +166,15 @@ impl fmt::Display for Bytecode {
             Bytecode::MakePair => write!(f, "PAIR"),
             Bytecode::MakeVector { length } => write!(f, "VECT {length}"),
             Bytecode::ListToVector => write!(f, "LTVC"),
-            Bytecode::Reference { symbol } => write!(f, "REFR {}", symbol.into_inner()),
+            Bytecode::Reference {
+                symbol,
+                enable_fallback,
+            } => write!(
+                f,
+                "{} {}",
+                if *enable_fallback { "RFFB" } else { "REFR" },
+                symbol.into_inner()
+            ),
             Bytecode::Call { args } => write!(f, "CALL {args}"),
             Bytecode::Splice => write!(f, "SPLI"),
             Bytecode::MakeHole { id } => write!(f, "HOLE {id}"),
@@ -250,7 +261,7 @@ pub struct Chunk<'gc> {
     pub(crate) fallback: ImportFallback<'gc>,
 }
 pub type ChunkPtr<'gc> = Gc<'gc, Chunk<'gc>>;
-pub type ImportFallbackMap<'gc> = HashMap<Static<lasso::Spur>, ValuePtr<'gc>>;
+pub type ImportFallbackMap<'gc> = HashMap<Static<lasso::Spur>, (ValuePtr<'gc>, usize)>;
 pub type ImportFallback<'gc> = Option<Gc<'gc, ImportFallbackMap<'gc>>>;
 
 impl<'gc> Chunk<'gc> {

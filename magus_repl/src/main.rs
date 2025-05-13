@@ -238,7 +238,7 @@ fn chunk_debug(interpreter: &mut Interpreter, chunk: &ChunkHandle) {
                 .flat_map(|l| l.chunk().code.iter().copied().collect::<Vec<_>>()),
         ) {
             match code {
-                Bytecode::Reference { symbol } if !shown.contains(&symbol) => {
+                Bytecode::Reference { symbol, .. } if !shown.contains(&symbol) => {
                     shown.insert(symbol);
                     println!("{} -> `{}`", symbol.into_inner(), interner.resolve(&symbol));
                 }

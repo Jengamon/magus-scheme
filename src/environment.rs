@@ -203,12 +203,32 @@ impl<'gc, V: Collect<'gc>> Environment<'gc, V> {
         }
     }
 
+    /// Get the value of a given symbol
     pub fn get(&self, name: impl Into<Symbol>) -> Result<GeneralBinding<'gc, V>, GetError> {
         self.get_internal(name, 0)
     }
 
+    /// Get the definition depth (0 - local, 1 - parent, 2 - parent's parent, etc.) of a given symbol
+    pub fn depth(&self, name: impl Into<Symbol>) -> Result<usize, GetError> {
+        self.depth_internal(name, 0)
+    }
+
     /// Maimum number of envs we can recurse into before we "hide" and say None
     const MAX_RECURSION: usize = 2048;
+
+    fn depth_internal(&self, name: impl Into<Symbol>, depth: usize) -> Result<usize, GetError> {
+        let name = name.into();
+        if self.inner.borrow().values.contains_key(&name) {
+            Ok(depth)
+        } else if let Some(parent) = self.parent {
+            if depth >= Self::MAX_RECURSION {
+                return Err(GetError::TooFar);
+            }
+            parent.borrow().depth_internal(name, depth + 1)
+        } else {
+            Err(GetError::NameNotFound(name))
+        }
+    }
 
     fn get_internal(
         &self,

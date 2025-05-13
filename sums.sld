@@ -1,0 +1,13 @@
+(define-library (sums)
+  (import (scheme base))
+  (export riemann range-1 range sum)
+  (begin
+    (define (riemann x) (/ (* x (+ x 1)) 2))
+    (define (range-1 x)
+      (define (range-1-iter x lst)
+        (if (> x 1)
+            (range-1-iter (- x 1) (cons x lst))
+            (cons 1 lst)))
+      (range-1-iter x '()))
+    (define (range x) (cons 0 (range-1 x)))
+    (define (sum x) (apply + (range-1 x)))))

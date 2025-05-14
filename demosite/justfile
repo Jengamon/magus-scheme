@@ -1,3 +1,6 @@
+dev: pkg
+    deno task dev
+
 pkg: clean-pkg
     wasm-pack build --target deno ../magus_web --out-dir $(pwd)/pkg
 

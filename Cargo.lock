@@ -1099,6 +1099,7 @@ name = "magus_web"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "js-sys",
  "magus",
  "wasm-bindgen",
 ]

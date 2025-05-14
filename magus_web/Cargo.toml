@@ -9,5 +9,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 anyhow.workspace = true
+js-sys = "0.3.77"
 magus = { path = ".." }
 wasm-bindgen = "0.2"

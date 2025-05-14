@@ -1456,8 +1456,8 @@ impl<'gc> Thread<'gc> {
                                         } >= code.len(),
                                         !wind_frame,
                                     ) {
-                                        make_error!(SchemeErrorType::LambdaException(err));
                                         advance_to_next_inst!(undo self.frames.last_mut());
+                                        make_error!(SchemeErrorType::LambdaException(err));
                                         continue;
                                     };
                                 }

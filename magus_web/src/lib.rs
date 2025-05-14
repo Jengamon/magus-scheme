@@ -1,5 +1,5 @@
 //! Bindings to use magus on the web!
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use magus::ParseProgram;
 use wasm_bindgen::prelude::*;
@@ -84,9 +84,10 @@ impl MagusInterpreter {
         }
     }
 
+    /// Enable `(scheme base)`
     pub fn enable_base(&mut self) -> Result<(), String> {
         if self.registry.base.is_some() {
-            // don't enable again
+            // don't reenable
             return Ok(());
         }
 
@@ -99,6 +100,40 @@ impl MagusInterpreter {
             .register_native_module(&mut self.world.borrow_mut(), &base, None)
             .map_err(|e| e.to_string())?;
         self.registry.base = Some(base);
+        Ok(())
+    }
+
+    /// Enable `(scheme cxr)`
+    pub fn enable_cxr(&mut self) -> Result<(), String> {
+        if self.registry.cxr.is_some() {
+            // don't reenable
+            return Ok(());
+        }
+
+        let cxr = magus::stdlib::cxr::Cxr;
+
+        self.interpreter
+            .borrow_mut()
+            .register_native_module(&mut self.world.borrow_mut(), &cxr, None)
+            .map_err(|e| e.to_string())?;
+        self.registry.cxr = Some(cxr);
+        Ok(())
+    }
+
+    /// Enable `(scheme inexact)`
+    pub fn enable_inexact(&mut self) -> Result<(), String> {
+        if self.registry.inexact.is_some() {
+            // don't reenable
+            return Ok(());
+        }
+
+        let inexact = magus::stdlib::inexact::Inexact;
+
+        self.interpreter
+            .borrow_mut()
+            .register_native_module(&mut self.world.borrow_mut(), &inexact, None)
+            .map_err(|e| e.to_string())?;
+        self.registry.inexact = Some(inexact);
         Ok(())
     }
 
@@ -138,39 +173,117 @@ pub struct MagusThread {
     current_source: Option<(magus::lasso::Spur, Rc<str>)>,
 }
 
-fn magus_to_js<'gc>(
-    ptr: magus::ValuePtr<'gc>,
+struct MagusToJs<'gc> {
+    ptr_lib: HashMap<usize, JsValue>,
     null_ptr: magus::ValuePtr<'gc>,
-    resolver: &magus::lasso::Rodeo,
-) -> JsValue {
-    match *ptr.borrow() {
-        magus::Value::Void => JsValue::null(),
-        magus::Value::String(s) => JsValue::from_str(s.borrow().as_str()),
-        magus::Value::Symbol(s) => JsValue::from_str(resolver.resolve(&s.0)),
-        magus::Value::Number(n) => JsValue::from_f64(n.to_inexact()),
-        magus::Value::Inexact(f) => JsValue::from_f64(f),
-        magus::Value::Bool(b) => JsValue::from_bool(b),
-        magus::Value::Cons(c) => {
-            if c.is_list(ptr, null_ptr) {
-                let values = c
-                    .list_values(ptr, null_ptr)
-                    .into_iter()
-                    .map(|v| magus_to_js(v, null_ptr, resolver))
-                    .collect::<Vec<_>>();
-                values.into()
-            } else {
-                let car = c
-                    .car
-                    .map(|v| magus_to_js(v, null_ptr, resolver))
-                    .unwrap_or(JsValue::null());
-                let cdr = c
-                    .cdr
-                    .map(|v| magus_to_js(v, null_ptr, resolver))
-                    .unwrap_or(JsValue::null());
-                vec![car, cdr].into()
-            }
+}
+
+impl<'gc> MagusToJs<'gc> {
+    fn new(null_ptr: magus::ValuePtr<'gc>) -> Self {
+        Self {
+            ptr_lib: HashMap::new(),
+            null_ptr,
         }
-        _ => todo!(),
+    }
+
+    fn ptr_to_usize(ptr: magus::ValuePtr<'gc>) -> usize {
+        (&raw const *ptr.borrow()).addr()
+    }
+
+    fn memo(&mut self, ptr: magus::ValuePtr<'gc>, val: JsValue) {
+        self.ptr_lib.insert(Self::ptr_to_usize(ptr), val);
+    }
+
+    fn _produce(&mut self, ptr: magus::ValuePtr<'gc>, resolver: &magus::lasso::Rodeo) -> JsValue {
+        match *ptr.borrow() {
+            _ if magus::gc_arena::Gc::ptr_eq(ptr, self.null_ptr) => JsValue::null(),
+            magus::Value::Void => JsValue::null(),
+            magus::Value::String(s) => {
+                let obj = js_sys::Object::new();
+                js_sys::Reflect::set(
+                    &obj,
+                    &"symbol".into(),
+                    &JsValue::from_str(s.borrow().as_str()),
+                )
+                .unwrap();
+                obj.into()
+            }
+            magus::Value::Symbol(s) => JsValue::from_str(resolver.resolve(&s.0)),
+            magus::Value::Number(n) => JsValue::from_f64(n.to_inexact()),
+            magus::Value::Inexact(f) => JsValue::from_f64(f),
+            magus::Value::Bool(b) => JsValue::from_bool(b),
+            magus::Value::Vector(v) => {
+                let arr = js_sys::Array::new_with_length(v.vec.len() as u32);
+                for (i, val) in v.vec.iter().copied().enumerate() {
+                    let value = if magus::gc_arena::Gc::ptr_eq(val, ptr) {
+                        arr.clone().into()
+                    } else {
+                        self._produce(val, resolver)
+                    };
+                    self.memo(val, value.clone());
+                    arr.set(i as u32, value);
+                }
+                arr.into()
+            }
+            magus::Value::Cons(c) => {
+                // These can be self-referential!
+                if c.is_list(ptr, self.null_ptr) {
+                    let values = c
+                        .list_values(ptr, self.null_ptr)
+                        .into_iter()
+                        .collect::<Vec<_>>();
+                    let arr = js_sys::Array::new_with_length(values.len() as u32);
+                    for (i, val) in values.into_iter().enumerate() {
+                        let value = if magus::gc_arena::Gc::ptr_eq(val, ptr) {
+                            arr.clone().into()
+                        } else {
+                            self._produce(val, resolver)
+                        };
+                        self.memo(val, value.clone());
+                        arr.set(i as u32, value);
+                    }
+                    arr.into()
+                } else {
+                    let arr = js_sys::Array::new_with_length(2);
+                    let car = c
+                        .car
+                        .map(|v| {
+                            if magus::gc_arena::Gc::ptr_eq(v, ptr) {
+                                arr.clone().into()
+                            } else {
+                                self._produce(v, resolver)
+                            }
+                        })
+                        .unwrap_or(JsValue::null());
+                    if let Some(ptr) = c.car {
+                        self.memo(ptr, car.clone());
+                    }
+                    arr.set(0, car);
+                    let cdr = c
+                        .cdr
+                        .map(|v| {
+                            if magus::gc_arena::Gc::ptr_eq(v, ptr) {
+                                arr.clone().into()
+                            } else {
+                                self._produce(v, resolver)
+                            }
+                        })
+                        .unwrap_or(JsValue::null());
+                    if let Some(ptr) = c.cdr {
+                        self.memo(ptr, cdr.clone());
+                    }
+                    arr.set(1, cdr);
+                    arr.into()
+                }
+            }
+            _ => todo!(),
+        }
+    }
+
+    fn produce(&mut self, ptr: magus::ValuePtr<'gc>, resolver: &magus::lasso::Rodeo) -> JsValue {
+        let value = self._produce(ptr, resolver);
+        self.memo(ptr, value.clone());
+        value
     }
 }
 
@@ -222,6 +335,7 @@ impl MagusThread {
             .get_or_intern(filename);
 
         Ok(MagusChunk {
+            interpreter: Rc::clone(&self.interpreter),
             thread: self.thread.clone(),
             chunk,
             source: Rc::from(source.as_str()),
@@ -244,14 +358,15 @@ impl MagusThread {
                 match thread.borrow().result() {
                     Some(Ok(res)) => {
                         let results = res.collect::<Vec<_>>();
+                        let mut converter = MagusToJs::new(arena.null_ptr());
                         Ok(if results.is_empty() {
                             JsValue::null()
                         } else if results.len() == 1 {
-                            magus_to_js(results[0], arena.null_ptr(), interner)
+                            converter.produce(results[0], interner)
                         } else {
                             results
                                 .into_iter()
-                                .map(|v| magus_to_js(v, arena.null_ptr(), interner))
+                                .map(|v| converter.produce(v, interner))
                                 .collect::<Vec<_>>()
                                 .into()
                         })
@@ -321,10 +436,22 @@ impl MagusThread {
 
 #[wasm_bindgen]
 pub struct MagusChunk {
+    interpreter: Rc<RefCell<magus::Interpreter>>,
     thread: magus::ThreadHandle,
     chunk: magus::ChunkHandle,
     source_filename: magus::lasso::Spur,
     source: Rc<str>,
+}
+
+#[wasm_bindgen]
+impl MagusChunk {
+    /// Dump mmemonics for instructions of this chunk
+    pub fn instructions(&self) -> Vec<String> {
+        self.interpreter.borrow_mut().try_enter(|_, arena, _| {
+            let chunk = arena.chunk(&self.chunk);
+            chunk.code.iter().map(ToString::to_string).collect()
+        })
+    }
 }
 
 #[wasm_bindgen]

@@ -2,6 +2,7 @@ use fxhash::FxHashSet;
 
 use crate::{
     LibraryName, Syntax, SyntaxContext, SyntaxReturn,
+    bytecode::Bytecode,
     compiler::{
         CompileError, ImportSet, LibraryDeclaration, ListHead, ParseProgram, ProgramData,
         ProgramPtr,
@@ -123,6 +124,10 @@ fn include_files<'gc>(
         for program in programs {
             included_source.extend(compiler.compile_code(ctx, program)?.into_bytecode())
         }
+    }
+
+    if included_source.is_empty() {
+        included_source.push(Bytecode::PushVoid);
     }
 
     Ok(SyntaxReturn::Code(included_source.into_boxed_slice()))

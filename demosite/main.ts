@@ -8,7 +8,7 @@ const thread = interp.new_thread();
 const fuel = new MagusFuel(1_000);
 const chunk = thread.compile(
   "web-input.scm",
-  "(import (scheme base)) (values (features) (cons '() 1) #0=#(1 #0# 3 ))",
+  "(import (scheme base)) (values (features) (cons '() 1) (string #\\x1face) #0=#(1 #0# 3 ))",
   false,
   10_000,
 );

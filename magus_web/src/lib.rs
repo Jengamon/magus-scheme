@@ -206,16 +206,7 @@ impl<'gc> MagusToJs<'gc> {
         match *ptr.borrow() {
             _ if magus::gc_arena::Gc::ptr_eq(ptr, self.null_ptr) => JsValue::null(),
             magus::Value::Void => JsValue::null(),
-            magus::Value::String(s) => {
-                let obj = js_sys::Object::new();
-                js_sys::Reflect::set(
-                    &obj,
-                    &"symbol".into(),
-                    &JsValue::from_str(s.borrow().as_str()),
-                )
-                .unwrap();
-                obj.into()
-            }
+            magus::Value::String(s) => JsValue::from_str(s.borrow().as_str()),
             magus::Value::Symbol(s) => JsValue::from_str(resolver.resolve(&s.0)),
             magus::Value::Number(n) => JsValue::from_f64(n.to_inexact()),
             magus::Value::Inexact(f) => JsValue::from_f64(f),

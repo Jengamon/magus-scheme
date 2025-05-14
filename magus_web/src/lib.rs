@@ -294,7 +294,11 @@ impl<'gc> MagusToJs<'gc> {
 
     fn wrap_value(&self, ptr: magus::ValuePtr<'gc>, value: JsValue) -> JsValue {
         let vt = ptr.borrow().value_type();
-        if vt.unit_type() || magus::gc_arena::Gc::ptr_eq(ptr, self.null_ptr) {
+        if vt.unit_type() {
+            // just output the name as a string
+            vt.to_string().into()
+        } else if magus::gc_arena::Gc::ptr_eq(ptr, self.null_ptr) {
+            // this will be Js "null"
             value
         } else {
             let obj = js_sys::Object::new();

@@ -213,7 +213,20 @@ impl<'gc> MagusToJs<'gc> {
 
         match *ptr.borrow() {
             _ if magus::gc_arena::Gc::ptr_eq(ptr, self.null_ptr) => JsValue::null(),
+            magus::Value::Undefined => JsValue::undefined(),
             magus::Value::Void => JsValue::null(),
+            magus::Value::Values(v) => {
+                let arr = js_sys::Array::new_with_length(v.len() as u32);
+                for (i, val) in v.iter().copied().enumerate() {
+                    let value = if magus::gc_arena::Gc::ptr_eq(val, ptr) {
+                        self.wrap_value(ptr, arr.clone().into())
+                    } else {
+                        self.produce(val, resolver)
+                    };
+                    arr.set(i as u32, value);
+                }
+                arr.into()
+            }
             magus::Value::String(s) => JsValue::from_str(s.borrow().as_str()),
             magus::Value::Symbol(s) => JsValue::from_str(resolver.resolve(&s.0)),
             magus::Value::Number(n) => JsValue::from_f64(n.to_inexact()),

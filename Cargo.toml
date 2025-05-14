@@ -1,11 +1,14 @@
 [workspace]
 resolver = "2"
-members = [".", "datatest_parse", "magus_format", "magus_repl", "demosite"]
+members = [".", "datatest_parse", "magus_format", "magus_repl", "magus_web"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
+
+[workspace.dependencies]
+anyhow = "1.0.93"
 
 [package]
 name = "magus"
@@ -23,7 +26,7 @@ name = "library_name"
 harness = false
 
 [dependencies]
-anyhow = "1.0.91"
+anyhow.workspace = true
 arbitrary = { version = "1", features = ["derive"] }
 either = "1.14.0"
 fxhash = "0.2.1"
@@ -49,6 +52,3 @@ datatest_parse = { path = "datatest_parse" }
 divan = "0.1.17"
 rstest = "0.24.0"
 similar = "2.7.0"
-
-[patch.crates-io]
-leptos-use = { git = "https://github.com/DerKnerd/leptos-use.git" }

@@ -45,7 +45,7 @@ fn main() -> anyhow::Result<()> {
     )?;
     let mut fuel = magus::Fuel::with(1_000_000);
     interpreter.run(&thread, |ctx, arena, _| {
-        let chunk = arena.get_chunk(&chunk).expect("freed chunk");
+        let chunk = arena.chunk(&chunk);
         ctx.thread.borrow_mut(&ctx).include(&ctx, chunk, false);
     });
     // Run thread until out-of-fuel or finished

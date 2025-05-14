@@ -26,8 +26,8 @@ pub use compiler::{
 };
 pub use general_parser::{CompoundTermKind, TokenKind, gast::*, general_parse};
 pub use interpreter::{
-    ChunkHandle, CompilerHandle, Includer, Interpreter, NullIncluder, ThreadHandle, ValueHandle,
-    ValuePointers, thread::ThreadPtr,
+    ChunkHandle, CompilerHandle, Includer, Interpreter, NullIncluder, Registerable, ThreadHandle,
+    ValueHandle, ValuePointers, thread::ThreadPtr,
 };
 pub use num::{ExactReal, SchemeNumber};
 pub use rowan::TextRange;

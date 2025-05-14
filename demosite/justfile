@@ -1,2 +1,5 @@
-dev:
-    trunk serve
+pkg: clean-pkg
+    wasm-pack build --target deno ../magus_web --out-dir $(pwd)/pkg
+
+clean-pkg:
+    rm -Rf pkg

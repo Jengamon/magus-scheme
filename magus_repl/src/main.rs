@@ -212,9 +212,7 @@ fn compile_to_chunk(
 
 fn chunk_debug(interpreter: &mut Interpreter, chunk: &ChunkHandle) {
     interpreter.enter(|_mc, arena, interner| {
-        let Some(chunk) = arena.get_chunk(chunk) else {
-            unreachable!()
-        };
+        let chunk = arena.chunk(chunk);
         // TODO Make an actual debugger view?
         println!("==CONSTANTS TABLE==");
         for (idx, constant) in chunk.constants.iter().enumerate() {
@@ -336,9 +334,7 @@ fn execute(
             interpreter.run(thread, |ctx, arena, interner| {
                 let thread = ctx.thread;
                 {
-                    let Some(chunk) = arena.get_chunk(&chunk) else {
-                        unreachable!()
-                    };
+                    let chunk = arena.chunk(&chunk);
                     let mut thread = thread.borrow_mut(&ctx);
                     thread.include(ctx.mc, chunk, true);
                     // TODO Make an actual way to do this properly, and not so shenangian-y

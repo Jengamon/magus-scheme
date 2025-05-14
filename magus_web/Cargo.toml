@@ -1,0 +1,13 @@
+[package]
+name = "magus_web"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyhow.workspace = true
+magus = { path = ".." }
+wasm-bindgen = "0.2"

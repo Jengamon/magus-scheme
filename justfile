@@ -35,10 +35,10 @@ arbtest *FLAGS:
     cargo nextest r -E "test(arbtest)" {{FLAGS}}
 
 build-wasm: locale-data
-    ICU4X_DATA_DIR=$(pwd)/locale_data cargo build --target wasm32-unknown-unknown -p magus
+    ICU4X_DATA_DIR=$(pwd)/locale_data cargo build --target wasm32-unknown-unknown -p magus_web
 
 build-wasm-ci:
-    cargo build --target wasm32-unknown-unknown -p magus
+    cargo build --target wasm32-unknown-unknown -p magus_web
 
 doc:
     cargo doc --document-private-items --no-deps --open

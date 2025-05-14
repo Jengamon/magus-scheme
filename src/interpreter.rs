@@ -102,8 +102,12 @@ impl<'gc> Arena<'gc> {
     // TODO These functions should return the thing, not an Option
     // a failure to find means that somehow a handle outlived the existence of the thing,
     // and thats not very nice
-    pub fn get_chunk(&self, handle: &ChunkHandle) -> Option<bytecode::ChunkPtr<'gc>> {
-        self.stash.chunks.get(handle.key).copied()
+    pub fn chunk(&self, handle: &ChunkHandle) -> bytecode::ChunkPtr<'gc> {
+        self.stash
+            .chunks
+            .get(handle.key)
+            .copied()
+            .expect("handle exists to freed chunk")
     }
 
     pub fn stash_value(&mut self, value: ValuePtr<'gc>) -> ValueHandle {
@@ -133,6 +137,11 @@ impl<'gc> Arena<'gc> {
             .get(handle.key)
             .copied()
             .expect("handle exists to freed thread")
+    }
+
+    /// pls dont mutate this i beg
+    pub fn null_ptr(&self) -> ValuePtr<'gc> {
+        self.null_value
     }
 }
 

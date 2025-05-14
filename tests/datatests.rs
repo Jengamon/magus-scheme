@@ -108,8 +108,7 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
     )?;
     let mut fuel = Fuel::with(1_000_000);
     interp.run(&thread, |ctx, arena, _| {
-        // TODO no Option
-        let chunk = arena.get_chunk(&chunk).expect("freed chunk");
+        let chunk = arena.chunk(&chunk);
         ctx.thread.borrow_mut(&ctx).include(&ctx, chunk, false);
     });
     // Run thread until out-of-fuel or finished

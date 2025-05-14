@@ -52,6 +52,35 @@ pub enum ValueType {
     Error,
 }
 
+impl fmt::Display for ValueType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Values => write!(f, "values"),
+            Self::Undefined => write!(f, "undefined"),
+            Self::Void => write!(f, "void"),
+            Self::Number => write!(f, "number"),
+            Self::Inexact => write!(f, "inexact"),
+            Self::String => write!(f, "string"),
+            Self::Symbol => write!(f, "symbol"),
+            Self::Bool => write!(f, "bool"),
+            Self::Char => write!(f, "char"),
+            Self::Vector => write!(f, "vector"),
+            Self::Bytevector => write!(f, "bytevector"),
+            Self::Record => write!(f, "record"),
+            Self::InputPort => write!(f, "inputport"),
+            Self::OutputPort => write!(f, "outputport"),
+            Self::Cons => write!(f, "cons"),
+            Self::Environment => write!(f, "environment"),
+            Self::UserStruct => write!(f, "userstruct"),
+            Self::Lambda => write!(f, "lambda"),
+            Self::Continuation => write!(f, "continuation"),
+            Self::Promise => write!(f, "promise"),
+            Self::Parameter => write!(f, "parameter"),
+            Self::Error => write!(f, "error"),
+        }
+    }
+}
+
 impl ValueType {
     /// Types that can contain ValuePtr, and thus can be self-recursive data structures
     pub fn can_recurse(self) -> bool {
@@ -59,6 +88,11 @@ impl ValueType {
             self,
             Self::Vector | Self::Record | Self::Cons | Self::Parameter | Self::Promise
         )
+    }
+
+    /// Types that do not contain a value
+    pub fn unit_type(self) -> bool {
+        matches!(self, Self::Void | Self::Undefined)
     }
 }
 

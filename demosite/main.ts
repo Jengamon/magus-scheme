@@ -19,7 +19,7 @@ thread.load(chunk);
 while (thread.run(fuel)) {
   fuel.refill(1000, 1000);
 }
-console.log(thread.result());
+console.log(thread.result(true));
 console.log(interp.symbol_dump());
 
 const p = document.createElement("p");

@@ -181,16 +181,20 @@ pub struct MagusThread {
     current_source: Option<(magus::lasso::Spur, Rc<str>)>,
 }
 
+// TODO Add a typestruct for Verbose output `{"type": output}` and Simple output (i.e. strings and symbols are merged)
+// TODO Or maybe just a flag?
 struct MagusToJs<'gc> {
     ptr_lib: HashMap<usize, JsValue>,
     null_ptr: magus::ValuePtr<'gc>,
+    verbose: bool,
 }
 
 impl<'gc> MagusToJs<'gc> {
-    fn new(null_ptr: magus::ValuePtr<'gc>) -> Self {
+    fn new(null_ptr: magus::ValuePtr<'gc>, verbose: bool) -> Self {
         Self {
             ptr_lib: HashMap::new(),
             null_ptr,
+            verbose,
         }
     }
 
@@ -203,6 +207,10 @@ impl<'gc> MagusToJs<'gc> {
     }
 
     fn _produce(&mut self, ptr: magus::ValuePtr<'gc>, resolver: &magus::lasso::Rodeo) -> JsValue {
+        if let Some(val) = self.ptr_lib.get(&Self::ptr_to_usize(ptr)) {
+            return val.clone();
+        }
+
         match *ptr.borrow() {
             _ if magus::gc_arena::Gc::ptr_eq(ptr, self.null_ptr) => JsValue::null(),
             magus::Value::Void => JsValue::null(),
@@ -215,11 +223,10 @@ impl<'gc> MagusToJs<'gc> {
                 let arr = js_sys::Array::new_with_length(v.vec.len() as u32);
                 for (i, val) in v.vec.iter().copied().enumerate() {
                     let value = if magus::gc_arena::Gc::ptr_eq(val, ptr) {
-                        arr.clone().into()
+                        self.wrap_value(ptr, arr.clone().into())
                     } else {
-                        self._produce(val, resolver)
+                        self.produce(val, resolver)
                     };
-                    self.memo(val, value.clone());
                     arr.set(i as u32, value);
                 }
                 arr.into()
@@ -234,11 +241,10 @@ impl<'gc> MagusToJs<'gc> {
                     let arr = js_sys::Array::new_with_length(values.len() as u32);
                     for (i, val) in values.into_iter().enumerate() {
                         let value = if magus::gc_arena::Gc::ptr_eq(val, ptr) {
-                            arr.clone().into()
+                            self.wrap_value(ptr, arr.clone().into())
                         } else {
-                            self._produce(val, resolver)
+                            self.produce(val, resolver)
                         };
-                        self.memo(val, value.clone());
                         arr.set(i as u32, value);
                     }
                     arr.into()
@@ -248,29 +254,23 @@ impl<'gc> MagusToJs<'gc> {
                         .car
                         .map(|v| {
                             if magus::gc_arena::Gc::ptr_eq(v, ptr) {
-                                arr.clone().into()
+                                self.wrap_value(ptr, arr.clone().into())
                             } else {
-                                self._produce(v, resolver)
+                                self.produce(v, resolver)
                             }
                         })
                         .unwrap_or(JsValue::null());
-                    if let Some(ptr) = c.car {
-                        self.memo(ptr, car.clone());
-                    }
                     arr.set(0, car);
                     let cdr = c
                         .cdr
                         .map(|v| {
                             if magus::gc_arena::Gc::ptr_eq(v, ptr) {
-                                arr.clone().into()
+                                self.wrap_value(ptr, arr.clone().into())
                             } else {
-                                self._produce(v, resolver)
+                                self.produce(v, resolver)
                             }
                         })
                         .unwrap_or(JsValue::null());
-                    if let Some(ptr) = c.cdr {
-                        self.memo(ptr, cdr.clone());
-                    }
                     arr.set(1, cdr);
                     arr.into()
                 }
@@ -279,8 +279,31 @@ impl<'gc> MagusToJs<'gc> {
         }
     }
 
+    fn wrap_value(&self, ptr: magus::ValuePtr<'gc>, value: JsValue) -> JsValue {
+        let vt = ptr.borrow().value_type();
+        if vt.unit_type() || magus::gc_arena::Gc::ptr_eq(ptr, self.null_ptr) {
+            value
+        } else {
+            let obj = js_sys::Object::new();
+            let mut vtype = vt.to_string();
+            // override for lists
+            if let magus::Value::Cons(c) = *ptr.borrow() {
+                if c.is_list(ptr, self.null_ptr) {
+                    vtype = "list".to_string();
+                }
+            }
+            js_sys::Reflect::set(&obj, &vtype.into(), &value).unwrap();
+            obj.into()
+        }
+    }
+
     fn produce(&mut self, ptr: magus::ValuePtr<'gc>, resolver: &magus::lasso::Rodeo) -> JsValue {
         let value = self._produce(ptr, resolver);
+        let value = if self.verbose {
+            self.wrap_value(ptr, value)
+        } else {
+            value
+        };
         self.memo(ptr, value.clone());
         value
     }
@@ -349,7 +372,7 @@ impl MagusThread {
         })
     }
 
-    pub fn result(&self) -> Result<JsValue, String> {
+    pub fn result(&self, verbose: Option<bool>) -> Result<JsValue, String> {
         self.interpreter
             .borrow_mut()
             .try_enter(|_mc, arena, interner| {
@@ -357,7 +380,8 @@ impl MagusThread {
                 match thread.borrow().result() {
                     Some(Ok(res)) => {
                         let results = res.collect::<Vec<_>>();
-                        let mut converter = MagusToJs::new(arena.null_ptr());
+                        let mut converter =
+                            MagusToJs::new(arena.null_ptr(), verbose.unwrap_or_default());
                         Ok(if results.is_empty() {
                             JsValue::null()
                         } else if results.len() == 1 {

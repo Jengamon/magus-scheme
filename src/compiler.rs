@@ -560,6 +560,10 @@ pub struct World {
 pub struct LibraryNameExists;
 
 impl World {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn insert(
         &mut self,
         name: LibraryName,

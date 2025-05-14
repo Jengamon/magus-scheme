@@ -6,7 +6,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut interpreter = magus::Interpreter::default();
     let mut world = magus::World::default();
-    let includer = magus::interpreter::NullIncluder;
+    let includer = magus::NullIncluder;
     let compiler = interpreter.new_compiler();
     let thread = interpreter.new_thread();
     interpreter.register_module(

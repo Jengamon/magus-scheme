@@ -261,6 +261,11 @@ impl Default for Interpreter {
 }
 
 impl Interpreter {
+    // convenience
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Checks for any threads where the thread count is 0, and drops those pointers from the threadmap,
     /// eventually freeing the thread when the next collection occurs.
     fn check_for_dropped(&mut self) {
@@ -400,13 +405,13 @@ impl Interpreter {
         })
     }
 
-    /// Register a module to a compiler under a certain name
-    pub fn register_module<'a, R: Registerable>(
+    /// Register a local module to a compiler under a certain name
+    pub fn register_local_module<'a, R: Registerable>(
         &'a mut self,
         thread: &ThreadHandle,
         handle: &CompilerHandle,
-        world: &mut World,
-        module: R,
+        world: &World,
+        module: &R,
         rename: Option<LibraryName>,
         library_def_fn: impl for<'gc> FnOnce(
             ThreadPtr<'gc>,
@@ -414,16 +419,6 @@ impl Interpreter {
         ) -> LibraryDefinitionContext<'a, 'gc>,
     ) -> anyhow::Result<()> {
         let library_name = rename.unwrap_or_else(|| R::name(&mut self.interner));
-        let maybe_native = module.native();
-        if let Some(native) = maybe_native {
-            // There is a native library component
-            world
-                .insert_arc(library_name.clone(), native)
-                .context(format!(
-                    "failed to register module {}",
-                    std::any::type_name::<R>()
-                ))?;
-        }
 
         if let Some(source_data) = module.scheme() {
             let mut dependencies = module.scheme_dependency(&mut self.interner);
@@ -501,6 +496,47 @@ impl Interpreter {
         }
 
         Ok(())
+    }
+
+    /// Register a module to a compiler under a certain name
+    pub fn register_native_module<R: Registerable>(
+        &mut self,
+        world: &mut World,
+        module: &R,
+        rename: Option<LibraryName>,
+    ) -> anyhow::Result<()> {
+        let library_name = rename.unwrap_or_else(|| R::name(&mut self.interner));
+        let maybe_native = module.native();
+        if let Some(native) = maybe_native {
+            // There is a native library component
+            world
+                .insert_arc(library_name.clone(), native)
+                .context(format!(
+                    "failed to register module {}",
+                    std::any::type_name::<R>()
+                ))?;
+        }
+
+        Ok(())
+    }
+
+    /// Register a module to a compiler under a certain name
+    pub fn register_module<'a, R: Registerable>(
+        &'a mut self,
+        thread: &ThreadHandle,
+        handle: &CompilerHandle,
+        world: &mut World,
+        // ... this takes ownership for *convenience*. you can directly use register_*_module methods for
+        // by-reference
+        module: R,
+        rename: Option<LibraryName>,
+        library_def_fn: impl for<'gc> FnOnce(
+            ThreadPtr<'gc>,
+            ValuePointers<'gc>,
+        ) -> LibraryDefinitionContext<'a, 'gc>,
+    ) -> anyhow::Result<()> {
+        self.register_native_module(world, &module, rename.clone())?;
+        self.register_local_module(thread, handle, world, &module, rename, library_def_fn)
     }
 
     pub fn new_thread(&mut self) -> ThreadHandle {

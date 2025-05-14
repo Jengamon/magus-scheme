@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = [".", "datatest_parse", "magus_format", "magus_repl"]
+members = [".", "datatest_parse", "magus_format", "magus_repl", "demosite"]
 
 [workspace.package]
 version = "0.1.0"
@@ -49,3 +49,6 @@ datatest_parse = { path = "datatest_parse" }
 divan = "0.1.17"
 rstest = "0.24.0"
 similar = "2.7.0"
+
+[patch.crates-io]
+leptos-use = { git = "https://github.com/DerKnerd/leptos-use.git" }

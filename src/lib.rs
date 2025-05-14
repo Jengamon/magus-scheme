@@ -25,7 +25,10 @@ pub use compiler::{
     Syntax, SyntaxContext, SyntaxReturn, World,
 };
 pub use general_parser::{CompoundTermKind, TokenKind, gast::*, general_parse};
-pub use interpreter::{ChunkHandle, CompilerHandle, Interpreter, ThreadHandle};
+pub use interpreter::{
+    ChunkHandle, CompilerHandle, Includer, Interpreter, NullIncluder, ThreadHandle, ValueHandle,
+    ValuePointers, thread::ThreadPtr,
+};
 pub use num::{ExactReal, SchemeNumber};
 pub use rowan::TextRange;
 pub use runtime::{

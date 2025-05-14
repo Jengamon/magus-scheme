@@ -863,8 +863,8 @@ pub enum CompileError {
     EmptyList(Option<SourceData>),
     #[error("a dotted list was encountered in code")]
     DottedList(Option<SourceData>),
-    #[error("a macro encountered an error: {0}")]
-    Macro(Arc<anyhow::Error>, Option<SourceData>),
+    #[error("`{0}` encountered an error: {1}")]
+    Macro(Box<str>, Arc<anyhow::Error>, Option<SourceData>),
     #[error("no library name in library declaration")]
     NoLibraryName(Option<SourceData>),
     #[error(transparent)]
@@ -1912,7 +1912,13 @@ impl<'gc> Compiler<'gc> {
                     *self.rec_counter.borrow_mut(ctx) += 1;
                     let ret = mcr
                         .evaluate(ctx, self, self._current_env(), body)
-                        .map_err(|e| CompileError::Macro(Arc::new(e), program.source));
+                        .map_err(|e| {
+                            CompileError::Macro(
+                                Box::from(ctx.ecc.interner.resolve(&head_symbol.unwrap())),
+                                Arc::new(e),
+                                program.source,
+                            )
+                        });
                     *self.rec_counter.borrow_mut(ctx) -= 1;
                     ret
                 } else {

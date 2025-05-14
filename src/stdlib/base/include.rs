@@ -1,4 +1,3 @@
-use anyhow::Context;
 use fxhash::FxHashSet;
 
 use crate::{
@@ -122,12 +121,7 @@ fn include_files<'gc>(
         }
 
         for program in programs {
-            included_source.extend(
-                compiler
-                    .compile_code(ctx, program)
-                    .with_context(|| format!("while including {filename}"))?
-                    .into_bytecode(),
-            )
+            included_source.extend(compiler.compile_code(ctx, program)?.into_bytecode())
         }
     }
 

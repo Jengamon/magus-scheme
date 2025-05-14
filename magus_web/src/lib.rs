@@ -137,6 +137,14 @@ impl MagusInterpreter {
         Ok(())
     }
 
+    pub fn symbol_dump(&self) -> js_sys::Map {
+        let map = js_sys::Map::new();
+        for (k, v) in self.interpreter.borrow().interner().strings().enumerate() {
+            map.set(&(k + 1).into(), &v.into());
+        }
+        map
+    }
+
     pub fn new_thread(&mut self) -> Result<MagusThread, String> {
         let compiler = self.interpreter.borrow_mut().new_compiler();
         let thread = self.interpreter.borrow_mut().new_thread();

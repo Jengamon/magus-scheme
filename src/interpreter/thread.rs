@@ -1097,7 +1097,12 @@ impl<'gc> Thread<'gc> {
 
             // handle execution
             match &mut frame.execution {
-                Execution::Bytecode { chunk, pc, .. } => {
+                Execution::Bytecode {
+                    chunk,
+                    pc,
+                    fallback,
+                    ..
+                } => {
                     // If error is set, kill this frame (bytecode shouldn't run if actively erroring)
                     if self.error.is_some() {
                         if let Some(after) = self.handle_frame_end(&ctx, true) {
@@ -1686,7 +1691,10 @@ impl<'gc> Thread<'gc> {
                                 make_error!(SchemeErrorType::InvalidRest);
                             }
                         }
-                        Bytecode::SetBang { symbol } => {
+                        Bytecode::SetBang {
+                            symbol,
+                            enable_fallback,
+                        } => {
                             // Pop the top of stack and store in env as a given symbol
                             let Some(value) = self.stack.pop() else {
                                 make_error!(SchemeErrorType::NoValue(inst));
@@ -1697,6 +1705,15 @@ impl<'gc> Thread<'gc> {
                                 .rebind(&ctx, symbol, value, interner)
                                 .is_err()
                             {
+                                if enable_fallback {
+                                    if let Some(fb) = fallback {
+                                        if let Some((val, _)) = fb.get(&Static(symbol)).copied() {
+                                            *val.borrow_mut(&ctx) = *value.borrow();
+                                            advance_to_next_inst!();
+                                            continue;
+                                        }
+                                    }
+                                }
                                 make_error!(SchemeErrorType::NoName(Box::from(
                                     interner.resolve(&symbol)
                                 )));
@@ -1880,6 +1897,34 @@ impl<'gc> Thread<'gc> {
                                 make_error!(SchemeErrorType::LambdaException(err));
                                 continue;
                             };
+                        }
+                        Ok(LambdaReturn::Parameter { parameter }) => {
+                            let wind_frame = frame.wind_frame;
+                            let upvalue_index = frame.upvalue_index;
+                            let frame_ids = self.frames.iter().map(|f| f.id).collect::<Vec<_>>();
+                            let base_value = parameter.borrow().base_value(&frame_ids);
+                            self.stack.push(base_value);
+
+                            if let Some(convert) = parameter.borrow().convert {
+                                let convert = if convert.needs_label() {
+                                    convert.label(
+                                        &ctx,
+                                        upvalue_index.unwrap_or_else(|| {
+                                            Self::allocate_upvalue_index(
+                                                &mut self.next_upvalue_index,
+                                            )
+                                        }),
+                                    )
+                                } else {
+                                    convert
+                                };
+                                if let Err(err) =
+                                    self.call_lambda(&ctx, convert, 1, None, false, !wind_frame)
+                                {
+                                    make_error!(SchemeErrorType::LambdaException(err));
+                                    continue;
+                                };
+                            }
                         }
                         Ok(LambdaReturn::CallHandler {
                             lambda,

@@ -78,7 +78,10 @@ pub enum Bytecode {
     Define { symbol: lasso::Spur },
     /// Pop the value on the stack and set! a given symbol using that value
     /// (error if the symbol is not already defined in the environment)
-    SetBang { symbol: lasso::Spur },
+    SetBang {
+        symbol: lasso::Spur,
+        enable_fallback: bool,
+    },
     /// set! done to an argument
     ArgSetBang { index: usize },
     /// set! done to the rest argument
@@ -182,7 +185,17 @@ impl fmt::Display for Bytecode {
             Bytecode::MakeQuoteHole { id } => write!(f, "QHLE {id}"),
             Bytecode::FillQuoteHole { id } => write!(f, "QFLL {id}"),
             Bytecode::Define { symbol } => write!(f, "DEFN {}", symbol.into_inner()),
-            Bytecode::SetBang { symbol } => write!(f, "SET! {}", symbol.into_inner()),
+            Bytecode::SetBang {
+                symbol,
+                enable_fallback,
+            } => {
+                write!(
+                    f,
+                    "{} {}",
+                    if *enable_fallback { "S!FB" } else { "SET!" },
+                    symbol.into_inner()
+                )
+            }
             Self::ArgSetBang { index } => write!(f, "AST! {index}"),
             Self::RestSetBang => write!(f, "RST!"),
             Bytecode::SetBangUpvalue { index } => write!(f, "SETU {}", index),

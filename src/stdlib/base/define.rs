@@ -241,7 +241,13 @@ impl Syntax for SetBang {
                             .compile_code(ctx, value)?
                             .into_bytecode()
                             .into_iter()
-                            .chain([Bytecode::SetBang { symbol: name }, Bytecode::PushVoid])
+                            .chain([
+                                Bytecode::SetBang {
+                                    symbol: name,
+                                    enable_fallback: compiler.is_bound_variable(&name),
+                                },
+                                Bytecode::PushVoid,
+                            ])
                             .collect(),
                     ));
                 }
@@ -270,7 +276,13 @@ impl Syntax for SetBang {
                     .compile_code(ctx, value)?
                     .into_bytecode()
                     .into_iter()
-                    .chain([Bytecode::SetBang { symbol: name }, Bytecode::PushVoid])
+                    .chain([
+                        Bytecode::SetBang {
+                            symbol: name,
+                            enable_fallback: compiler.is_bound_variable(&name),
+                        },
+                        Bytecode::PushVoid,
+                    ])
                     .collect(),
             ))
         }

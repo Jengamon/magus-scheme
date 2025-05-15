@@ -22,6 +22,6 @@ while (thread.run(fuel)) {
 console.log(thread.result(true));
 console.log(interp.symbol_dump());
 
-const p = document.createElement("p");
-p.textContent = thread.result().toString();
-document.body.appendChild(p);
+// const p = document.createElement("p");
+// p.textContent = thread.result().toString();
+// document.body.appendChild(p);

@@ -5,14 +5,28 @@
     "build": "deno run -A npm:vite build"
   },
   "imports": {
+    "@codemirror/commands": "npm:@codemirror/commands@^6.8.1",
+    "@codemirror/language": "npm:@codemirror/language@^6.11.0",
+    "@codemirror/legacy-modes": "npm:@codemirror/legacy-modes@^6.5.1",
+    "@codemirror/state": "npm:@codemirror/state@^6.5.2",
+    "@codemirror/view": "npm:@codemirror/view@^6.36.8",
+    "@phosphor-icons/web": "npm:@phosphor-icons/web@^2.1.2",
+    "@solid-primitives/storage": "npm:@solid-primitives/storage@^4.3.2",
     "@std/assert": "jsr:@std/assert@1",
+    "@tailwindcss/vite": "npm:@tailwindcss/vite@^4.1.6",
+    "codemirror": "npm:codemirror@^6.0.1",
+    "daisyui": "npm:daisyui@^5.0.35",
     "solid-js": "npm:solid-js@^1.9.6",
+    "tailwindcss": "npm:tailwindcss@^4.1.6",
+    "thememirror": "npm:thememirror@^2.0.1",
     "vite": "npm:vite@^6.3.5",
-    "vite-plugin-solid": "npm:vite-plugin-solid@^2.11.6"
+    "vite-plugin-solid": "npm:vite-plugin-solid@^2.11.6",
+    "zod": "npm:zod@^3.24.4"
   },
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "solid-js",
+    "experimentalDecorators": true,
+    "jsxImportSource": "npm:solid-js",
     "lib": [
       "DOM",
       "DOM.Iterable",

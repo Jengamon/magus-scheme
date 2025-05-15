@@ -113,7 +113,20 @@ impl Highlighter for MagusHighlightor {
             let keyword_style = Style::new().fg(Color::Green);
             let span = tok.text_range();
             // There are only 2 keywords (and they stop meaning a keyword once a non-keyword is encountered)
-            const KEYWORDS: [&str; 2] = ["import", "define-library"];
+            const KEYWORDS: &[&str] = &[
+                "import",
+                "define-library",
+                "export",
+                "include",
+                "include-ci",
+                "include-library-declarations",
+                "cond-expand",
+                "begin",
+                "only",
+                "rename",
+                "prefix",
+                "except",
+            ];
             let is_keyword = KEYWORDS.contains(&tok.text());
             styled_buf.style_range(
                 span.start().into(),

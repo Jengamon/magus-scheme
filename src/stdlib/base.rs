@@ -20,6 +20,8 @@ use crate::{
 pub use boolean::{And, Or};
 pub use conditionals::If;
 pub use define::{Define, SetBang};
+pub(crate) use error_obj::ErrorObject;
+pub use error_obj::{Error as ErrorLambda, ErrorObjectMessage, IsErrorObject};
 pub use exception::WithExceptionHandler;
 pub use include::{Include, IncludeCi};
 pub use macros::{DefineSyntax, SyntaxRules};
@@ -41,6 +43,7 @@ use super::Formals;
 mod boolean;
 mod conditionals;
 mod define;
+mod error_obj;
 mod exception;
 mod include;
 mod macros;
@@ -421,6 +424,8 @@ impl Module for Base {
             "include",
             "include-ci",
             "make-parameter",
+            "error",
+            "error-object?",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -519,6 +524,9 @@ impl Module for Base {
             "char?" => lambda!(IsChar),
             "floor/" => lambda!(FloorSlash),
             "make-parameter" => lambda!(MakeParameter),
+            "error" => lambda!(ErrorLambda),
+            "error-object?" => lambda!(IsErrorObject),
+            "error-object-message" => lambda!(ErrorObjectMessage),
             _ => None,
         }
     }

@@ -126,6 +126,15 @@ impl<'gc> NativeLambdaContext<'_, 'gc> {
             lambda.arity()
         }
     }
+
+    /// Convenience function to use the thread context true and false values
+    pub fn bool(&self, v: bool) -> ValuePtr<'gc> {
+        if v {
+            self.thread_ctx.true_value
+        } else {
+            self.thread_ctx.false_value
+        }
+    }
 }
 
 impl<'gc> std::ops::Deref for NativeLambdaContext<'_, 'gc> {

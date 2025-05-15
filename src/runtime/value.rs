@@ -5,12 +5,13 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::string::String as StdString;
 
-use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
+use gc_arena::{Collect, Gc, Mutation, RefLock, Rootable, Static};
 use lasso::IntoResolver;
 use unicode_general_category::get_general_category;
 
 use crate::environment::StackEnvironmentPtr;
 use crate::interpreter::thread::ThreadFrame;
+use crate::stdlib::base::ErrorObject;
 
 use super::lambda::Lambda;
 use super::{
@@ -816,8 +817,12 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K, ModeDisplay> {
             }
             Value::Environment(_) => todo!(),
             Value::UserStruct(user) => {
-                let label = user.label().unwrap_or("userdata");
-                write!(f, "#<{label} {:p}>", &self.value)
+                if let Ok(s) = user.downcast::<Rootable![ErrorObject<'_>]>() {
+                    write!(f, "{}", s.message.string.borrow())
+                } else {
+                    let label = user.label().unwrap_or("userdata");
+                    write!(f, "#<{label} {:p}>", &self.value)
+                }
             }
             // Value::Lambda(lambda) => write!(f, "<lambda {:p}>", *lambda.borrow()),
             Value::Lambda(lambda) => write!(f, "#<lambda {lambda:p}>"),

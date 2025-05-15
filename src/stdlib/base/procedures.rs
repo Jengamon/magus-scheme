@@ -2685,7 +2685,9 @@ mod parameter {
             let convert = match args.get(1).map(|ptr| *ptr.borrow()) {
                 Some(Value::Lambda(convert)) if convert.arity().is_satisfied(1) => Some(convert),
                 Some(_) => {
-                    return Err(anyhow::anyhow!("make-parameter expects a 1-arity lambda"))?;
+                    return Err(anyhow::anyhow!(
+                        "make-parameter expects a 1-arity lambda as its second argument"
+                    ))?;
                 }
                 None => None,
             };

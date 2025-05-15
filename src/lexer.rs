@@ -801,7 +801,9 @@ pub enum SyntaxToken {
     StartVector,
     #[regex(r"(?i)#u8\(")]
     StartBytevector,
-    #[regex(r#"[a-zA-Z!$%&*/:<=>?@^_~][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*"#, |l| Box::from(l.slice()))]
+    // #[regex(r#"[a-zA-Z!$%&*/:<=>?@^_~][0-9a-zA-Z!$%&*/:<=>?^_~+\-.@]*"#, |l| Box::from(l.slice()))]
+    // extended Unicode plain ident
+    #[regex(r#"[\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{Mn}\p{Nl}\p{No}\p{Sc}[\p{Sk}--[`]]\p{So}[\p{Sm}--[+]][\p{Po}--[#;.',\\]][\p{Pd}--[-]]\p{Pc}\p{Co}\u200c\u200d][\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{Mn}\p{Nl}\p{No}\p{Sc}\p{Sk}\p{So}\p{Sm}\p{Pd}\p{Pc}\p{Po}\p{Co}\u200c\u200d\p{Nd}\p{Me}\p{Mc}]*"#, |l| Box::from(l.slice()))]
     #[regex(r#"\|([^|\\]|\\[xXabntr|])*\|"#, process_piped_ident)]
     #[token("+", |l| Box::from(l.slice()))]
     #[token("-", |l| Box::from(l.slice()))]

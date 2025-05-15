@@ -1,4 +1,4 @@
-[0..3] invalid token encountered
 ---
+[0..3] Syntax(Identifier("|+i"))
 ---
 |+i

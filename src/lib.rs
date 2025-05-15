@@ -2,6 +2,12 @@
 // Gotta sign it in duplicate.
 #![deny(unsafe_code)]
 
+// NOTE We do quite a bit of optimizing based off the assumption that *GC data does not move*
+// ...that is true for the forseeable future, but that guarantee must hold true (or at least, it
+// has to visibly be true for us)
+// (If this changes, we would need some kind of gc tag that is the same for an arbitrary Gc allocation
+// for its lifetime. rn its the address but it could be something else in the future)
+
 pub mod bytecode;
 pub mod compiler;
 pub mod environment;

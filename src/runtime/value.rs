@@ -1017,11 +1017,13 @@ impl Promise<'_> {
 /// A dynamically bound value location with a
 /// default value, and possibly a conversion lambda
 pub struct Parameter<'gc> {
-    pub(crate) init: ValuePtr<'gc>,
+    init: ValuePtr<'gc>,
     pub(crate) convert: Option<Lambda<'gc>>,
     // TODO an fxhash::FxHashMap of usize (which are the addresses of ThreadFrame::id) to ValuePtr
     // to find the value of a parameter we climb up the stack of frame in existence, and if not found *then* we use init
     // (to find the "raw value", it ofc can require a lambda to *actually* figure out)
+    // the key is the address of a `ThreadFrame::id`
+    frame_values: fxhash::FxHashMap<usize, ValuePtr<'gc>>,
 }
 pub type ParameterPtr<'gc> = Gc<'gc, RefLock<Parameter<'gc>>>;
 
@@ -1030,6 +1032,7 @@ impl<'gc> Parameter<'gc> {
         Self {
             init,
             convert: None,
+            frame_values: Default::default(),
         }
     }
 
@@ -1037,7 +1040,20 @@ impl<'gc> Parameter<'gc> {
         Self {
             init,
             convert: Some(convert),
+            frame_values: Default::default(),
         }
+    }
+
+    // Get the value of a parameter in the current dynamic context
+    pub fn base_value(&self, frame_stack: &[Gc<()>]) -> ValuePtr<'gc> {
+        // look up the frame ids in reverse, if one hits, then the value is the value for that frame, otherwise
+        // the value is the init value
+        let found_value = frame_stack.iter().rev().find_map(|idp| {
+            let id = (&raw const *idp.as_ref()).addr();
+            self.frame_values.get(&id).copied()
+        });
+
+        found_value.unwrap_or(self.init)
     }
 }
 

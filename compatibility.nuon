@@ -132,7 +132,7 @@
     [ "base", "procedure", list?, true, "test if a value is a proper list", "" ],
     [ "base", "procedure", make-bytevector, true, "make a bytevector of a specified filled with a default byte value (or 0 if unspecified)", "" ],
     [ "base", "procedure", make-list, true, "make a list of a specified length filled with a default value (or 0 if unspecified)", "" ],
-    [ "base", "", make-parameter, false, "", "" ],
+    [ "base", "procedure", make-parameter, true, "make a parameter object", "" ],
     [ "base", "", make-string, false, "", "" ],
     [ "base", "", make-vector, false, "", "" ],
     [ "base", "procedure", map, true, "applies a function to each member of a list, returning it as a new list", "" ],

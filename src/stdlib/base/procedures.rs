@@ -13,6 +13,7 @@ pub use math::{
     Add, Denominator, Divide, ExactIntegerSqrt, Expt, FloorSlash, Gcd, Lcm, Multiply, Numerator,
     Subtract,
 };
+pub use parameter::MakeParameter;
 pub use predicates::{
     IsBytevector, IsChar, IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull,
     IsOdd, IsPair, IsProcedure, IsString, IsSymbol, IsVector,
@@ -2652,6 +2653,53 @@ mod structure {
             Ok(crate::runtime::lambda::LambdaReturn::Return(vec![
                 Value::Cons(crate::value::ConsCell::new(Some(args[0]), Some(args[1])))
                     .into_ptr(&ctx),
+            ]))
+        }
+    }
+}
+
+mod parameter {
+    use gc_arena::{Collect, Gc, RefLock};
+
+    use crate::{
+        Value,
+        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        value::Parameter,
+    };
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct MakeParameter;
+
+    impl<'gc> NativeLambda<'gc> for MakeParameter {
+        fn arity(&self) -> Arity {
+            Arity::Bounded { min: 1, max: 2 }
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let init = args[0];
+            let convert = match args.get(1).map(|ptr| *ptr.borrow()) {
+                Some(Value::Lambda(convert)) if convert.arity().is_satisfied(1) => Some(convert),
+                Some(_) => {
+                    return Err(anyhow::anyhow!("make-parameter expects a 1-arity lambda"))?;
+                }
+                None => None,
+            };
+
+            Ok(LambdaReturn::Return(vec![
+                Value::Parameter(Gc::new(
+                    &ctx,
+                    RefLock::new(if let Some(convert) = convert {
+                        Parameter::with_convert(init, convert)
+                    } else {
+                        Parameter::new(init)
+                    }),
+                ))
+                .into_ptr(&ctx),
             ]))
         }
     }

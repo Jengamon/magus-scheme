@@ -29,8 +29,8 @@ pub use procedures::{
     ExactIntegerSqrt, Expt, Features, FloorSlash, Gcd, Inexact, IntegerToChar, IsBytevector,
     IsChar, IsEq, IsEqual, IsEqv, IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList,
     IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, IsVector, Lcm, ListCopy, ListSetBang,
-    ListToString, MakeBytevector, Map, MonotonicAscending, MonotonicDescending, Multiply,
-    NumberToString, Numerator, Raise, RaiseContinuable, StringAppend, StringConstructor,
+    ListToString, MakeBytevector, MakeParameter, Map, MonotonicAscending, MonotonicDescending,
+    Multiply, NumberToString, Numerator, Raise, RaiseContinuable, StringAppend, StringConstructor,
     StringCopy, StringLength, StringRef, StringToList, StringToNumber, StringToSymbol,
     StringToUtf8, Substring, Subtract, SymbolToString, Utf8ToString, Values, VectorRef,
 };
@@ -420,6 +420,7 @@ impl Module for Base {
             "floor/",
             "include",
             "include-ci",
+            "make-parameter",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -517,6 +518,7 @@ impl Module for Base {
             "bytevector?" => lambda!(IsBytevector),
             "char?" => lambda!(IsChar),
             "floor/" => lambda!(FloorSlash),
+            "make-parameter" => lambda!(MakeParameter),
             _ => None,
         }
     }

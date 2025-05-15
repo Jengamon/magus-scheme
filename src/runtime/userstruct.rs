@@ -16,10 +16,6 @@ pub struct BadUserStructType;
 /// A garbage-collected pointer to a user-defined type.
 #[derive(Debug, Copy, Clone, Collect)]
 #[collect(no_drop)]
-// Do we need associated data with this type?
-// ASK Do we need this type?
-// FIXME yes, we want to store a custom label, so that
-// not every single one is a "userstruct"
 pub struct UserStruct<'gc>(Any<'gc, Option<Box<str>>>);
 
 impl PartialEq for UserStruct<'_> {

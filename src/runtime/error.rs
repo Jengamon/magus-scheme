@@ -79,6 +79,12 @@ pub enum SchemeErrorType<'gc> {
         #[collect(require_static)]
         LambdaException,
     ),
+    /// Lambda exception during a parameter call (runtime errors)
+    #[error("parameter exception: {0}")]
+    ParameterException(#[collect(require_static)] LambdaException),
+    /// Called a parameter with more than 0 arguments
+    #[error("parameter calls do not accept arguments")]
+    Parameter,
     #[error("instruction expected more values: {0:?}")]
     NoValue(#[collect(require_static)] Bytecode),
     #[error("{inst} expected a {expected:?}, but found a {kind:?}")]
@@ -196,7 +202,7 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
                             if f.alternate() {
                                 String::new()
                             } else {
-                                format!(" {chunk:p}@({pc})")
+                                format!(" 0x{:x}@({pc})", (&raw const *chunk.as_ref()).addr())
                             }
                         ),
                         Execution::Native { native, .. } => format!(
@@ -204,7 +210,7 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
                             if f.alternate() {
                                 String::new()
                             } else {
-                                format!(" {native:p}")
+                                format!(" 0x{:x}", (&raw const *native.borrow()).addr())
                             }
                         ),
                     },
@@ -230,7 +236,7 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
                             if f.alternate() {
                                 String::new()
                             } else {
-                                format!(" {chunk:p}@({pc})")
+                                format!(" 0x{:x}@({pc})", (&raw const *chunk.as_ref()).addr())
                             }
                         ),
                         Execution::Native { native, .. } => format!(
@@ -238,7 +244,7 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
                             if f.alternate() {
                                 String::new()
                             } else {
-                                format!(" {native:p}")
+                                format!(" 0x{:x}", (&raw const *native.borrow()).addr())
                             }
                         ),
                     }

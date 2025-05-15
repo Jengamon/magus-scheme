@@ -629,6 +629,29 @@ impl<'gc> Thread<'gc> {
             .collect()
     }
 
+    fn duplicate_upvalue_mapping(
+        &mut self,
+        ctx: &Context<'_, 'gc>,
+        lambda: Lambda<'gc>,
+    ) -> Lambda<'gc> {
+        if let Some(mapping) = lambda
+            .get_label()
+            .and_then(|l| self.upvalue_mapping.get(&l))
+        {
+            // if we are compiled and *set* upvalues, we need a copy of the scope
+            if matches!(lambda, Lambda::Compiled(c) if c.chunk.code.iter().any(|bc| matches!(bc, Bytecode::SetUpvalue { .. })))
+            {
+                let new_scope = Self::allocate_upvalue_index(&mut self.next_upvalue_index);
+                self.upvalue_mapping.insert(new_scope, mapping.clone());
+                lambda.label(ctx, new_scope)
+            } else {
+                lambda
+            }
+        } else {
+            lambda
+        }
+    }
+
     /// Sets up the call to a lambda
     ///
     /// If `!is_tail`, `override_wind` has no effect. Otherwise it controls whether `wind_frame` flag is
@@ -1159,7 +1182,8 @@ impl<'gc> Thread<'gc> {
                                 &ctx,
                                 RefLock::new(Value::Lambda({
                                     let l = chunk.lambdas[index];
-                                    let l = if let Some(upvalue_index) = frame.upvalue_index {
+
+                                    if let Some(upvalue_index) = frame.upvalue_index {
                                         l.label(&ctx, upvalue_index)
                                     } else {
                                         l.label(
@@ -1168,8 +1192,7 @@ impl<'gc> Thread<'gc> {
                                                 &mut self.next_upvalue_index,
                                             ),
                                         )
-                                    };
-                                    l
+                                    }
                                 })),
                             ));
                             let frame = self.frames.last_mut();
@@ -1425,25 +1448,12 @@ impl<'gc> Thread<'gc> {
                                 Value::Lambda(mut l) => {
                                     // dbg!((&self.upvalue_mapping, *upvalue_index, &l));
                                     // Generate copy of lambda scope if it already exists (for new upvalues)
-                                    if let Some(mapping) =
-                                        l.get_label().and_then(|l| self.upvalue_mapping.get(&l))
-                                    {
-                                        // if we are compiled and *set* upvalues, we need a copy of the scope
-                                        if matches!(l, Lambda::Compiled(c) if c.chunk.code.iter().any(|bc| matches!(bc, Bytecode::SetUpvalue { .. })))
-                                        {
-                                            let new_scope = Self::allocate_upvalue_index(
-                                                &mut self.next_upvalue_index,
-                                            );
-                                            self.upvalue_mapping.insert(new_scope, mapping.clone());
-                                            l = l.label(&ctx, new_scope);
-                                        }
-                                        // otherwise, we can continue as normal
-                                    }
                                     let pc = *pc;
                                     let wind_frame = frame.wind_frame;
                                     let code = std::rc::Rc::clone(&chunk.code);
                                     // advance to next inst *before* pushing lambda
                                     advance_to_next_inst!();
+                                    l = self.duplicate_upvalue_mapping(&ctx, l);
                                     if let Err(err) = self.call_lambda(
                                         &ctx,
                                         l,
@@ -1479,6 +1489,61 @@ impl<'gc> Thread<'gc> {
                                         }
                                     }
                                     self.handle_continuation(&ctx, c);
+                                }
+                                Value::Parameter(p) => {
+                                    if args != 0 {
+                                        make_error!(SchemeErrorType::Parameter);
+                                        continue;
+                                    }
+
+                                    let upvalue_index = frame.upvalue_index;
+                                    let pc = *pc;
+                                    let wind_frame = frame.wind_frame;
+                                    let code = std::rc::Rc::clone(&chunk.code);
+                                    // advance to next inst *before* pushing lambda
+                                    advance_to_next_inst!();
+
+                                    let frame_ids =
+                                        self.frames.iter().map(|f| f.id).collect::<Vec<_>>();
+                                    let base_value = p.borrow().base_value(&frame_ids);
+                                    self.stack.push(base_value);
+
+                                    if let Some(lam) = p.borrow().convert {
+                                        // adapted from procedure call above
+                                        let lam = if let Some(upvalue_index) = upvalue_index {
+                                            lam.label(&ctx, upvalue_index)
+                                        } else {
+                                            lam.label(
+                                                &ctx,
+                                                Self::allocate_upvalue_index(
+                                                    &mut self.next_upvalue_index,
+                                                ),
+                                            )
+                                        };
+
+                                        let lam = self.duplicate_upvalue_mapping(&ctx, lam);
+
+                                        if let Err(err) = self.call_lambda(
+                                            &ctx,
+                                            lam,
+                                            1,
+                                            None,
+                                            pc + match code.get(pc + 1) {
+                                                // make sure true branches can also be properly registered as tail calls
+                                                // because a jump unconditionally executes, the actual total movement is
+                                                // jump + 1 plus the + 1 base from this instruction
+                                                Some(Bytecode::Jump { jump }) => jump + 2,
+                                                _ => 1,
+                                            } >= code.len(),
+                                            !wind_frame,
+                                        ) {
+                                            advance_to_next_inst!(undo self.frames.last_mut());
+                                            make_error!(SchemeErrorType::ParameterException(err));
+                                            continue;
+                                        };
+                                    } else {
+                                        advance_to_next_inst!(self.frames.last_mut());
+                                    }
                                 }
                                 _ => {
                                     make_error!(SchemeErrorType::NonCallable);

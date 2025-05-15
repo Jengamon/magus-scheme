@@ -757,6 +757,8 @@ impl<'gc> Thread<'gc> {
                 *frame = new_frame;
                 // Inherit old stack bottom
                 frame.bottom = old_bottom;
+                // wipe out args from the new bottom
+                self.stack.truncate(frame.bottom);
                 if !override_wind {
                     frame.wind_frame = old_wind;
                 }

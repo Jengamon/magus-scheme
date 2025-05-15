@@ -762,7 +762,7 @@ impl NestedCommentToken {
 #[derive(Debug, Clone, PartialEq, Logos, Arbitrary)]
 #[logos(error = LexerError)]
 pub enum SyntaxToken {
-    #[regex("[ \t]+")]
+    #[regex(r"[\p{Zs}\t]+")]
     IntralineWhitespace,
     #[token("\n")]
     #[token("\r\n")]

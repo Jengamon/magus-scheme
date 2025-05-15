@@ -426,6 +426,7 @@ impl Module for Base {
             "make-parameter",
             "error",
             "error-object?",
+            "error-object-message",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))

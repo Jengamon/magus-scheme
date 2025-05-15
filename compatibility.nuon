@@ -83,7 +83,7 @@
     [ "base", "procedure", error, true, "raise an error with a message (along with optional irritants)", "" ],
     [ "base", "", error-object-irritants, false, "", "" ],
     [ "base", "procedure", error-object-message, true, "get the encapsulated error message of an error object", "" ],
-    [ "base", "procedure", error-object?, true, "tests if a value is an error object", "if #t, can be passed to error-object-* procedures" ],
+    [ "base", "procedure", error-object?, true, "tests if a value is an error object", "if `#t`, can be passed to `error-object-*` procedures" ],
     [ "base", "procedure", even?, true, "tests if a value is an even integer", "" ],
     [ "base", "procedure", exact, true, "convert into exact numerical value (if possible)", "" ],
     [ "base", "procedure", exact-integer-sqrt, true, "Return two integers (*s*, *r*) such that the argument *k* satisfies both `k = s^2 + r` and `k < (s + 1)^2`", "" ],

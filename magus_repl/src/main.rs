@@ -17,6 +17,7 @@ use magus::{
     general_parser::GeneralParserError,
     interpreter::{CompilerHandle, Includer, Interpreter, ThreadHandle, ValueHandle},
     library_name,
+    rowan::TextSize,
     runtime::lambda::Lambda,
     stdlib,
     value::ModeWrite,
@@ -83,7 +84,7 @@ fn main() -> anyhow::Result<()> {
 
 struct MagusHighlightor;
 impl Highlighter for MagusHighlightor {
-    fn highlight(&self, line: &str, _cursor: usize) -> reedline::StyledText {
+    fn highlight(&self, line: &str, cursor: usize) -> reedline::StyledText {
         use magus::{Abbreviation, DatumComment, NestedComment, SyntaxKind};
         use nu_ansi_term::{Color, Style};
 
@@ -217,6 +218,7 @@ impl Highlighter for MagusHighlightor {
         {
             let mut parenthesis_stack = Vec::new();
             let unbalanced_style = Color::Red.reverse();
+            let highlight_style = Color::LightCyan.reverse();
             for tok in parse.syntax().descendants_with_tokens().filter_map(|ele| {
                 if matches!(
                     ele.kind(),
@@ -239,7 +241,25 @@ impl Highlighter for MagusHighlightor {
                     parenthesis_stack.push(span);
                 } else {
                     // rparens pop a span (or highlight if they failed)
-                    if parenthesis_stack.pop().is_none() {
+                    if let Some(lpspan) = parenthesis_stack.pop() {
+                        let cursor = TextSize::new(cursor as u32);
+                        let maybe_highlight_span = if lpspan.contains(cursor) {
+                            // highlight the span that doesn't contain the cursor
+                            Some(span)
+                        } else if span.contains(cursor) {
+                            Some(lpspan)
+                        } else {
+                            None
+                        };
+
+                        if let Some(highlight_span) = maybe_highlight_span {
+                            styled_buf.style_range(
+                                highlight_span.start().into(),
+                                highlight_span.end().into(),
+                                highlight_style,
+                            );
+                        }
+                    } else {
                         styled_buf.style_range(
                             span.start().into(),
                             span.end().into(),

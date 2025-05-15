@@ -1,0 +1,13 @@
+---
+"a"
+"invalid radix"
+---
+(import (only (scheme base) make-parameter parameterize <= lambda and exact-integer? error define values
+	number->string call/cc with-exception-handler error-object-message quote if))
+(define radix (make-parameter 'cu (lambda (x)
+	(if (and (exact-integer? x) (<= 2 x 16))
+		x
+		(error "invalid radix")))))
+(define (f n) (number->string n (radix)))
+(values (parameterize ((radix 16)) (f 10))
+		(call/cc (lambda (k) (with-exception-handler (lambda (e) (k (error-object-message e))) (lambda () (radix))))))

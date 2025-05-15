@@ -1049,6 +1049,12 @@ impl<'gc> Parameter<'gc> {
         }
     }
 
+    /// Parameterize a value for a given frame
+    pub fn parameterize(&mut self, frame_id: Gc<()>, value: ValuePtr<'gc>) {
+        self.frame_values
+            .insert((&raw const *frame_id.as_ref()).addr(), value);
+    }
+
     // Get the value of a parameter in the current dynamic context
     pub fn base_value(&self, frame_stack: &[Gc<()>]) -> ValuePtr<'gc> {
         // look up the frame ids in reverse, if one hits, then the value is the value for that frame, otherwise

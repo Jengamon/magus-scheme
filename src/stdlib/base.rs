@@ -25,14 +25,15 @@ pub use error_obj::{Error as ErrorLambda, ErrorObjectMessage, IsErrorObject};
 pub use exception::WithExceptionHandler;
 pub use include::{Include, IncludeCi};
 pub use macros::{DefineSyntax, SyntaxRules};
+pub use parameters::{MakeParameter, Parameterize};
 pub use procedures::{
     Add, Apply, Ascending, Bytevector, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr,
     CharToInteger, Cons, Denominator, Descending, Divide, DynamicWind, Equal, Exact,
     ExactIntegerSqrt, Expt, Features, FloorSlash, Gcd, Inexact, IntegerToChar, IsBytevector,
     IsChar, IsEq, IsEqual, IsEqv, IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList,
     IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, IsVector, Lcm, ListCopy, ListSetBang,
-    ListToString, MakeBytevector, MakeParameter, Map, MonotonicAscending, MonotonicDescending,
-    Multiply, NumberToString, Numerator, Raise, RaiseContinuable, StringAppend, StringConstructor,
+    ListToString, MakeBytevector, Map, MonotonicAscending, MonotonicDescending, Multiply,
+    NumberToString, Numerator, Raise, RaiseContinuable, StringAppend, StringConstructor,
     StringCopy, StringLength, StringRef, StringToList, StringToNumber, StringToSymbol,
     StringToUtf8, Substring, Subtract, SymbolToString, Utf8ToString, Values, VectorRef,
 };
@@ -47,6 +48,7 @@ mod error_obj;
 mod exception;
 mod include;
 mod macros;
+mod parameters;
 mod procedures;
 mod quote;
 
@@ -424,6 +426,7 @@ impl Module for Base {
             "include",
             "include-ci",
             "make-parameter",
+            "parameterize",
             "error",
             "error-object?",
             "error-object-message",
@@ -550,6 +553,7 @@ impl Module for Base {
             })),
             "include" => Some(Arc::new(Include)),
             "include-ci" => Some(Arc::new(IncludeCi)),
+            "parameterize" => Some(Arc::new(Parameterize)),
             _ => None,
         }
     }

@@ -158,7 +158,7 @@
     [ "base", "", output-port-open?, false, "", "" ],
     [ "base", "", output-port?, false, "", "" ],
     [ "base", "procedure", pair?, true, "Returns if its argument is a pair", "null `'()` is *not* considered a pair" ],
-    [ "base", "", parameterize, false, "", "" ],
+    [ "base", "syntax", parameterize, true, "change the value of a parameter for the dynamic extent of a call", "" ],
     [ "base", "", peek-char, false, "", "" ],
     [ "base", "", "peek-u8", false, "", "" ],
     [ "base", "", port?, false, "", "" ],

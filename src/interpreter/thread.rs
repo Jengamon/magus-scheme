@@ -777,9 +777,12 @@ impl<'gc> Thread<'gc> {
             if let Some(frame) = self.frames.last_mut() {
                 let old_bottom = frame.bottom;
                 let old_wind = frame.wind_frame;
+                let old_id = frame.id;
                 *frame = new_frame;
                 // Inherit old stack bottom
                 frame.bottom = old_bottom;
+                // Inherit old stack id
+                frame.id = old_id;
                 // wipe out args from the new bottom
                 self.stack.truncate(frame.bottom);
                 if !override_wind {
@@ -1541,8 +1544,6 @@ impl<'gc> Thread<'gc> {
                                             make_error!(SchemeErrorType::ParameterException(err));
                                             continue;
                                         };
-                                    } else {
-                                        advance_to_next_inst!(self.frames.last_mut());
                                     }
                                 }
                                 _ => {
@@ -1720,7 +1721,27 @@ impl<'gc> Thread<'gc> {
 
                             advance_to_next_inst!();
                         }
-                        _ => todo!(),
+                        Bytecode::Parameterize => {
+                            let Some(parameter) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+                            let Some(value) = self.stack.pop() else {
+                                make_error!(SchemeErrorType::NoValue(inst));
+                                continue;
+                            };
+                            let Value::Parameter(parameter) = *parameter.borrow() else {
+                                make_error!(SchemeErrorType::WrongValue {
+                                    inst: "parameterize",
+                                    expected: ValueType::Parameter,
+                                    kind: (*parameter.borrow()).value_type()
+                                });
+                                continue;
+                            };
+
+                            parameter.borrow_mut(&ctx).parameterize(frame.id, value);
+                            advance_to_next_inst!();
+                        }
                     }
                 }
                 Execution::Native { native } => {

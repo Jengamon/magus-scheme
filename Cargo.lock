@@ -1074,6 +1074,7 @@ dependencies = [
  "target-lexicon",
  "target-triple",
  "thiserror 2.0.12",
+ "unicode-general-category",
 ]
 
 [[package]]
@@ -1090,6 +1091,7 @@ dependencies = [
  "ctrlc",
  "humantime",
  "magus",
+ "nu-ansi-term",
  "reedline",
  "yansi",
 ]
@@ -2011,6 +2013,12 @@ name = "typenum"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
+
+[[package]]
+name = "unicode-general-category"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24adfe8311434967077a6adff125729161e6e4934d76f6b7c55318ac5c9246d3"
 
 [[package]]
 name = "unicode-ident"

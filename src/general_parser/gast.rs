@@ -335,7 +335,15 @@ impl OneLineComment {}
 simple_gast!(token OneLineComment from OLCOMMENT);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DatumComment(MagusSyntaxNode);
-impl DatumComment {}
+impl DatumComment {
+    pub fn comment_sym(&self) -> Option<MagusSyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .by_kind(|k| k == SyntaxKind::DCOMMENT_SYM)
+            .filter_map(|ele| ele.into_token())
+            .next()
+    }
+}
 simple_gast!(node DatumComment from DCOMMENT);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InlineWhitespace(MagusSyntaxToken);

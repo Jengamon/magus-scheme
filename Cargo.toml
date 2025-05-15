@@ -43,6 +43,7 @@ slotmap = "1.0.7"
 target-lexicon = "0.13.2"
 target-triple = "0.1.4"
 thiserror = "2"
+unicode-general-category = "1.0.0"
 
 [dev-dependencies]
 arbtest = "0.3.1"

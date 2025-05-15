@@ -1,7 +1,7 @@
 use core::fmt;
 use magus::{
-    value::escape_write_char, ContainsDatum, Datum, DatumVisitor, GAstNode, GAstToken,
-    MagusSyntaxNode,
+    value::{escape_write_char, is_valid_unpiped_scheme_identifier},
+    ContainsDatum, Datum, DatumVisitor, GAstNode, GAstToken, MagusSyntaxNode,
 };
 use std::borrow::Cow;
 use yansi::Paint;
@@ -35,47 +35,7 @@ impl<'a, 'f> DatumPrintImpl<'a, 'f> {
 
     fn identifier_string(identifier: &str) -> Cow<'_, str> {
         // rough rules for unpiped identifiers
-        if identifier
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || r"!$%&*/:<=>?^_~".contains(c))
-            || identifier.chars().take(1).all(|c| c.is_ascii_alphabetic())
-                && identifier
-                    .chars()
-                    .skip(1)
-                    .all(|c| c.is_ascii_alphanumeric() || r"!$%&*/:<=>?^_~+\-@".contains(c))
-            || ["+", "-"].contains(&identifier)
-            || (identifier.starts_with(['+', '-'])
-                && identifier
-                    .chars()
-                    .skip(1)
-                    .take(1)
-                    .all(|c| c.is_ascii_alphabetic() || r"!$%&*/:<=>?^_~+\-@".contains(c))
-                && identifier
-                    .chars()
-                    .skip(2)
-                    .all(|c| c.is_ascii_alphanumeric() || r"!$%&*/:<=>?^_~+\-.@".contains(c)))
-            || (identifier.starts_with(['+', '-'])
-                && identifier.chars().skip(1).take(1).all(|c| c == '.')
-                && identifier
-                    .chars()
-                    .skip(2)
-                    .take(1)
-                    .all(|c| c.is_ascii_alphabetic() || r"!$%&*/:<=>?^_~+\-.@".contains(c))
-                && identifier
-                    .chars()
-                    .skip(3)
-                    .all(|c| c.is_ascii_alphanumeric() || r"!$%&*/:<=>?^_~+\-.@".contains(c)))
-            || (identifier.starts_with('.')
-                && identifier
-                    .chars()
-                    .skip(1)
-                    .take(1)
-                    .all(|c| c.is_ascii_alphabetic() || r"!$%&*/:<=>?^_~+\-.@".contains(c))
-                && identifier
-                    .chars()
-                    .skip(2)
-                    .all(|c| c.is_ascii_alphanumeric() || r"!$%&*/:<=>?^_~+\-.@".contains(c)))
-        {
+        if is_valid_unpiped_scheme_identifier(identifier) {
             Cow::Borrowed(identifier)
         } else {
             Cow::Owned(format!("|{identifier}|"))

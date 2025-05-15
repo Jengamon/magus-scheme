@@ -13,6 +13,7 @@ use magus::{
     compiler::{LibraryDefinitionContext, LibraryName, ParseProgram, World},
     environment::StackEnvironment,
     gc_arena::{Gc, RefLock},
+    general_parse,
     general_parser::GeneralParserError,
     interpreter::{CompilerHandle, Includer, Interpreter, ThreadHandle, ValueHandle},
     library_name,
@@ -22,13 +23,15 @@ use magus::{
     ChunkHandle, ContainsDatum, ExternalCompilerContext, Fuel, GAstNode, Module, Value,
 };
 use reedline::{
-    Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus, PromptViMode, Reedline,
-    Signal, SqliteBackedHistory, Validator,
+    Highlighter, Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus,
+    PromptViMode, Reedline, Signal, SqliteBackedHistory, Validator,
 };
-use yansi::{Condition, Paint};
 
 mod datum_printer;
 
+const CLI_COMMANDS: &[&str] = &[
+    "#gc", "#env", "#collect", "#quit", "#q", "#help", "#?", "#time",
+];
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Cli {
@@ -59,6 +62,8 @@ impl Includer for PwdIncluder {
 }
 
 fn main() -> anyhow::Result<()> {
+    use yansi::Condition;
+
     yansi::whenever(Condition::TTY_AND_COLOR);
 
     let args = Cli::parse();
@@ -76,23 +81,190 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
+struct MagusHighlightor;
+impl Highlighter for MagusHighlightor {
+    fn highlight(&self, line: &str, _cursor: usize) -> reedline::StyledText {
+        use magus::{Abbreviation, DatumComment, NestedComment, SyntaxKind};
+        use nu_ansi_term::{Color, Style};
+
+        // For now, highlight *around* the cursor (ignore it)
+        let parse = general_parse(line);
+        let mut styled_buf = reedline::StyledText::new();
+        styled_buf.push((Style::new(), line.to_string()));
+
+        // Highlight cli commands
+        if CLI_COMMANDS.contains(&line.to_lowercase().as_str()) {
+            // Highlight as cli commands, and return!
+            styled_buf.style_range(0, line.len(), Style::new().fg(Color::Green));
+            return styled_buf;
+        }
+
+        // Highlight all identifiers in blue
+        for tok in parse.syntax().descendants_with_tokens().filter_map(|ele| {
+            if ele.kind() == SyntaxKind::SYMBOL {
+                ele.into_token()
+            } else {
+                None
+            }
+        }) {
+            let identifier_style = Style::new().bold().fg(Color::Blue);
+            // Just underline identifiers that end with "!" (but arent just "!") as those usually indicate mutation
+            let mutation_style = Style::new().bold().underline().fg(Color::Blue);
+            let keyword_style = Style::new().fg(Color::Green);
+            let span = tok.text_range();
+            // There are only 2 keywords (and they stop meaning a keyword once a non-keyword is encountered)
+            const KEYWORDS: [&str; 2] = ["import", "define-library"];
+            let is_keyword = KEYWORDS.contains(&tok.text());
+            styled_buf.style_range(
+                span.start().into(),
+                span.end().into(),
+                if is_keyword {
+                    keyword_style
+                } else if tok.text() != "!" && tok.text().ends_with('!') {
+                    mutation_style
+                } else {
+                    identifier_style
+                },
+            );
+        }
+        // Highlight all numbers in dim yellow
+        for tok in parse.syntax().descendants_with_tokens().filter_map(|ele| {
+            if ele.kind() == SyntaxKind::NUMBER {
+                ele.into_token()
+            } else {
+                None
+            }
+        }) {
+            let number_style = Style::new().fg(Color::Yellow);
+            let span = tok.text_range();
+            styled_buf.style_range(span.start().into(), span.end().into(), number_style);
+        }
+        // Highlight all abbreviated in bold red
+        for abbrev in parse.syntax().descendants_with_tokens().filter_map(|ele| {
+            if ele.kind() == SyntaxKind::ABBREV {
+                Abbreviation::cast(ele.into_node()?)
+            } else {
+                None
+            }
+        }) {
+            let abbrev_style = Style::new().fg(Color::Red);
+            let span = abbrev.syntax().text_range();
+            styled_buf.style_range(span.start().into(), span.end().into(), abbrev_style);
+        }
+        // Highlight all directives in dim red
+        for tok in parse.syntax().descendants_with_tokens().filter_map(|ele| {
+            if ele.kind() == SyntaxKind::DIRECTIVE {
+                ele.into_token()
+            } else {
+                None
+            }
+        }) {
+            let directive_style = Style::new().dimmed().fg(Color::Red);
+            let span = tok.text_range();
+            styled_buf.style_range(span.start().into(), span.end().into(), directive_style);
+        }
+
+        // Highlight unbalanced parentheses
+        {
+            let mut parenthesis_stack = Vec::new();
+            let unbalanced_style = Color::Red.reverse();
+            for tok in parse.syntax().descendants_with_tokens().filter_map(|ele| {
+                if matches!(ele.kind(), SyntaxKind::LPAREN | SyntaxKind::RPAREN) {
+                    ele.into_token()
+                } else {
+                    None
+                }
+            }) {
+                let span = tok.text_range();
+                if tok.kind() == SyntaxKind::LPAREN {
+                    // lparen push their span to stack
+                    parenthesis_stack.push(span);
+                } else {
+                    // rparens pop a span (or highlight if they failed)
+                    if parenthesis_stack.pop().is_none() {
+                        styled_buf.style_range(
+                            span.start().into(),
+                            span.end().into(),
+                            unbalanced_style,
+                        );
+                    }
+                }
+            }
+
+            // Highlight the unbalanced left parens now
+            for span in parenthesis_stack {
+                styled_buf.style_range(span.start().into(), span.end().into(), unbalanced_style);
+            }
+        }
+
+        // Handle comments
+        {
+            let comment_style = Style::new().fg(Color::DarkGray);
+            // one-line
+            for tok in parse.syntax().descendants_with_tokens().filter_map(|ele| {
+                if ele.kind() == SyntaxKind::OLCOMMENT {
+                    ele.into_token()
+                } else {
+                    None
+                }
+            }) {
+                let span = tok.text_range();
+                styled_buf.style_range(span.start().into(), span.end().into(), comment_style);
+            }
+            // Datum comment
+            for dc in parse.syntax().descendants_with_tokens().filter_map(|ele| {
+                if ele.kind() == SyntaxKind::DCOMMENT {
+                    DatumComment::cast(ele.into_node()?)
+                } else {
+                    None
+                }
+            }) {
+                let span = dc.syntax().text_range();
+                styled_buf.style_range(span.start().into(), span.end().into(), comment_style);
+            }
+            // Nested comment
+            for nc in parse.syntax().descendants_with_tokens().filter_map(|ele| {
+                if ele.kind() == SyntaxKind::NCOMMENT {
+                    NestedComment::cast(ele.into_node()?)
+                } else {
+                    None
+                }
+            }) {
+                let span = nc.syntax().text_range();
+                styled_buf.style_range(span.start().into(), span.end().into(), comment_style);
+            }
+        }
+        styled_buf
+    }
+}
+
 struct SchemeValidator;
 impl Validator for SchemeValidator {
     fn validate(&self, line: &str) -> reedline::ValidationResult {
+        use magus::SyntaxKind;
+
+        // run *just* the general parser, and make sure stuff is balanced
+        let parse = general_parse(line);
         // check if parens (and #|) are balanced
-        let lparen_count = line.chars().filter(|c| *c == '(').count();
-        let rparen_count = line.chars().filter(|c| *c == ')').count();
-        let snc_count = line
-            .chars()
-            .collect::<Vec<_>>()
-            .windows(2)
-            .filter(|c| c[0] == '#' && c[1] == '|')
+        let lparen_count = parse
+            .syntax()
+            .descendants_with_tokens()
+            .filter(|ele| ele.kind() == SyntaxKind::LPAREN)
             .count();
-        let enc_count = line
-            .chars()
-            .collect::<Vec<_>>()
-            .windows(2)
-            .filter(|c| c[0] == '|' && c[1] == '#')
+        let rparen_count = parse
+            .syntax()
+            .descendants_with_tokens()
+            .filter(|ele| ele.kind() == SyntaxKind::RPAREN)
+            .count();
+        let snc_count = parse
+            .syntax()
+            .descendants_with_tokens()
+            .filter(|ele| ele.kind() == SyntaxKind::START_NCOMMENT)
+            .count();
+        let enc_count = parse
+            .syntax()
+            .descendants_with_tokens()
+            .filter(|ele| ele.kind() == SyntaxKind::END_NCOMMENT)
             .count();
 
         if lparen_count != rparen_count || line.ends_with(';') || snc_count != enc_count {
@@ -306,6 +478,8 @@ fn execute(
     world: &World,
     termination_recv: &Receiver<()>,
 ) {
+    use yansi::Paint;
+
     // TODO Return output (either () or the interpreter error)
     // Show what the parser sees
     println!("{:#?}", module.syntax());
@@ -500,6 +674,8 @@ fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle, ThreadHan
 }
 
 fn compile_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> anyhow::Result<()> {
+    use yansi::Paint;
+
     let path = path.as_ref();
     let source = std::fs::read_to_string(path).context("failed to read input file")?;
 
@@ -546,6 +722,8 @@ fn compile_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> an
 }
 
 fn execute_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> anyhow::Result<()> {
+    use yansi::Paint;
+
     // fake receiver
     let (_tx, rx) = channel();
 
@@ -590,12 +768,15 @@ fn execute_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> an
 }
 
 fn repl(case_insensitive: bool) -> anyhow::Result<()> {
+    use yansi::Paint;
+
     let mut readline = Reedline::create()
         .with_history(Box::new(
             SqliteBackedHistory::with_file("history.local.db".into(), None, None)
                 .expect("failed to configure history file"),
         ))
-        .with_validator(Box::new(SchemeValidator));
+        .with_validator(Box::new(SchemeValidator))
+        .with_highlighter(Box::new(MagusHighlightor));
     let mut prompt = MagusPrompt::default();
     println!("Type `#q` or `#quit` to exit. Type `#help` for more commands.");
 
@@ -644,12 +825,7 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
     let mut double_ctrl_c = false;
     loop {
         match readline.read_line(&prompt) {
-            Ok(Signal::Success(cmd))
-                if [
-                    "#gc", "#env", "#collect", "#quit", "#q", "#help", "#?", "#time",
-                ]
-                .contains(&cmd.to_lowercase().as_str()) =>
-            {
+            Ok(Signal::Success(cmd)) if CLI_COMMANDS.contains(&cmd.to_lowercase().as_str()) => {
                 double_ctrl_c = false;
                 match cmd.to_lowercase().as_str() {
                     "#help" | "#?" => {

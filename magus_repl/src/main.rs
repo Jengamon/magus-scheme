@@ -140,15 +140,51 @@ impl Highlighter for MagusHighlightor {
                 },
             );
         }
-        // Highlight all numbers in dim yellow
+        // Highlight all triggers and labels in purple (labels are dim purple)
         for tok in parse.syntax().descendants_with_tokens().filter_map(|ele| {
-            if ele.kind() == SyntaxKind::NUMBER {
+            if matches!(ele.kind(), SyntaxKind::DLABEL | SyntaxKind::DTRIGGER) {
+                ele.into_token()
+            } else {
+                None
+            }
+        }) {
+            let number_style = Style::new().fg(Color::LightPurple);
+            let is_label = tok.kind() == SyntaxKind::DLABEL;
+            let span = tok.text_range();
+            styled_buf.style_range(
+                span.start().into(),
+                span.end().into(),
+                if is_label {
+                    number_style.dimmed()
+                } else {
+                    number_style
+                },
+            );
+        }
+        // Highlight all numbers, bools, and characters in dim yellow
+        for tok in parse.syntax().descendants_with_tokens().filter_map(|ele| {
+            if matches!(
+                ele.kind(),
+                SyntaxKind::NUMBER | SyntaxKind::CHARACTER | SyntaxKind::BOOLEAN
+            ) {
                 ele.into_token()
             } else {
                 None
             }
         }) {
             let number_style = Style::new().fg(Color::Yellow);
+            let span = tok.text_range();
+            styled_buf.style_range(span.start().into(), span.end().into(), number_style);
+        }
+        // Highlight all strings in cyan
+        for tok in parse.syntax().descendants_with_tokens().filter_map(|ele| {
+            if matches!(ele.kind(), SyntaxKind::STRING) {
+                ele.into_token()
+            } else {
+                None
+            }
+        }) {
+            let number_style = Style::new().fg(Color::Cyan);
             let span = tok.text_range();
             styled_buf.style_range(span.start().into(), span.end().into(), number_style);
         }
@@ -182,14 +218,23 @@ impl Highlighter for MagusHighlightor {
             let mut parenthesis_stack = Vec::new();
             let unbalanced_style = Color::Red.reverse();
             for tok in parse.syntax().descendants_with_tokens().filter_map(|ele| {
-                if matches!(ele.kind(), SyntaxKind::LPAREN | SyntaxKind::RPAREN) {
+                if matches!(
+                    ele.kind(),
+                    SyntaxKind::LPAREN
+                        | SyntaxKind::RPAREN
+                        | SyntaxKind::START_BYTEVECTOR
+                        | SyntaxKind::START_VECTOR
+                ) {
                     ele.into_token()
                 } else {
                     None
                 }
             }) {
                 let span = tok.text_range();
-                if tok.kind() == SyntaxKind::LPAREN {
+                if matches!(
+                    tok.kind(),
+                    SyntaxKind::LPAREN | SyntaxKind::START_BYTEVECTOR | SyntaxKind::START_VECTOR
+                ) {
                     // lparen push their span to stack
                     parenthesis_stack.push(span);
                 } else {
@@ -262,7 +307,12 @@ impl Validator for SchemeValidator {
         let lparen_count = parse
             .syntax()
             .descendants_with_tokens()
-            .filter(|ele| ele.kind() == SyntaxKind::LPAREN)
+            .filter(|ele| {
+                matches!(
+                    ele.kind(),
+                    SyntaxKind::LPAREN | SyntaxKind::START_BYTEVECTOR | SyntaxKind::START_VECTOR
+                )
+            })
             .count();
         let rparen_count = parse
             .syntax()

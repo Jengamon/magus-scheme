@@ -288,7 +288,8 @@ impl<'gc> MagusToJs<'gc> {
                     arr.into()
                 }
             }
-            _ => todo!(),
+            // Value in progress "simply" return undefined
+            _ => JsValue::undefined(),
         }
     }
 

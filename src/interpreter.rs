@@ -593,6 +593,18 @@ impl Interpreter {
             .mutate_root(|mc, arena| (func)(mc, arena, &mut self.interner))
     }
 
+    /// Checks if a thread is considered finished
+    pub fn is_finished(&self, handle: &ThreadHandle) -> bool {
+        self.arena.mutate(|_mc, arena| {
+            let thread = arena
+                .stash
+                .threads
+                .get(handle.key)
+                .expect("thread was dropped when a handle still exists");
+            thread.borrow().is_finished()
+        })
+    }
+
     pub fn run(
         &mut self,
         handle: &ThreadHandle,

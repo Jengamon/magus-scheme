@@ -588,7 +588,8 @@ fn execute(
         Ok(chunk) => {
             let mut fuel = Fuel::with(1_000);
             chunk_debug(interpreter, &chunk);
-            interpreter.run(thread, |ctx, arena, interner| {
+            // thread setup
+            interpreter.run(thread, |ctx, arena, _interner| {
                 let thread = ctx.thread;
                 {
                     let chunk = arena.chunk(&chunk);
@@ -613,13 +614,32 @@ fn execute(
                         // The shenanigan: id want to keep this private to the magus crate
                         frame_env.borrow_mut(&ctx).reparent(Some(chunk.import_env));
                     }
-                    while !thread.is_finished() {
+                }
+            });
+            // execution loop
+            while !interpreter.is_finished(thread) {
+                let should_continue = interpreter.try_run(thread, |ctx, _arena, interner| {
+                    let thread = ctx.thread;
+                    {
+                        let mut thread = thread.borrow_mut(&ctx);
                         if let Ok(()) = termination_recv.try_recv() {
-                            break;
+                            return false;
                         }
                         thread.step(ctx, interner, world, includer, &mut fuel);
                         fuel.refill(1_000, 1_000);
+                        true
                     }
+                });
+
+                if !should_continue {
+                    break;
+                }
+            }
+            // thread coda (get result)
+            interpreter.run(thread, |ctx, _, interner| {
+                let thread = ctx.thread;
+                {
+                    let mut thread = thread.borrow_mut(&ctx);
                     // dbg!(&thread);
                     let sources = [(interner.get_or_intern_static("repl.scm"), source.as_ref())];
                     if let Some(res) = thread.result() {

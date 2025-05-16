@@ -2191,7 +2191,7 @@ impl<'gc> Compiler<'gc> {
                     // self-referential fix
                     let self_ref = Value::Undefined.into_ptr(mc);
                     let fallback = if let Some(f) = chunk.fallback {
-                        let mut new_fallback = f.as_ref().clone();
+                        let mut new_fallback = f.borrow().clone();
                         new_fallback.insert(Static(symbol), (self_ref, 0));
                         new_fallback
                     } else {
@@ -2208,7 +2208,7 @@ impl<'gc> Compiler<'gc> {
                         chunk.upvalues,
                         chunk.import_env,
                         chunk.labels.as_ref().clone(),
-                        Some(Gc::new(mc, fallback)),
+                        Some(Gc::new(mc, RefLock::new(fallback))),
                     );
                     let new_lambda = Value::Lambda({
                         let l =
@@ -2752,7 +2752,7 @@ impl<'gc> Compiler<'gc> {
                         }
 
                         let fallback = if !map.is_empty() {
-                            Some(Gc::new(mc, map))
+                            Some(Gc::new(mc, RefLock::new(map)))
                         } else {
                             None
                         };

@@ -4,7 +4,7 @@ use core::fmt;
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use fxhash::FxHashMap;
-use gc_arena::{Collect, Gc, Mutation, Static};
+use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
 
 use crate::{
     ValuePtr,
@@ -275,7 +275,7 @@ pub struct Chunk<'gc> {
 }
 pub type ChunkPtr<'gc> = Gc<'gc, Chunk<'gc>>;
 pub type ImportFallbackMap<'gc> = HashMap<Static<lasso::Spur>, (ValuePtr<'gc>, usize)>;
-pub type ImportFallback<'gc> = Option<Gc<'gc, ImportFallbackMap<'gc>>>;
+pub type ImportFallback<'gc> = Option<Gc<'gc, RefLock<ImportFallbackMap<'gc>>>>;
 
 impl<'gc> Chunk<'gc> {
     #[allow(clippy::too_many_arguments)]

@@ -1,0 +1,15 @@
+---
+9
+10
+---
+(define-library (sb)
+	(import (only (scheme base) + set! define))
+	(export demb)
+	(begin
+		(define dem 9)
+		(define (demb)
+			(define ret dem)
+			(set! dem (+ ret 1))
+			ret)))
+(import (sb) (only (scheme base) values))
+(values (demb) (demb))

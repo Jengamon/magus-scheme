@@ -1016,7 +1016,7 @@ impl<'gc> Thread<'gc> {
                 }
             })
             // .inspect(|fb| eprintln!("FBFB: {:?}", fb.keys()))
-            .find_map(|fb| fb.get(&Static(symbol)).copied())
+            .find_map(|fb| fb.borrow().get(&Static(symbol)).copied())
             .filter(|&fallback| !matches!(*fallback.0.borrow(), Value::Undefined))
     }
 
@@ -1707,8 +1707,10 @@ impl<'gc> Thread<'gc> {
                             {
                                 if enable_fallback {
                                     if let Some(fb) = fallback {
-                                        if let Some((val, _)) = fb.get(&Static(symbol)).copied() {
-                                            *val.borrow_mut(&ctx) = *value.borrow();
+                                        if let Some((val, _)) =
+                                            fb.borrow_mut(&ctx).get_mut(&Static(symbol))
+                                        {
+                                            *val = value;
                                             advance_to_next_inst!();
                                             continue;
                                         }

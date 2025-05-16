@@ -499,7 +499,7 @@ fn chunk_debug(interpreter: &mut Interpreter, chunk: &ChunkHandle) {
                     shown.insert(symbol);
                     println!("{} -> `{}`", symbol.into_inner(), interner.resolve(&symbol));
                 }
-                Bytecode::SetBang { symbol } if !shown.contains(&symbol) => {
+                Bytecode::SetBang { symbol, .. } if !shown.contains(&symbol) => {
                     shown.insert(symbol);
                     println!("{} -> `{}`", symbol.into_inner(), interner.resolve(&symbol));
                 }

@@ -2,6 +2,7 @@
 
 use core::fmt;
 use gc_arena::{Collect, Gc, Mutation, RefLock};
+use std::rc::Rc;
 
 use crate::{
     Fuel, ValuePtr,
@@ -71,6 +72,9 @@ pub enum LambdaReturn<'gc> {
         lambda: Lambda<'gc>,
         args: Vec<ValuePtr<'gc>>,
         dynamic_wind: DynamicWind<'gc>,
+        /// This gives up ownership of the environment. Only use for
+        /// environments you created. (It will reparent it if its parent is None)
+        env: Option<StackEnvironmentPtr<'gc>>,
     },
     /// Call a given lambda as an exception handler, and push the values it returns onto the stack
     CallHandler {
@@ -194,15 +198,26 @@ pub struct CompiledLambda<'gc> {
     #[collect(require_static)]
     pub(crate) arity: Arity,
     pub(crate) chunk: ChunkPtr<'gc>,
+    #[collect(require_static)]
+    pub(crate) arg_names: Rc<[lasso::Spur]>,
+    #[collect(require_static)]
+    pub(crate) rest_name: Option<lasso::Spur>,
     pub(crate) upvalue_id: Option<usize>,
 }
 
 impl<'gc> CompiledLambda<'gc> {
-    pub fn new(arity: Arity, chunk: ChunkPtr<'gc>) -> Self {
+    pub fn new(
+        arity: Arity,
+        chunk: ChunkPtr<'gc>,
+        arg_names: impl IntoIterator<Item = lasso::Spur>,
+        rest_name: Option<lasso::Spur>,
+    ) -> Self {
         Self {
             arity,
             chunk,
             upvalue_id: None,
+            arg_names: arg_names.into_iter().collect(),
+            rest_name,
         }
     }
 
@@ -221,6 +236,8 @@ impl<'gc> CompiledLambda<'gc> {
                 arity: self.arity,
                 chunk: self.chunk,
                 upvalue_id: Some(upvalue_id),
+                arg_names: Rc::clone(&self.arg_names),
+                rest_name: self.rest_name,
             },
         )
     }

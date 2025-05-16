@@ -2211,8 +2211,15 @@ impl<'gc> Compiler<'gc> {
                         Some(Gc::new(mc, RefLock::new(fallback))),
                     );
                     let new_lambda = Value::Lambda({
-                        let l =
-                            Lambda::Compiled(Gc::new(mc, CompiledLambda::new(c.arity, new_chunk)));
+                        let l = Lambda::Compiled(Gc::new(
+                            mc,
+                            CompiledLambda::new(
+                                c.arity,
+                                new_chunk,
+                                c.arg_names.iter().copied(),
+                                c.rest_name,
+                            ),
+                        ));
                         if let Some(uid) = c.upvalue_id {
                             l.label(mc, uid)
                         } else {
@@ -2774,7 +2781,15 @@ impl<'gc> Compiler<'gc> {
                             fallback,
                         );
 
-                        let mut lambda = Gc::new(mc, CompiledLambda::new(c.arity, new_chunk));
+                        let mut lambda = Gc::new(
+                            mc,
+                            CompiledLambda::new(
+                                c.arity,
+                                new_chunk,
+                                c.arg_names.iter().copied(),
+                                c.rest_name,
+                            ),
+                        );
 
                         if let Some(label) = c.upvalue_id {
                             lambda = lambda.label(mc, label);

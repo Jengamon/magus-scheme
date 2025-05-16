@@ -137,6 +137,23 @@ impl MagusInterpreter {
         Ok(())
     }
 
+    /// Enable `(scheme lazy)`
+    pub fn enable_lazy(&mut self) -> Result<(), String> {
+        if self.registry.lazy.is_some() {
+            // don't reenable
+            return Ok(());
+        }
+
+        let lazy = magus::stdlib::lazy::Lazy;
+
+        self.interpreter
+            .borrow_mut()
+            .register_native_module(&mut self.world.borrow_mut(), &lazy, None)
+            .map_err(|e| e.to_string())?;
+        self.registry.lazy = Some(lazy);
+        Ok(())
+    }
+
     pub fn symbol_dump(&self) -> js_sys::Map {
         let map = js_sys::Map::new();
         for (k, v) in self.interpreter.borrow().interner().strings().enumerate() {

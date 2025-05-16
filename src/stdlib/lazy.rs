@@ -79,6 +79,8 @@ mod syntax {
                                 import_env,
                                 labels,
                             ),
+                            [],
+                            None,
                         ),
                     );
                     Ok::<_, anyhow::Error>(Lambda::Compiled(compiled))
@@ -155,6 +157,8 @@ mod syntax {
                                     import_env,
                                     labels,
                                 ),
+                                [],
+                                None,
                             ),
                         );
                         Ok::<_, anyhow::Error>(compiled)
@@ -178,6 +182,7 @@ mod procedures {
 
     use crate::{
         Value,
+        environment::StackEnvironment,
         runtime::lambda::{Arity, LambdaResult, LambdaReturn, NativeLambda, NativeLambdaContext},
         value::Promise,
     };
@@ -233,10 +238,41 @@ mod procedures {
                     unreachable!()
                 };
 
+                let mut arg_env = StackEnvironment::new(&ctx, None);
+                // TODO crawl up frames in reverse and put values as needed into environment
+                for frame in ctx.frames.iter().rev() {
+                    if let Some((arg_names, rest_name)) = frame.arg_name_data() {
+                        let args = frame.args();
+                        for (name, value) in arg_names.iter().copied().zip(args) {
+                            if arg_env.is_defined(name).is_none() {
+                                arg_env.define(&ctx, name, *value, false).unwrap();
+                            }
+                        }
+
+                        if let Some((name, value)) = rest_name.zip(frame.rest_arg()) {
+                            if arg_env.is_defined(name).is_none() {
+                                arg_env.define(&ctx, name, value, false).unwrap();
+                            }
+                        }
+                    }
+
+                    for (name, value) in frame.tail_called_args() {
+                        arg_env.define(&ctx, name.0, *value, false).unwrap();
+                    }
+                }
+
+                // Technically we want a new env where our local env is preserved, but
+                // this parent env interferes
+                let mut current_env = ctx.frames.last().map(|f| f.env_raw()).unwrap();
+                let current_env_parent = current_env.parent();
+                arg_env.reparent(current_env_parent);
+                current_env.reparent(Some(Gc::new(&ctx, RefLock::new(arg_env))));
+
                 Ok(LambdaReturn::Call {
                     lambda,
                     args: vec![],
                     dynamic_wind: None,
+                    env: Some(Gc::new(&ctx, RefLock::new(current_env))),
                 })
             } else {
                 // store the promise value, and return it!

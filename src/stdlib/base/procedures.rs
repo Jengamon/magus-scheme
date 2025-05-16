@@ -358,6 +358,7 @@ mod control {
                     lambda: thunk,
                     args: vec![],
                     dynamic_wind: Some((before, after)),
+                    env: None,
                 })
             } else {
                 Ok(LambdaReturn::Return(vec![*ctx.stack.first().unwrap()]))
@@ -1528,6 +1529,7 @@ mod list {
                     Either::Left(lambda) => Ok(LambdaReturn::Call {
                         lambda,
                         args: first_values,
+                        env: None,
                         dynamic_wind: None,
                     }),
                     Either::Right(cont) => Ok(LambdaReturn::Continue {
@@ -1573,6 +1575,7 @@ mod list {
                         Procedure::Lambda(lambda) => Ok(LambdaReturn::Call {
                             lambda,
                             args: values,
+                            env: None,
                             dynamic_wind: None,
                         }),
                         Procedure::Continuation(cont) => {
@@ -2607,6 +2610,7 @@ mod structure {
                     lambda: producer,
                     args: vec![],
                     dynamic_wind: None,
+                    env: None,
                 })
             } else {
                 let Value::Lambda(consumer) = *args[1].borrow() else {

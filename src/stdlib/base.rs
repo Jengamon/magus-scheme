@@ -188,7 +188,12 @@ impl Syntax for Lambda {
         // dbg!((arg_list, &chunk));
         let index = ctx.add_lambda(Gc::new(
             ctx,
-            lambda::CompiledLambda::new(formals.arity(), chunk?),
+            lambda::CompiledLambda::new(
+                formals.arity(),
+                chunk?,
+                formals.non_rest_params(),
+                formals.rest_param(),
+            ),
         ));
 
         Ok(SyntaxReturn::Code(Box::from([

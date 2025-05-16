@@ -1,0 +1,12 @@
+---
+42
+2
+---
+(import (only (scheme base) define if = not values) (only (scheme lazy) delay force))
+(define fx (delay x))
+(define (cbat x)
+  (if (not (= x 42))
+    (define x 2))
+  (force fx))
+; promises (delay) are memoized, so remember to reset
+(values (cbat 42) (define fx (delay x)) (cbat 41))

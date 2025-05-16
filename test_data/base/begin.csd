@@ -93,6 +93,8 @@ Chunk {
                     },
                     fallback: None,
                 },
+                arg_names: [],
+                rest_name: None,
                 upvalue_id: None,
             },
         ),

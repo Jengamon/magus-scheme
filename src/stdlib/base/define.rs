@@ -84,8 +84,15 @@ impl Syntax for Define {
                     args.iter().skip(1).copied(),
                 );
 
-                let index =
-                    ctx.add_lambda(Gc::new(ctx, CompiledLambda::new(formals.arity(), chunk?)));
+                let index = ctx.add_lambda(Gc::new(
+                    ctx,
+                    CompiledLambda::new(
+                        formals.arity(),
+                        chunk?,
+                        formals.non_rest_params(),
+                        formals.rest_param(),
+                    ),
+                ));
 
                 Ok(SyntaxReturn::Code(Box::from([
                     Bytecode::PushLambda { index },
@@ -119,8 +126,15 @@ impl Syntax for Define {
                     args.iter().skip(1).copied(),
                 );
 
-                let index =
-                    ctx.add_lambda(Gc::new(ctx, CompiledLambda::new(formals.arity(), chunk?)));
+                let index = ctx.add_lambda(Gc::new(
+                    ctx,
+                    CompiledLambda::new(
+                        formals.arity(),
+                        chunk?,
+                        formals.non_rest_params(),
+                        formals.rest_param(),
+                    ),
+                ));
 
                 Ok(SyntaxReturn::Code(Box::from([
                     Bytecode::PushLambda { index },

@@ -56,6 +56,7 @@ impl<'gc> NativeLambda<'gc> for WithExceptionHandler {
                 lambda: thunk,
                 args: Vec::new(),
                 dynamic_wind: None,
+                env: None,
             })
         } else {
             Ok(LambdaReturn::Return(vec![ctx.stack[0]]))

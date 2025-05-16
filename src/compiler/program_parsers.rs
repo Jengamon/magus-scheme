@@ -1,7 +1,8 @@
 use core::fmt;
+use std::num::NonZeroU16;
 
 use gc_arena::{Gc, Mutation};
-use num::{BigInt, BigRational, BigUint, bigint::Sign};
+use num::{BigInt, BigRational, BigUint, One, bigint::Sign};
 
 use crate::{
     AbbreviationKind, ContainsDatum as _, DatumVisitor, ExactReal, GAstNode, GAstToken as _,
@@ -11,6 +12,83 @@ use crate::{
     general_parser::GeneralParserError,
     value::Number,
 };
+
+pub fn exact_decimal(
+    base: u64,
+    leading_zeros: Option<NonZeroU16>,
+    post_dot: u64,
+    exponent_neg: bool,
+    exponent: u64,
+    is_neg: bool,
+) -> BigRational {
+    use num::FromPrimitive;
+
+    // an exact decimal is a ratio!
+    let mut numer = BigInt::from_biguint(Sign::Plus, BigUint::from_u64(base).unwrap());
+    // we need a ten around for lots of stuff
+    let ten = BigInt::from_biguint(Sign::Plus, BigUint::from_u64(10).unwrap());
+
+    // decimal shift for everything in leading zeros!
+    if let Some(lz) = leading_zeros {
+        let lz_pow = BigUint::from_u16(lz.get()).unwrap();
+        numer *= num::pow::Pow::pow(&ten, &lz_pow);
+    }
+
+    // shift for post_dot and add
+    if post_dot != 0 {
+        let pd_pow = BigUint::from_u64(1 + post_dot.ilog10() as u64).unwrap();
+        numer *= num::pow::Pow::pow(&ten, &pd_pow);
+    };
+
+    let pd = BigInt::from_biguint(Sign::Plus, BigUint::from_u64(post_dot).unwrap());
+    numer += pd;
+
+    // power of 10 for exponent
+    let pt = {
+        let pd_exp = BigInt::from_biguint(
+            Sign::Plus,
+            BigUint::from_u64(if post_dot != 0 {
+                1 + post_dot.ilog10() as u64
+            } else {
+                0
+            })
+            .unwrap(),
+        );
+        let lz_exp = if let Some(lz) = leading_zeros {
+            BigInt::new(Sign::Plus, vec![lz.get() as u32])
+        } else {
+            BigInt::ZERO
+        };
+        let pow = BigInt::from_biguint(
+            if exponent_neg {
+                Sign::Minus
+            } else {
+                Sign::Plus
+            },
+            BigUint::from_u64(exponent).unwrap(),
+        );
+        let tpow = pow - pd_exp - lz_exp;
+
+        let (sign, uint_pow) = tpow.into_parts();
+
+        let expt = num::pow::Pow::pow(ten, uint_pow);
+        // raising a number to a power doesn't output 0, unless the base was 0, so
+        if sign == Sign::Minus {
+            BigRational::new(BigInt::one(), expt)
+        } else {
+            BigRational::new(expt, BigInt::one())
+        }
+    };
+
+    // dbg!(&pt);
+
+    let unsigned_decimal_ratio = BigRational::new(numer, BigInt::one()) * pt;
+    if is_neg {
+        unsigned_decimal_ratio * -BigInt::one()
+    } else {
+        unsigned_decimal_ratio
+    }
+}
 
 use super::{ParseProgram, ProgramPtr};
 
@@ -210,6 +288,31 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
                             ),
                         )));
                     }
+                    Some(SchemeNumber::Exact(ExactReal::Decimal {
+                        base,
+                        leading_zeros,
+                        post_dot,
+                        exponent,
+                        exponent_neg,
+                        is_neg,
+                    })) => {
+                        let decimal_ratio = exact_decimal(
+                            base,
+                            leading_zeros,
+                            post_dot,
+                            exponent_neg,
+                            exponent,
+                            is_neg,
+                        );
+
+                        self.ptr = Some(Ok(Gc::new(
+                            self.mc,
+                            Program::new(
+                                ProgramData::Number(Number::from_rational(decimal_ratio)),
+                                source_data!(self, number),
+                            ),
+                        )));
+                    }
                     Some(SchemeNumber::Exact(ExactReal::Rational {
                         numer,
                         denom,
@@ -279,7 +382,7 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
                             ),
                         )));
                     }
-                    Some(SchemeNumber::Exact(_)) | Some(SchemeNumber::ExactComplex { .. }) => {
+                    Some(SchemeNumber::ExactComplex { .. }) => {
                         self.ptr = Some(Err(GAstProgramError::UnsupportedNumber(
                             number.syntax().text_range(),
                         )));
@@ -579,5 +682,48 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
         }
 
         Ok(programs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ExactReal;
+
+    use super::exact_decimal;
+    use arbtest::arbtest;
+    use assert2::{assert, let_assert};
+
+    #[test]
+    fn test_exact_decimal_roundtrip_arbtest() {
+        arbtest(|u| {
+            use num::ToPrimitive;
+            let base: u64 = u.arbitrary()?;
+            let leading_zeros: Option<std::num::NonZero<u16>> = u.arbitrary()?;
+            let post_dot = u.arbitrary::<u16>()? as u64;
+            let exponent_neg = u.arbitrary()?;
+            let exponent = u.arbitrary::<u16>()? as u64;
+            let is_neg = u.arbitrary()?;
+            let ratio = exact_decimal(
+                base,
+                leading_zeros,
+                post_dot,
+                exponent_neg,
+                exponent,
+                is_neg,
+            );
+            let real = ExactReal::Decimal {
+                base,
+                leading_zeros,
+                post_dot,
+                exponent,
+                exponent_neg,
+                is_neg,
+            };
+            let_assert!(Some(ratio) = ratio.to_f64());
+            assert!(real.inexact() == ratio);
+            Ok(())
+        })
+        // allow this test to run for 2 seconds, cuz getting powers is expensive
+        .budget_ms(2_000);
     }
 }

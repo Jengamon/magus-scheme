@@ -8,6 +8,7 @@ use crate::{
 pub mod base;
 pub mod inexact;
 pub mod lazy;
+pub mod magus_help;
 mod magus_impl;
 pub mod srfi;
 pub mod write;

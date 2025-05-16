@@ -68,6 +68,7 @@ mod syntax {
                     let compiled = Gc::new(
                         ctx,
                         CompiledLambda::new(
+                            ctx,
                             Arity::Exact(0),
                             Chunk::new(
                                 ctx,
@@ -146,6 +147,7 @@ mod syntax {
                         let compiled = Gc::new(
                             ctx,
                             CompiledLambda::new(
+                                ctx,
                                 Arity::Exact(0),
                                 Chunk::new(
                                     ctx,

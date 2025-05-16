@@ -87,6 +87,7 @@ impl Syntax for Define {
                 let index = ctx.add_lambda(Gc::new(
                     ctx,
                     CompiledLambda::new(
+                        ctx,
                         formals.arity(),
                         chunk?,
                         formals.non_rest_params(),
@@ -129,6 +130,7 @@ impl Syntax for Define {
                 let index = ctx.add_lambda(Gc::new(
                     ctx,
                     CompiledLambda::new(
+                        ctx,
                         formals.arity(),
                         chunk?,
                         formals.non_rest_params(),

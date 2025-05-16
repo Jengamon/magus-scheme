@@ -20,8 +20,7 @@ use crate::{
 pub use boolean::{And, Or};
 pub use conditionals::If;
 pub use define::{Define, SetBang};
-pub(crate) use error_obj::ErrorObject;
-pub use error_obj::{Error as ErrorLambda, ErrorObjectMessage, IsErrorObject};
+pub use error_obj::{Error as ErrorLambda, ErrorObject, ErrorObjectMessage, IsErrorObject};
 pub use exception::WithExceptionHandler;
 pub use include::{Include, IncludeCi};
 pub use macros::{DefineSyntax, SyntaxRules};
@@ -190,6 +189,7 @@ impl Syntax for Lambda {
         let index = ctx.add_lambda(Gc::new(
             ctx,
             lambda::CompiledLambda::new(
+                ctx,
                 formals.arity(),
                 chunk?,
                 formals.non_rest_params(),

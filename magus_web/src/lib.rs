@@ -12,6 +12,7 @@ struct ModuleRegistry {
     inexact: Option<magus::stdlib::inexact::Inexact>,
 
     srfi_1: Option<magus::stdlib::srfi::list::Srfi1>,
+    help: Option<magus::stdlib::magus_help::MagusHelp>,
 }
 
 impl ModuleRegistry {
@@ -56,6 +57,7 @@ impl ModuleRegistry {
         module_register!(lazy);
         module_register!(cxr);
         module_register!(srfi_1);
+        module_register!(help);
 
         Ok(())
     }
@@ -151,6 +153,23 @@ impl MagusInterpreter {
             .register_native_module(&mut self.world.borrow_mut(), &lazy, None)
             .map_err(|e| e.to_string())?;
         self.registry.lazy = Some(lazy);
+        Ok(())
+    }
+
+    /// Enable `(magus help)`
+    pub fn enable_magus_help(&mut self) -> Result<(), String> {
+        if self.registry.help.is_some() {
+            // don't reenable
+            return Ok(());
+        }
+
+        let help = magus::stdlib::magus_help::MagusHelp;
+
+        self.interpreter
+            .borrow_mut()
+            .register_native_module(&mut self.world.borrow_mut(), &help, None)
+            .map_err(|e| e.to_string())?;
+        self.registry.help = Some(help);
         Ok(())
     }
 

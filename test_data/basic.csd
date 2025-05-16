@@ -78,6 +78,9 @@ Chunk {
                 arg_names: [],
                 rest_name: None,
                 upvalue_id: None,
+                doc_string: RefLock(
+                    None,
+                ),
             },
         ),
     ],

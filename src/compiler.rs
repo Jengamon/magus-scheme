@@ -2214,6 +2214,7 @@ impl<'gc> Compiler<'gc> {
                         let l = Lambda::Compiled(Gc::new(
                             mc,
                             CompiledLambda::new(
+                                mc,
                                 c.arity,
                                 new_chunk,
                                 c.arg_names.iter().copied(),
@@ -2784,6 +2785,7 @@ impl<'gc> Compiler<'gc> {
                         let mut lambda = Gc::new(
                             mc,
                             CompiledLambda::new(
+                                mc,
                                 c.arity,
                                 new_chunk,
                                 c.arg_names.iter().copied(),

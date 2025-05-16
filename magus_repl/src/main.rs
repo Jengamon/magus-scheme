@@ -673,6 +673,19 @@ fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle, ThreadHan
         &thread,
         &compiler,
         &mut world,
+        stdlib::magus_help::MagusHelp,
+        None,
+        |thread, vp| LibraryDefinitionContext {
+            max_fuel: Some(10_000),
+            value_pointers: vp,
+            additional_features: Some(&additional_features),
+            thread,
+        },
+    )?;
+    interpreter.register_module(
+        &thread,
+        &compiler,
+        &mut world,
         stdlib::base::Base {
             additional_features: std::sync::Arc::clone(&additional_features),
         },

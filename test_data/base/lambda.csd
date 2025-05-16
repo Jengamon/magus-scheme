@@ -89,6 +89,9 @@ Chunk {
                 arg_names: [],
                 rest_name: None,
                 upvalue_id: None,
+                doc_string: RefLock(
+                    None,
+                ),
             },
         ),
         Compiled(
@@ -184,6 +187,9 @@ Chunk {
                                 arg_names: [],
                                 rest_name: None,
                                 upvalue_id: None,
+                                doc_string: RefLock(
+                                    None,
+                                ),
                             },
                         ),
                     ],
@@ -242,6 +248,9 @@ Chunk {
                 ],
                 rest_name: None,
                 upvalue_id: None,
+                doc_string: RefLock(
+                    None,
+                ),
             },
         ),
         Compiled(
@@ -337,6 +346,9 @@ Chunk {
                                 arg_names: [],
                                 rest_name: None,
                                 upvalue_id: None,
+                                doc_string: RefLock(
+                                    None,
+                                ),
                             },
                         ),
                         Compiled(
@@ -432,6 +444,9 @@ Chunk {
                                                 arg_names: [],
                                                 rest_name: None,
                                                 upvalue_id: None,
+                                                doc_string: RefLock(
+                                                    None,
+                                                ),
                                             },
                                         ),
                                     ],
@@ -490,6 +505,9 @@ Chunk {
                                 ],
                                 rest_name: None,
                                 upvalue_id: None,
+                                doc_string: RefLock(
+                                    None,
+                                ),
                             },
                         ),
                     ],
@@ -557,6 +575,9 @@ Chunk {
                     Spur(10),
                 ),
                 upvalue_id: None,
+                doc_string: RefLock(
+                    None,
+                ),
             },
         ),
         Compiled(
@@ -652,6 +673,9 @@ Chunk {
                                 arg_names: [],
                                 rest_name: None,
                                 upvalue_id: None,
+                                doc_string: RefLock(
+                                    None,
+                                ),
                             },
                         ),
                         Compiled(
@@ -747,6 +771,9 @@ Chunk {
                                                 arg_names: [],
                                                 rest_name: None,
                                                 upvalue_id: None,
+                                                doc_string: RefLock(
+                                                    None,
+                                                ),
                                             },
                                         ),
                                     ],
@@ -805,6 +832,9 @@ Chunk {
                                 ],
                                 rest_name: None,
                                 upvalue_id: None,
+                                doc_string: RefLock(
+                                    None,
+                                ),
                             },
                         ),
                         Compiled(
@@ -900,6 +930,9 @@ Chunk {
                                                 arg_names: [],
                                                 rest_name: None,
                                                 upvalue_id: None,
+                                                doc_string: RefLock(
+                                                    None,
+                                                ),
                                             },
                                         ),
                                         Compiled(
@@ -995,6 +1028,9 @@ Chunk {
                                                                 arg_names: [],
                                                                 rest_name: None,
                                                                 upvalue_id: None,
+                                                                doc_string: RefLock(
+                                                                    None,
+                                                                ),
                                                             },
                                                         ),
                                                     ],
@@ -1053,6 +1089,9 @@ Chunk {
                                                 ],
                                                 rest_name: None,
                                                 upvalue_id: None,
+                                                doc_string: RefLock(
+                                                    None,
+                                                ),
                                             },
                                         ),
                                     ],
@@ -1120,6 +1159,9 @@ Chunk {
                                     Spur(10),
                                 ),
                                 upvalue_id: None,
+                                doc_string: RefLock(
+                                    None,
+                                ),
                             },
                         ),
                     ],
@@ -1205,6 +1247,9 @@ Chunk {
                 ],
                 rest_name: None,
                 upvalue_id: None,
+                doc_string: RefLock(
+                    None,
+                ),
             },
         ),
     ],

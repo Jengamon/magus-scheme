@@ -13,9 +13,18 @@ use crate::{
 /// The error object used for `error`
 #[derive(Collect)]
 #[collect(no_drop)]
-pub(crate) struct ErrorObject<'gc> {
+pub struct ErrorObject<'gc> {
     pub(crate) message: String<'gc>,
     irritants: Vec<ValuePtr<'gc>>,
+}
+
+impl<'gc> ErrorObject<'gc> {
+    pub fn new(message: String<'gc>, irritants: impl IntoIterator<Item = ValuePtr<'gc>>) -> Self {
+        Self {
+            message,
+            irritants: irritants.into_iter().collect(),
+        }
+    }
 }
 
 #[derive(Debug, Collect)]

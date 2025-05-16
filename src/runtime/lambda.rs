@@ -17,7 +17,7 @@ use crate::{
 
 use super::{
     error::SchemeErrorPtr,
-    value::{ContinuationPtr, ParameterPtr},
+    value::{self, ContinuationPtr, ParameterPtr},
 };
 
 /// Possible errors
@@ -186,6 +186,11 @@ pub trait NativeLambda<'gc>: std::fmt::Debug + Collectable {
         let _ = mc;
         None
     }
+
+    /// Provide a documentation string
+    fn doc_string(&self) -> Option<&str> {
+        None
+    }
 }
 pub type NativeLambdaPtr<'gc> = Gc<'gc, RefLock<dyn NativeLambda<'gc> + 'gc>>;
 pub type LambdaResult<'gc> = Result<LambdaReturn<'gc>, LambdaError>;
@@ -203,10 +208,12 @@ pub struct CompiledLambda<'gc> {
     #[collect(require_static)]
     pub(crate) rest_name: Option<lasso::Spur>,
     pub(crate) upvalue_id: Option<usize>,
+    pub(crate) doc_string: Gc<'gc, RefLock<Option<value::String<'gc>>>>,
 }
 
 impl<'gc> CompiledLambda<'gc> {
     pub fn new(
+        mc: &Mutation<'gc>,
         arity: Arity,
         chunk: ChunkPtr<'gc>,
         arg_names: impl IntoIterator<Item = lasso::Spur>,
@@ -218,6 +225,7 @@ impl<'gc> CompiledLambda<'gc> {
             upvalue_id: None,
             arg_names: arg_names.into_iter().collect(),
             rest_name,
+            doc_string: Gc::new(mc, RefLock::new(None)),
         }
     }
 
@@ -238,6 +246,7 @@ impl<'gc> CompiledLambda<'gc> {
                 upvalue_id: Some(upvalue_id),
                 arg_names: Rc::clone(&self.arg_names),
                 rest_name: self.rest_name,
+                doc_string: self.doc_string,
             },
         )
     }
@@ -320,6 +329,30 @@ impl Lambda<'_> {
             _ => None,
         }
     }
+
+    /// Get a lambda's doc string
+    pub fn doc_string(&self, native_lam: Option<&dyn NativeLambda>) -> Option<String> {
+        match self {
+            Self::Compiled(c) => c.doc_string.borrow().map(|i| i.borrow().clone()),
+            Self::ClosureCompiled { compiled, .. } => {
+                compiled.doc_string.borrow().map(|i| i.borrow().clone())
+            }
+            Self::Native(n) => {
+                if let Some(native) = native_lam {
+                    // compare addresses, if same, we are the same pointer, just use us
+                    let n_addr = n.as_ptr().addr();
+                    let our_addr = (native as *const dyn NativeLambda).addr();
+                    if n_addr == our_addr {
+                        native.doc_string().map(str::to_string)
+                    } else {
+                        n.borrow().doc_string().map(str::to_string)
+                    }
+                } else {
+                    n.borrow().doc_string().map(str::to_string)
+                }
+            }
+        }
+    }
 }
 
 impl<'gc> Lambda<'gc> {
@@ -332,6 +365,21 @@ impl<'gc> Lambda<'gc> {
                 compiled: compiled.label(mc, upvalue_id),
                 env,
             },
+        }
+    }
+
+    /// (Try to) set a lambda's doc string
+    pub fn set_doc_string(&self, mc: &Mutation<'gc>, to: Option<value::String<'gc>>) -> bool {
+        match self {
+            Self::Native(_) => false,
+            Self::Compiled(c) => {
+                *c.doc_string.borrow_mut(mc) = to;
+                true
+            }
+            Self::ClosureCompiled { compiled, .. } => {
+                *compiled.doc_string.borrow_mut(mc) = to;
+                true
+            }
         }
     }
 }

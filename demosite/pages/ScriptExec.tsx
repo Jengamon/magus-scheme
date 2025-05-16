@@ -53,6 +53,7 @@ function ScriptExec() {
   interpreter.enable_cxr();
   interpreter.enable_inexact();
   interpreter.enable_lazy();
+  interpreter.enable_magus_help();
 
   let thread: MagusThread | null = null;
 

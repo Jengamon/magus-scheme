@@ -746,16 +746,6 @@ impl<'gc> Thread<'gc> {
         } else {
             None
         };
-        while let Some(v) = self.stack.last() {
-            match *v.borrow() {
-                Value::Void => {
-                    self.stack.pop();
-                }
-                _ => {
-                    break;
-                }
-            }
-        }
         let (execution, upvalue_index, closed_env) = Execution::from_lambda(
             ctx,
             lambda,

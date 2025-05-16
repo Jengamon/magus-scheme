@@ -76,16 +76,10 @@ impl Write for OutputPort {
                     }
                 }
             } else {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "output port was poisoned",
-                ))?
+                Err(std::io::Error::other("output port was poisoned"))?
             }
         } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "output port was closed",
-            ))?
+            Err(std::io::Error::other("output port was closed"))?
         }
     }
 
@@ -94,16 +88,10 @@ impl Write for OutputPort {
             if let Ok(mut writer) = port.lock() {
                 writer.flush()
             } else {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "output port was poisoned",
-                ))?
+                Err(std::io::Error::other("output port was poisoned"))?
             }
         } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "output port was closed",
-            ))?
+            Err(std::io::Error::other("output port was closed"))?
         }
     }
 }
@@ -162,16 +150,10 @@ impl Read for InputPort {
                     }
                 }
             } else {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "input port was poisoned",
-                ))?
+                Err(std::io::Error::other("input port was poisoned"))?
             }
         } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "input port was closed",
-            ))?
+            Err(std::io::Error::other("input port was closed"))?
         }
     }
 }

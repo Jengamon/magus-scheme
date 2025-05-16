@@ -160,7 +160,7 @@ impl Syntax for Parameterize {
 
         let lambda = ctx.add_lambda(Gc::new(
             ctx,
-            CompiledLambda::new(&ctx, Arity::Exact(0), parameterize_chunk, [], None),
+            CompiledLambda::new(ctx, Arity::Exact(0), parameterize_chunk, [], None),
         ));
 
         Ok(SyntaxReturn::Code(Box::new([

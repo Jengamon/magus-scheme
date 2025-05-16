@@ -508,6 +508,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K, ModeWrite> {
             Value::Inexact(fp) if fp.is_infinite() && fp.is_sign_negative() => write!(f, "-inf.0"),
             Value::Inexact(fp) if fp.is_infinite() => write!(f, "+inf.0"),
             Value::Inexact(fp) if fp.is_nan() => write!(f, "+nan.0"),
+            Value::Inexact(fp) if fp.fract() == 0.0 => write!(f, "{fp}."),
             Value::Inexact(fp) => write!(f, "{fp}"),
             Value::String(s) => write!(
                 f,
@@ -683,6 +684,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K, ModeDisplay> {
             Value::Inexact(fp) if fp.is_infinite() && fp.is_sign_negative() => write!(f, "-inf.0"),
             Value::Inexact(fp) if fp.is_infinite() => write!(f, "+inf.0"),
             Value::Inexact(fp) if fp.is_nan() => write!(f, "+nan.0"),
+            Value::Inexact(fp) if fp.fract() == 0.0 => write!(f, "{fp}."),
             Value::Inexact(fp) => write!(f, "{fp}"),
             Value::String(s) => write!(f, "{}", s.borrow()),
             Value::Symbol(sym) => write!(f, "{}", self.resolver.resolve(&sym.0)),

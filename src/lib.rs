@@ -7,6 +7,8 @@
 // has to visibly be true for us)
 // (If this changes, we would need some kind of gc tag that is the same for an arbitrary Gc allocation
 // for its lifetime. rn its the address but it could be something else in the future)
+// NOTE due to how the GC works, as long as we aren't storing the value long-term (it is
+// transient within 1 mutate call), we are fine
 
 pub mod bytecode;
 pub mod compiler;

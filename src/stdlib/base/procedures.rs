@@ -10,8 +10,8 @@ pub use equality::{IsEq, IsEqual, IsEqv};
 pub use error::{Raise, RaiseContinuable};
 pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr, ListCopy, ListSetBang, Map};
 pub use math::{
-    Add, Denominator, Divide, ExactIntegerSqrt, Expt, FloorSlash, Gcd, Lcm, Multiply, Numerator,
-    Subtract,
+    Add, Ceiling, Denominator, Divide, ExactIntegerSqrt, Expt, Floor, FloorSlash, Gcd, Lcm,
+    Multiply, Numerator, Round, Subtract, Truncate, TruncateSlash,
 };
 pub use predicates::{
     IsBytevector, IsChar, IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull,
@@ -938,14 +938,208 @@ mod math {
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct TruncateSlash;
-    /// Also known as `quotient`
+
+    impl<'gc> NativeLambda<'gc> for TruncateSlash {
+        fn arity(&self) -> Arity {
+            Arity::Exact(2)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let n1 = match *args[0].borrow() {
+                Value::Number(n) => Either::Left(n),
+                Value::Inexact(f) => Either::Right(f),
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "truncate/ expects a number as its first argument"
+                    ))?;
+                }
+            };
+
+            let n2 = match *args[1].borrow() {
+                Value::Number(n) => Either::Left(n),
+                Value::Inexact(f) => Either::Right(f),
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "truncate/ expects a number as its second argument"
+                    ))?;
+                }
+            };
+
+            let (n, r) = match (n1, n2) {
+                (Either::Left(n1), Either::Left(n2)) => {
+                    if n2.is_zero() {
+                        return Err(anyhow::anyhow!("truncate/: divide by zero"))?;
+                    } else {
+                        match &*n1 / &*n2 {
+                            Number::Integer(i) => (
+                                Either::Left(Number::Integer(i)),
+                                Either::Left(Number::Integer(BigInt::ZERO)),
+                            ),
+                            Number::Rational(r) => {
+                                let n_q = Number::from_rational(r.trunc());
+                                (
+                                    Either::Left(n_q.clone()),
+                                    Either::Left(&*n1 - &(&*n2 * &n_q)),
+                                )
+                            }
+                        }
+                    }
+                }
+                (Either::Left(n1), Either::Right(n2)) => {
+                    let n1 = n1.to_inexact();
+                    let n_q = (n1 / n2).trunc();
+                    (Either::Right(n_q), Either::Right(n1 - n2 * n_q))
+                }
+                (Either::Right(n1), Either::Left(n2)) => {
+                    let n2 = n2.to_inexact();
+                    let n_q = (n1 / n2).trunc();
+                    (Either::Right(n_q), Either::Right(n1 - n2 * n_q))
+                }
+                (Either::Right(n1), Either::Right(n2)) => {
+                    let n_q = (n1 / n2).trunc();
+                    (Either::Right(n_q), Either::Right(n1 - n2 * n_q))
+                }
+            };
+
+            macro_rules! make_value {
+                ($val:expr) => {
+                    match $val {
+                        Either::Left(n) => Value::Number(Gc::new(&ctx, n)).into_ptr(&ctx),
+                        Either::Right(f) => Value::Inexact(f).into_ptr(&ctx),
+                    }
+                };
+            }
+
+            Ok(LambdaReturn::Return(vec![make_value!(n), make_value!(r)]))
+        }
+    }
+
     #[derive(Debug, Collect)]
     #[collect(require_static)]
-    pub struct TruncateQuotient;
-    /// Also known as `remainder`
+    pub struct Floor;
+
+    impl<'gc> NativeLambda<'gc> for Floor {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let res = match *args[0].borrow() {
+                Value::Number(n) => match &*n {
+                    // integers get a no-op
+                    Number::Integer(_) => args[0],
+                    Number::Rational(r) => {
+                        Value::Number(Gc::new(&ctx, Number::from_rational(r.floor())))
+                            .into_ptr(&ctx)
+                    }
+                },
+                Value::Inexact(i) => Value::Inexact(i.floor()).into_ptr(&ctx),
+                _ => Err(anyhow::anyhow!("floor expects a number as its argument"))?,
+            };
+
+            Ok(LambdaReturn::Return(vec![res]))
+        }
+    }
+
     #[derive(Debug, Collect)]
     #[collect(require_static)]
-    pub struct TruncateRemainder;
+    pub struct Ceiling;
+
+    impl<'gc> NativeLambda<'gc> for Ceiling {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let res = match *args[0].borrow() {
+                Value::Number(n) => match &*n {
+                    // integers get a no-op
+                    Number::Integer(_) => args[0],
+                    Number::Rational(r) => {
+                        Value::Number(Gc::new(&ctx, Number::from_rational(r.ceil()))).into_ptr(&ctx)
+                    }
+                },
+                Value::Inexact(i) => Value::Inexact(i.ceil()).into_ptr(&ctx),
+                _ => Err(anyhow::anyhow!("ceiling expects a number as its argument"))?,
+            };
+
+            Ok(LambdaReturn::Return(vec![res]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Truncate;
+
+    impl<'gc> NativeLambda<'gc> for Truncate {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let res = match *args[0].borrow() {
+                Value::Number(n) => match &*n {
+                    // integers get a no-op
+                    Number::Integer(_) => args[0],
+                    Number::Rational(r) => {
+                        Value::Number(Gc::new(&ctx, Number::from_rational(r.trunc())))
+                            .into_ptr(&ctx)
+                    }
+                },
+                Value::Inexact(i) => Value::Inexact(i.trunc()).into_ptr(&ctx),
+                _ => Err(anyhow::anyhow!("truncate expects a number as its argument"))?,
+            };
+
+            Ok(LambdaReturn::Return(vec![res]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct Round;
+
+    impl<'gc> NativeLambda<'gc> for Round {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let res = match *args[0].borrow() {
+                Value::Number(n) => match &*n {
+                    // integers get a no-op
+                    Number::Integer(_) => args[0],
+                    Number::Rational(r) => {
+                        Value::Number(Gc::new(&ctx, Number::from_rational(r.round())))
+                            .into_ptr(&ctx)
+                    }
+                },
+                Value::Inexact(i) => Value::Inexact(i.round()).into_ptr(&ctx),
+                _ => Err(anyhow::anyhow!("round expects a number as its argument"))?,
+            };
+
+            Ok(LambdaReturn::Return(vec![res]))
+        }
+    }
 
     /// Get the numerator of a rational number
     #[derive(Debug, Collect)]

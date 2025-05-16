@@ -8,7 +8,7 @@
 (import (magus impl))
 (export list not memq memv member abs square boolean? boolean=?
     zero? positive? negative? length assq assv make-list list-ref
-    floor-quotient floor-remainder)
+    floor-quotient floor-remainder truncate-quotient truncate-remainder)
 (begin
   (define (list . in) in)
   (define (not x) (if x #f #t))
@@ -39,6 +39,10 @@
       (call-with-values (lambda () (floor/ a b)) (lambda (q r) q)))
   (define (floor-remainder a b)
       (call-with-values (lambda () (floor/ a b)) (lambda (q r) r)))
+  (define (truncate-quotient a b)
+      (call-with-values (lambda () (truncate/ a b)) (lambda (q r) q)))
+  (define (truncate-remainder a b)
+      (call-with-values (lambda () (truncate/ a b)) (lambda (q r) r)))
   (define (boolean? b) (if (or (eq? b #f) (eq? b #t)) #t #f))
   (define (boolean=? . lst)
     (define (boolean=-iter v lst)

@@ -28,14 +28,15 @@ pub use macros::{DefineSyntax, SyntaxRules};
 pub use parameters::{MakeParameter, Parameterize};
 pub use procedures::{
     Add, Apply, Ascending, Bytevector, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr,
-    CharToInteger, Cons, Denominator, Descending, Divide, DynamicWind, Equal, Exact,
-    ExactIntegerSqrt, Expt, Features, FloorSlash, Gcd, Inexact, IntegerToChar, IsBytevector,
+    Ceiling, CharToInteger, Cons, Denominator, Descending, Divide, DynamicWind, Equal, Exact,
+    ExactIntegerSqrt, Expt, Features, Floor, FloorSlash, Gcd, Inexact, IntegerToChar, IsBytevector,
     IsChar, IsEq, IsEqual, IsEqv, IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList,
     IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, IsVector, Lcm, ListCopy, ListSetBang,
     ListToString, MakeBytevector, Map, MonotonicAscending, MonotonicDescending, Multiply,
-    NumberToString, Numerator, Raise, RaiseContinuable, StringAppend, StringConstructor,
+    NumberToString, Numerator, Raise, RaiseContinuable, Round, StringAppend, StringConstructor,
     StringCopy, StringLength, StringRef, StringToList, StringToNumber, StringToSymbol,
-    StringToUtf8, Substring, Subtract, SymbolToString, Utf8ToString, Values, VectorRef,
+    StringToUtf8, Substring, Subtract, SymbolToString, Truncate, TruncateSlash, Utf8ToString,
+    Values, VectorRef,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -428,6 +429,7 @@ impl Module for Base {
             "bytevector?",
             "char?",
             "floor/",
+            "truncate/",
             "include",
             "include-ci",
             "make-parameter",
@@ -435,6 +437,10 @@ impl Module for Base {
             "error",
             "error-object?",
             "error-object-message",
+            "floor",
+            "ceiling",
+            "round",
+            "truncate",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -532,10 +538,15 @@ impl Module for Base {
             "bytevector?" => lambda!(IsBytevector),
             "char?" => lambda!(IsChar),
             "floor/" => lambda!(FloorSlash),
+            "truncate/" => lambda!(TruncateSlash),
             "make-parameter" => lambda!(MakeParameter),
             "error" => lambda!(ErrorLambda),
             "error-object?" => lambda!(IsErrorObject),
             "error-object-message" => lambda!(ErrorObjectMessage),
+            "floor" => lambda!(Floor),
+            "ceiling" => lambda!(Ceiling),
+            "round" => lambda!(Round),
+            "truncate" => lambda!(Truncate),
             _ => None,
         }
     }

@@ -885,19 +885,25 @@ mod math {
             };
 
             let (n, r) = match (n1, n2) {
-                (Either::Left(n1), Either::Left(n2)) => match &*n1 / &*n2 {
-                    Number::Integer(i) => (
-                        Either::Left(Number::Integer(i)),
-                        Either::Left(Number::Integer(BigInt::ZERO)),
-                    ),
-                    Number::Rational(r) => {
-                        let n_q = Number::from_rational(r.floor());
-                        (
-                            Either::Left(n_q.clone()),
-                            Either::Left(&*n1 - &(&*n2 * &n_q)),
-                        )
+                (Either::Left(n1), Either::Left(n2)) => {
+                    if n2.is_zero() {
+                        return Err(anyhow::anyhow!("floor/: divide by zero"))?;
+                    } else {
+                        match &*n1 / &*n2 {
+                            Number::Integer(i) => (
+                                Either::Left(Number::Integer(i)),
+                                Either::Left(Number::Integer(BigInt::ZERO)),
+                            ),
+                            Number::Rational(r) => {
+                                let n_q = Number::from_rational(r.floor());
+                                (
+                                    Either::Left(n_q.clone()),
+                                    Either::Left(&*n1 - &(&*n2 * &n_q)),
+                                )
+                            }
+                        }
                     }
-                },
+                }
                 (Either::Left(n1), Either::Right(n2)) => {
                     let n1 = n1.to_inexact();
                     let n_q = (n1 / n2).floor();

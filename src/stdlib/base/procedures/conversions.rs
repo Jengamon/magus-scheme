@@ -1,11 +1,11 @@
 use either::Either;
 use gc_arena::{Collect, Gc, RefLock};
-use num::{BigInt, BigRational, BigUint, One, bigint::Sign};
+use num::{bigint::Sign, BigInt, BigRational, BigUint, One};
 
 use crate::{
-    Value,
     runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
     value::{self, ConsCell, Number},
+    Value,
 };
 
 #[derive(Debug, Collect)]
@@ -138,16 +138,17 @@ impl<'gc> NativeLambda<'gc> for NumberToString {
             },
         };
 
-        Ok(LambdaReturn::Return(vec![
-            Value::String(Gc::new(&ctx, RefLock::new(output_string)).into()).into_ptr(&ctx),
-        ]))
+        Ok(LambdaReturn::Return(vec![Value::String(
+            Gc::new(&ctx, RefLock::new(output_string)).into(),
+        )
+        .into_ptr(&ctx)]))
     }
 }
 
 fn exact_decimal_stn(
     // is our overall output negative
     is_neg: bool,
-    base: f64,
+    base: BigUint,
     // if non-empty, this is in base-10
     post_digits: Vec<u8>,
     exponent_sign: Option<Sign>,
@@ -157,13 +158,10 @@ fn exact_decimal_stn(
     // an exact decimal is a ratio!
     use num::FromPrimitive;
 
-    // input from our parse mean that value is *always* positive
-    assert!(base.is_sign_positive() && base.is_finite());
-
     // we need a ten around for lots of stuff
     let ten = BigInt::from_biguint(Sign::Plus, BigUint::from_u64(10).unwrap());
 
-    let mut num = BigRational::from_float(base).unwrap();
+    let mut num = BigRational::new(BigInt::from_biguint(Sign::Plus, base), BigInt::one());
 
     for (i, digit) in post_digits.into_iter().enumerate() {
         let ratio = BigRational::new(
@@ -360,12 +358,12 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
             },
             Decimal {
                 is_neg: bool,
-                value: f64,
+                value: BigUint,
                 post_digits: Vec<u8>,
             },
             DecimalExponent {
                 is_neg: bool,
-                value: f64,
+                value: BigUint,
                 post_digits: Vec<u8>,
                 exponent_sign: Option<Sign>,
                 exponent_digits: Vec<u8>,
@@ -394,24 +392,25 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                     },
                     Some(Ok(StnComponent::Dot)) if radix == 10 => ParsingState::Decimal {
                         is_neg: false,
-                        value: 0.0,
+                        value: BigUint::ZERO,
                         post_digits: vec![],
                     },
                     Some(Ok(StnComponent::PosInf)) if lexer.next().is_none() => {
                         return Ok(LambdaReturn::Return(vec![
-                            Value::Inexact(f64::INFINITY).into_ptr(&ctx),
+                            Value::Inexact(f64::INFINITY).into_ptr(&ctx)
                         ]));
                     }
                     Some(Ok(StnComponent::NegInf)) if lexer.next().is_none() => {
-                        return Ok(LambdaReturn::Return(vec![
-                            Value::Inexact(f64::NEG_INFINITY).into_ptr(&ctx),
-                        ]));
+                        return Ok(LambdaReturn::Return(vec![Value::Inexact(
+                            f64::NEG_INFINITY,
+                        )
+                        .into_ptr(&ctx)]));
                     }
                     Some(Ok(StnComponent::PosNan | StnComponent::NegNan))
                         if lexer.next().is_none() =>
                     {
                         return Ok(LambdaReturn::Return(vec![
-                            Value::Inexact(f64::NAN).into_ptr(&ctx),
+                            Value::Inexact(f64::NAN).into_ptr(&ctx)
                         ]));
                     }
                     _ => break,
@@ -427,7 +426,7 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                     },
                     Some(Ok(StnComponent::Dot)) if radix == 10 => ParsingState::Decimal {
                         is_neg,
-                        value: 0.0,
+                        value: BigUint::ZERO,
                         post_digits: vec![],
                     },
                     _ => break,
@@ -444,9 +443,7 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                     Some(Ok(StnComponent::Digit(0xe))) if radix == 10 => {
                         ParsingState::DecimalExponent {
                             is_neg,
-                            value: prefix
-                                .to_f64()
-                                .ok_or(anyhow::anyhow!("string->number: number too big"))?,
+                            value: prefix,
                             post_digits: vec![],
                             exponent_sign: None,
                             exponent_digits: vec![],
@@ -454,9 +451,7 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                     }
                     Some(Ok(StnComponent::Dot)) if radix == 10 => ParsingState::Decimal {
                         is_neg,
-                        value: prefix
-                            .to_f64()
-                            .ok_or(anyhow::anyhow!("string->number: number too big"))?,
+                        value: prefix,
                         post_digits: vec![],
                     },
                     Some(Ok(StnComponent::Slash)) => ParsingState::Rational {
@@ -514,6 +509,10 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                             } else {
                                 Value::Inexact(
                                 value
+                                    .to_f64()
+                                    .ok_or_else(|| {
+                                        anyhow::anyhow!("string->number: number too big")
+                                    })?
                                     + post_digits
                                         .into_iter()
                                         .enumerate()
@@ -592,6 +591,10 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                             } else {
                                 Value::Inexact(
                                     (value
+                                        .to_f64()
+                                        .ok_or_else(|| {
+                                            anyhow::anyhow!("string->number: number too big")
+                                        })?
                                         + post_digits
                                             .into_iter()
                                             .enumerate()
@@ -700,7 +703,7 @@ impl<'gc> NativeLambda<'gc> for StringToSymbol {
         let sym = ctx.interner.get_or_intern(s.borrow().as_str());
 
         Ok(LambdaReturn::Return(vec![
-            Value::Symbol(sym.into()).into_ptr(&ctx),
+            Value::Symbol(sym.into()).into_ptr(&ctx)
         ]))
     }
 }
@@ -727,13 +730,10 @@ impl<'gc> NativeLambda<'gc> for SymbolToString {
 
         let str = ctx.interner.resolve(&s.0);
 
-        Ok(LambdaReturn::Return(vec![
-            Value::String(value::String::new_frozen(Gc::new(
-                &ctx,
-                RefLock::new(str.to_string()),
-            )))
-            .into_ptr(&ctx),
-        ]))
+        Ok(LambdaReturn::Return(vec![Value::String(
+            value::String::new_frozen(Gc::new(&ctx, RefLock::new(str.to_string()))),
+        )
+        .into_ptr(&ctx)]))
     }
 }
 
@@ -775,9 +775,10 @@ impl<'gc> NativeLambda<'gc> for ListToString {
             .collect::<Result<_, _>>()?;
         let s = String::from_iter(values);
 
-        Ok(LambdaReturn::Return(vec![
-            Value::String(Gc::new(&ctx, RefLock::new(s)).into()).into_ptr(&ctx),
-        ]))
+        Ok(LambdaReturn::Return(vec![Value::String(
+            Gc::new(&ctx, RefLock::new(s)).into(),
+        )
+        .into_ptr(&ctx)]))
     }
 }
 
@@ -939,9 +940,10 @@ impl<'gc> NativeLambda<'gc> for Utf8ToString {
         let s = String::from_utf8(b)
             .map_err(|_| anyhow::anyhow!("utf8->string: bytes were not valid UTF8"))?;
 
-        Ok(LambdaReturn::Return(vec![
-            Value::String(Gc::new(&ctx, RefLock::new(s)).into()).into_ptr(&ctx),
-        ]))
+        Ok(LambdaReturn::Return(vec![Value::String(
+            Gc::new(&ctx, RefLock::new(s)).into(),
+        )
+        .into_ptr(&ctx)]))
     }
 }
 
@@ -1019,9 +1021,10 @@ impl<'gc> NativeLambda<'gc> for StringToUtf8 {
             .collect::<String>();
         let bytes = im_rc::Vector::from_iter(s.as_bytes().iter().copied());
 
-        Ok(LambdaReturn::Return(vec![
-            Value::Bytevector(Gc::new(&ctx, gc_arena::Static(bytes)).into()).into_ptr(&ctx),
-        ]))
+        Ok(LambdaReturn::Return(vec![Value::Bytevector(
+            Gc::new(&ctx, gc_arena::Static(bytes)).into(),
+        )
+        .into_ptr(&ctx)]))
     }
 }
 

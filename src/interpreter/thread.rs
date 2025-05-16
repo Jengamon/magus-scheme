@@ -2123,7 +2123,7 @@ mod tests {
     use crate::{
         Fuel,
         bytecode::{self, Bytecode::*, Constant},
-        compiler::World,
+        compiler::{Compiler, World},
         environment::Environment,
         interpreter::{Context, Includer, NullIncluder},
         runtime::convert::IntoValue,
@@ -2164,8 +2164,11 @@ mod tests {
                 )
                 .expect("failed to define cowl");
             // manual compilation of "cowl\n(define ram 3)\nram"
+            // compiler has to provide id, so
+            let compiler = Compiler::new(mc, 0);
             // TODO Convert this into a thread (full execution) datatest
             let chunk = bytecode::Chunk::new(
+                &compiler,
                 mc,
                 [
                     Reference {

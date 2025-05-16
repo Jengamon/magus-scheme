@@ -249,6 +249,9 @@ pub struct Interpreter {
     thread_knobs: SecondaryMap<ThreadKey, Arc<()>>,
     compiler_knobs: SecondaryMap<CompilerKey, Arc<()>>,
     interner: lasso::Rodeo,
+
+    // internal compiler id counter
+    compiler_counter: usize,
 }
 
 impl Default for Interpreter {
@@ -265,6 +268,7 @@ impl Default for Interpreter {
             thread_knobs: SecondaryMap::new(),
             compiler_knobs: SecondaryMap::new(),
             interner: lasso::Rodeo::new(),
+            compiler_counter: 0,
         }
     }
 }
@@ -376,7 +380,10 @@ impl Interpreter {
     pub fn new_compiler(&mut self) -> CompilerHandle {
         let knob = Arc::new(());
         self.arena.mutate_root(|mc, arena| {
-            let new_compiler = compiler::Compiler::new(mc);
+            let cid = self.compiler_counter;
+            // just don't expect over usize::MAX compilers to have unique macros....
+            self.compiler_counter = self.compiler_counter.wrapping_add(1);
+            let new_compiler = compiler::Compiler::new(mc, cid);
             let key = arena.stash.compilers.insert(new_compiler);
             self.compiler_knobs.insert(key, knob.clone());
             CompilerHandle { _knob: knob, key }

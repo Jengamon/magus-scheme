@@ -8,6 +8,7 @@ use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
 
 use crate::{
     ValuePtr,
+    compiler::Compiler,
     environment::StackEnvironmentPtr,
     runtime::lambda::Lambda,
     value::{Number, PromisePtr},
@@ -250,6 +251,11 @@ impl SourceData {
 // NOTE Chunks are not thread-safe and are immutable, so to make them *really* cheap to clone,
 // we can use Rc
 pub struct Chunk<'gc> {
+    /// The "address" of the compiler used to create this chunk
+    /// (used to make new unique local macro environments per compiler, as the
+    /// compiler is expected to ensure any index is unique for code emitted *from that
+    /// same compiler*)
+    pub compiler_id: usize,
     /// number of upvalues this chunk (and subchunks) can use
     pub upvalues: usize,
     /// symbols this chunk references
@@ -280,6 +286,7 @@ pub type ImportFallback<'gc> = Option<Gc<'gc, RefLock<ImportFallbackMap<'gc>>>>;
 impl<'gc> Chunk<'gc> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        compiler: &Compiler<'gc>,
         mc: &Mutation<'gc>,
         code: impl IntoIterator<Item = Bytecode>,
         constants: impl IntoIterator<Item = Constant>,
@@ -290,6 +297,7 @@ impl<'gc> Chunk<'gc> {
         labels: FxHashMap<usize, SourceData>,
     ) -> ChunkPtr<'gc> {
         let chunk = Self {
+            compiler_id: compiler.id,
             code: code.into_iter().collect(),
             constants: constants.into_iter().collect(),
             lambdas: lambdas.into_iter().collect(),
@@ -304,7 +312,8 @@ impl<'gc> Chunk<'gc> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn with_fallback(
+    pub(crate) fn with_fallback(
+        compiler_id: usize,
         mc: &Mutation<'gc>,
         code: impl IntoIterator<Item = Bytecode>,
         constants: impl IntoIterator<Item = Constant>,
@@ -316,6 +325,7 @@ impl<'gc> Chunk<'gc> {
         fallback: ImportFallback<'gc>,
     ) -> ChunkPtr<'gc> {
         let chunk = Self {
+            compiler_id,
             code: code.into_iter().collect(),
             constants: constants.into_iter().collect(),
             lambdas: lambdas.into_iter().collect(),

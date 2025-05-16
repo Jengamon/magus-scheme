@@ -146,6 +146,7 @@ impl Syntax for Parameterize {
                     .collect();
 
                 Ok::<_, anyhow::Error>(Chunk::new(
+                    compiler,
                     ctx,
                     code,
                     ctx.constants(),

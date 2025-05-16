@@ -71,6 +71,7 @@ mod syntax {
                             ctx,
                             Arity::Exact(0),
                             Chunk::new(
+                                compiler,
                                 ctx,
                                 code,
                                 ctx.constants(),
@@ -150,6 +151,7 @@ mod syntax {
                                 ctx,
                                 Arity::Exact(0),
                                 Chunk::new(
+                                    compiler,
                                     ctx,
                                     code,
                                     ctx.constants(),

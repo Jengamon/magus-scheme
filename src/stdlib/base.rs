@@ -105,6 +105,7 @@ pub fn lambda_helper<'gc>(
             .collect();
 
         Ok(Chunk::new(
+            compiler,
             ctx,
             code,
             ctx.constants(),

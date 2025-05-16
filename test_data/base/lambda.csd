@@ -2,6 +2,7 @@
 ---
 ; all the arities are wrong currently
 Chunk {
+    compiler_id: 1351,
     upvalues: 0,
     constants: [
         Number(
@@ -22,6 +23,7 @@ Chunk {
                     0,
                 ),
                 chunk: Chunk {
+                    compiler_id: 1351,
                     upvalues: 0,
                     constants: [
                         Number(
@@ -100,6 +102,7 @@ Chunk {
                     1,
                 ),
                 chunk: Chunk {
+                    compiler_id: 1351,
                     upvalues: 0,
                     constants: [
                         Number(
@@ -120,6 +123,7 @@ Chunk {
                                     0,
                                 ),
                                 chunk: Chunk {
+                                    compiler_id: 1351,
                                     upvalues: 0,
                                     constants: [
                                         Number(
@@ -259,6 +263,7 @@ Chunk {
                     1,
                 ),
                 chunk: Chunk {
+                    compiler_id: 1351,
                     upvalues: 0,
                     constants: [
                         Number(
@@ -279,6 +284,7 @@ Chunk {
                                     0,
                                 ),
                                 chunk: Chunk {
+                                    compiler_id: 1351,
                                     upvalues: 0,
                                     constants: [
                                         Number(
@@ -357,6 +363,7 @@ Chunk {
                                     1,
                                 ),
                                 chunk: Chunk {
+                                    compiler_id: 1351,
                                     upvalues: 0,
                                     constants: [
                                         Number(
@@ -377,6 +384,7 @@ Chunk {
                                                     0,
                                                 ),
                                                 chunk: Chunk {
+                                                    compiler_id: 1351,
                                                     upvalues: 0,
                                                     constants: [
                                                         Number(
@@ -586,6 +594,7 @@ Chunk {
                     3,
                 ),
                 chunk: Chunk {
+                    compiler_id: 1351,
                     upvalues: 0,
                     constants: [
                         Number(
@@ -606,6 +615,7 @@ Chunk {
                                     0,
                                 ),
                                 chunk: Chunk {
+                                    compiler_id: 1351,
                                     upvalues: 0,
                                     constants: [
                                         Number(
@@ -684,6 +694,7 @@ Chunk {
                                     1,
                                 ),
                                 chunk: Chunk {
+                                    compiler_id: 1351,
                                     upvalues: 0,
                                     constants: [
                                         Number(
@@ -704,6 +715,7 @@ Chunk {
                                                     0,
                                                 ),
                                                 chunk: Chunk {
+                                                    compiler_id: 1351,
                                                     upvalues: 0,
                                                     constants: [
                                                         Number(
@@ -843,6 +855,7 @@ Chunk {
                                     1,
                                 ),
                                 chunk: Chunk {
+                                    compiler_id: 1351,
                                     upvalues: 0,
                                     constants: [
                                         Number(
@@ -863,6 +876,7 @@ Chunk {
                                                     0,
                                                 ),
                                                 chunk: Chunk {
+                                                    compiler_id: 1351,
                                                     upvalues: 0,
                                                     constants: [
                                                         Number(
@@ -941,6 +955,7 @@ Chunk {
                                                     1,
                                                 ),
                                                 chunk: Chunk {
+                                                    compiler_id: 1351,
                                                     upvalues: 0,
                                                     constants: [
                                                         Number(
@@ -961,6 +976,7 @@ Chunk {
                                                                     0,
                                                                 ),
                                                                 chunk: Chunk {
+                                                                    compiler_id: 1351,
                                                                     upvalues: 0,
                                                                     constants: [
                                                                         Number(

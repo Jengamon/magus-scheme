@@ -1,6 +1,7 @@
 
 ---
 Chunk {
+    compiler_id: 1351,
     upvalues: 0,
     constants: [
         Number(
@@ -21,6 +22,7 @@ Chunk {
                     0,
                 ),
                 chunk: Chunk {
+                    compiler_id: 1351,
                     upvalues: 0,
                     constants: [
                         Number(

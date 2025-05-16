@@ -1,6 +1,7 @@
 
 ---
 Chunk {
+    compiler_id: 1351,
     upvalues: 0,
     constants: [
         Symbol(

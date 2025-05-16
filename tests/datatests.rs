@@ -266,7 +266,7 @@ fn compile_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()
         let includer = NullIncluder;
         let programs =
             (format!("{path}.scm"), data.source()).parse_program(mc, &mut interner, false)?;
-        let mut compiler = Compiler::new(mc);
+        let mut compiler = Compiler::new(mc, 1351);
         let mut ecc = ExternalCompilerContext {
             world: &test_world,
             includer: &includer,

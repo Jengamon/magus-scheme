@@ -790,6 +790,9 @@ enum NativeItem<'gc> {
 #[derive(Debug, Collect)]
 #[collect(no_drop)]
 pub struct Compiler<'gc> {
+    // "unique" identifier for this compiler. any compiler
+    // using this identifier shares local macro environments
+    pub(crate) id: usize,
     // The Compiler builds the definition of Scheme-defined modules
     // and uses those definitions to create an environment, which is part of
     // the output in addition to the chunk
@@ -1481,8 +1484,9 @@ impl<'gc> Compiler<'gc> {
     /// Maximum number of recursive calls before macro expansion fails
     const MAX_RECURSION: usize = 200;
 
-    pub fn new(mc: &Mutation<'gc>) -> Self {
+    pub fn new(mc: &Mutation<'gc>, id: usize) -> Self {
         Self {
+            id,
             local_world: LocalWorld::default(),
             syntax_items: Default::default(),
             global_variables_defined: Default::default(),
@@ -1634,6 +1638,7 @@ impl<'gc> Compiler<'gc> {
 
         // when we create our chunk, our import env is *always* the initial default environment
         Ok(Chunk::new(
+            self,
             mc,
             code,
             constants,
@@ -2178,6 +2183,7 @@ impl<'gc> Compiler<'gc> {
 
         fn self_ref_lambda_fix<'gc>(
             mc: &Mutation<'gc>,
+            compiler_id: usize,
             symbol: lasso::Spur,
             value: ValuePtr<'gc>,
         ) -> ValuePtr<'gc> {
@@ -2200,6 +2206,7 @@ impl<'gc> Compiler<'gc> {
                         new_fallback
                     };
                     let new_chunk = Chunk::with_fallback(
+                        compiler_id,
                         mc,
                         chunk.code.iter().copied(),
                         chunk.constants.iter().cloned(),
@@ -2270,7 +2277,7 @@ impl<'gc> Compiler<'gc> {
                     match v {
                         ExportItem::Value(mut value) => {
                             if mapped_symbol != *symbol {
-                                value = self_ref_lambda_fix(mc, *symbol, value);
+                                value = self_ref_lambda_fix(mc, self.id, *symbol, value);
                             }
                             self._current_env()
                                 .borrow_mut(mc)
@@ -2346,7 +2353,7 @@ impl<'gc> Compiler<'gc> {
                 } else if let Some(mut value) = modl.value(mc, interner.resolve(&symbol)) {
                     // freeze a module imported value (TODO check how this actually impacts things)
                     if mapped_symbol != symbol {
-                        value = self_ref_lambda_fix(mc, symbol, value);
+                        value = self_ref_lambda_fix(mc, self.id, symbol, value);
                     }
                     self._current_env()
                         .borrow_mut(mc)
@@ -2442,7 +2449,7 @@ impl<'gc> Compiler<'gc> {
 
         // The compiler we will use to compile the library (so that the only interface between these compilers is
         // the library export interface.)
-        let mut lib_compiler = Compiler::new(mc);
+        let mut lib_compiler = Compiler::new(mc, self.id);
         // Copy over our local world (for those local defs)
         lib_compiler.local_world = self.local_world.clone();
 
@@ -2771,6 +2778,7 @@ impl<'gc> Compiler<'gc> {
                         // this starting point
                         let chunk = c.chunk;
                         let new_chunk = Chunk::with_fallback(
+                            self.id,
                             mc,
                             chunk.code.iter().copied(),
                             chunk.constants.iter().cloned(),

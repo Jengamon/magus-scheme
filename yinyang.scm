@@ -12,4 +12,4 @@
 ((lambda (yin)
     ((lambda (yang) (yin yang))
      ((lambda (cc) (display #\*) cc) (call-with-current-continuation (lambda (c) c)))))
-  ((lambda (cc) (display #\@) cc) (call-with-current-continuation (lambda (c) c))))
+  ((lambda (cc) (display #\xa) cc) (call-with-current-continuation (lambda (c) c))))

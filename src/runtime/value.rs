@@ -689,11 +689,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K, ModeDisplay> {
             Value::String(s) => write!(f, "{}", s.borrow()),
             Value::Symbol(sym) => write!(f, "{}", self.resolver.resolve(&sym.0)),
             Value::Bool(b) => write!(f, "#{}", if b { "t" } else { "f" }),
-            Value::Char(c) => write!(
-                f,
-                "{}",
-                escape_write_char(c, true).into_iter().collect::<Box<str>>()
-            ),
+            Value::Char(c) => write!(f, "{c}"),
             Value::Vector(ref vec) if vec.is_circular(self.value_ptr) => {
                 write!(
                     f,

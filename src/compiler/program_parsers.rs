@@ -13,7 +13,7 @@ use crate::{
     value::Number,
 };
 
-pub fn exact_decimal(
+fn exact_decimal(
     base: u64,
     leading_zeros: Option<NonZeroU16>,
     post_dot: u64,
@@ -79,8 +79,6 @@ pub fn exact_decimal(
             BigRational::new(expt, BigInt::one())
         }
     };
-
-    // dbg!(&pt);
 
     let unsigned_decimal_ratio = BigRational::new(numer, BigInt::one()) * pt;
     if is_neg {

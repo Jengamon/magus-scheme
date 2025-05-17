@@ -4,4 +4,12 @@ import tailwindPlugin from "@tailwindcss/vite";
 
 export default defineConfig({
   plugins: [solidPlugin(), tailwindPlugin()],
+  optimizeDeps: {
+    esbuildOptions: {
+      target: "esnext",
+    },
+  },
+  build: {
+    target: "esnext",
+  },
 });

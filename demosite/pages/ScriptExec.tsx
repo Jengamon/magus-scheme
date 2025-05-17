@@ -99,7 +99,11 @@ function ScriptExec() {
       thread.run(fuel);
     } else if (thread) {
       try {
-        setOutput(JSON.stringify(thread.result()));
+        setOutput(JSON.stringify(thread.result(), (_name, val) => {
+          return typeof val === "number" && (isNaN(val) || !isFinite(val))
+            ? val.toString()
+            : val;
+        }, "  "));
         setError(null);
       } catch (e) {
         setError(errSchema.parse(e));

@@ -151,6 +151,7 @@ impl Syntax for Parameterize {
                     code,
                     ctx.constants(),
                     ctx.lambdas(),
+                    ctx.macros(),
                     ctx.promises(),
                     ctx.upvalues(),
                     import_env,

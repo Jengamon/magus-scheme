@@ -1,4 +1,4 @@
-error: Rust code produced an error: car only operates on a pair
+error: car only operates on a pair
 
 Backtrace:
  - <<synthesized>> <<native>>

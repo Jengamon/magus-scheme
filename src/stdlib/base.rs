@@ -32,10 +32,10 @@ pub use procedures::{
     IsChar, IsEq, IsEqual, IsEqv, IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList,
     IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, IsVector, Lcm, ListCopy, ListSetBang,
     ListToString, MakeBytevector, Map, MonotonicAscending, MonotonicDescending, Multiply,
-    NumberToString, Numerator, Raise, RaiseContinuable, Round, StringAppend, StringConstructor,
-    StringCopy, StringLength, StringRef, StringToList, StringToNumber, StringToSymbol,
-    StringToUtf8, Substring, Subtract, SymbolToString, Truncate, TruncateSlash, Utf8ToString,
-    Values, VectorRef,
+    NumberToString, Numerator, Raise, RaiseContinuable, Round, SetCarBang, SetCdrBang,
+    StringAppend, StringConstructor, StringCopy, StringLength, StringRef, StringToList,
+    StringToNumber, StringToSymbol, StringToUtf8, Substring, Subtract, SymbolToString, Truncate,
+    TruncateSlash, Utf8ToString, Values, VectorRef,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -110,6 +110,7 @@ pub fn lambda_helper<'gc>(
             code,
             ctx.constants(),
             ctx.lambdas(),
+            ctx.macros(),
             ctx.promises(),
             ctx.upvalues(),
             import_env,
@@ -442,6 +443,8 @@ impl Module for Base {
             "ceiling",
             "round",
             "truncate",
+            "set-car!",
+            "set-cdr!",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -548,6 +551,8 @@ impl Module for Base {
             "ceiling" => lambda!(Ceiling),
             "round" => lambda!(Round),
             "truncate" => lambda!(Truncate),
+            "set-car!" => lambda!(SetCarBang),
+            "set-cdr!" => lambda!(SetCdrBang),
             _ => None,
         }
     }

@@ -110,6 +110,18 @@ pub enum Bytecode {
     /// causes the frame to be left, it is unset, and if a continuation causes the frame
     /// to resume it is set again)
     Parameterize,
+
+    // macro stuff
+    /// Create the environment at index on the thread, using the current environment as the parent
+    /// environment
+    ReserveMacroEnv { env_id: usize },
+    /// Create a new frame that is a copy of the current frame except:
+    /// - the code to be executed is defined at the given macro id
+    /// - program counter is reset to 0
+    /// - the environment is the one defined by the env_id
+    ///
+    /// If the env_id has not been reserved, this code is an error
+    Macro { index: usize, env_id: usize },
 }
 
 impl Bytecode {
@@ -146,7 +158,8 @@ impl Bytecode {
             Self::Duplicate => 1,
             Self::Pop => 1,
             Self::Parameterize => 2,
-            // Self::Return => 4,
+            Self::ReserveMacroEnv { .. } => 1,
+            Self::Macro { .. } => 4,
         }
     }
 }
@@ -205,6 +218,8 @@ impl fmt::Display for Bytecode {
             Bytecode::Duplicate => write!(f, "DUPL"),
             Bytecode::Pop => write!(f, "SPOP"),
             Bytecode::Parameterize => write!(f, "PRMZ"),
+            Bytecode::ReserveMacroEnv { env_id } => write!(f, "RMCE {env_id}"),
+            Bytecode::Macro { index, env_id } => write!(f, "MACR {env_id} {index}"),
         }
     }
 }
@@ -218,10 +233,6 @@ pub enum Constant {
     Symbol(lasso::Spur),
     Char(char),
     Number(Number),
-    // Rational(bool, u64, u64),
-    // TODO Support exact rational numbers
-    // (We can use BigRational directly here b/c Copy is not required as it is in Value)
-    // (well it's more likely (due to how our frontend works) to support Rational64 instead)
     Inexact(f64),
     String(Arc<str>),
     Bytevector(Arc<[u8]>),
@@ -263,6 +274,8 @@ pub struct Chunk<'gc> {
     pub constants: Rc<[Constant]>,
     /// lambdas this chunk defines
     pub lambdas: Rc<[Lambda<'gc>]>,
+    /// macro chunks this chunk defined
+    pub macros: Rc<[ChunkPtr<'gc>]>,
     /// promises this chunk defines
     pub promises: Rc<[PromisePtr<'gc>]>,
     /// environment this chunk references
@@ -291,6 +304,7 @@ impl<'gc> Chunk<'gc> {
         code: impl IntoIterator<Item = Bytecode>,
         constants: impl IntoIterator<Item = Constant>,
         lambdas: impl IntoIterator<Item = Lambda<'gc>>,
+        macros: impl IntoIterator<Item = ChunkPtr<'gc>>,
         promises: impl IntoIterator<Item = PromisePtr<'gc>>,
         upvalues: usize,
         import_stack_env: StackEnvironmentPtr<'gc>,
@@ -302,6 +316,7 @@ impl<'gc> Chunk<'gc> {
             constants: constants.into_iter().collect(),
             lambdas: lambdas.into_iter().collect(),
             promises: promises.into_iter().collect(),
+            macros: macros.into_iter().collect(),
             upvalues,
             import_env: import_stack_env,
             labels: Rc::new(labels),
@@ -318,6 +333,7 @@ impl<'gc> Chunk<'gc> {
         code: impl IntoIterator<Item = Bytecode>,
         constants: impl IntoIterator<Item = Constant>,
         lambdas: impl IntoIterator<Item = Lambda<'gc>>,
+        macros: impl IntoIterator<Item = ChunkPtr<'gc>>,
         promises: impl IntoIterator<Item = PromisePtr<'gc>>,
         upvalues: usize,
         import_stack_env: StackEnvironmentPtr<'gc>,
@@ -330,6 +346,7 @@ impl<'gc> Chunk<'gc> {
             constants: constants.into_iter().collect(),
             lambdas: lambdas.into_iter().collect(),
             promises: promises.into_iter().collect(),
+            macros: macros.into_iter().collect(),
             upvalues,
             import_env: import_stack_env,
             labels: Rc::new(labels),

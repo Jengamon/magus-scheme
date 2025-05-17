@@ -196,6 +196,7 @@ pub struct SyntaxContext<'a, 'b, 'gc> {
     pub library_def: LibraryDefinitionContext<'a, 'gc>,
     constants: &'b mut Vec<Constant>,
     lambdas: &'b mut Vec<Lambda<'gc>>,
+    chunks: &'b mut Vec<ChunkPtr<'gc>>,
     promises: &'b mut Vec<PromisePtr<'gc>>,
     upvalues: &'b mut usize,
 }
@@ -273,6 +274,11 @@ impl<'gc> SyntaxContext<'_, '_, 'gc> {
     /// Get all lambdas in the current compile context
     pub fn lambdas(&self) -> impl IntoIterator<Item = Lambda<'gc>> {
         self.lambdas.clone()
+    }
+
+    /// Get all macros in the current compile context
+    pub fn macros(&self) -> impl IntoIterator<Item = ChunkPtr<'gc>> {
+        self.chunks.clone()
     }
 
     /// Get all promises in the current compile context
@@ -679,6 +685,27 @@ impl Scope {
     }
 }
 
+/// A placeholder for a [`Transformer`] used for `letrec-syntax`
+#[derive(Debug)]
+struct PrivateTransformerPlaceholder {
+    name: lasso::Spur,
+}
+
+impl Syntax for PrivateTransformerPlaceholder {
+    fn evaluate<'gc>(
+        &self,
+        ctx: &mut SyntaxContext<'_, '_, 'gc>,
+        _compiler: &mut Compiler<'gc>,
+        _import_env: StackEnvironmentPtr<'gc>,
+        _args: &[ProgramPtr<'gc>],
+    ) -> anyhow::Result<SyntaxReturn<'gc>> {
+        anyhow::bail!(
+            "syntax not yet defined: {}",
+            ctx.ecc.interner.resolve(&self.name)
+        )
+    }
+}
+
 /// A local representation of a [`Transformer`] used to store in an [`ArcSyntax`]
 #[derive(Debug)]
 struct PrivateTransformer {
@@ -808,6 +835,9 @@ pub struct Compiler<'gc> {
     // arguments that are in scope
     #[collect(require_static)]
     scopes: Vec<Scope>,
+
+    // increment counter for macro environments.
+    macro_env_counter: usize,
 
     // checkpoints store macro and variable definitions
     #[collect(require_static)]
@@ -1492,6 +1522,7 @@ impl<'gc> Compiler<'gc> {
             global_variables_defined: Default::default(),
             scopes: Default::default(),
             checkpoints: Default::default(),
+            macro_env_counter: 0,
             // The very first environment pointer is always the default environment
             environments: vec![Gc::new(mc, RefLock::new(Environment::new(mc, None)))],
             labeled_labels: FxHashSet::default(),
@@ -1598,6 +1629,7 @@ impl<'gc> Compiler<'gc> {
         // compile code loop
         let mut constants = Vec::new();
         let mut lambdas = Vec::new();
+        let mut chunks = Vec::new();
         let mut promises = Vec::new();
         let mut upvalues = 0;
         let mut context = SyntaxContext::<'a, '_, 'gc> {
@@ -1606,6 +1638,7 @@ impl<'gc> Compiler<'gc> {
             library_def,
             constants: &mut constants,
             lambdas: &mut lambdas,
+            chunks: &mut chunks,
             promises: &mut promises,
             upvalues: &mut upvalues,
         };
@@ -1643,6 +1676,7 @@ impl<'gc> Compiler<'gc> {
             code,
             constants,
             lambdas,
+            chunks,
             promises,
             upvalues,
             self.default_environment_ptr(),
@@ -2210,8 +2244,9 @@ impl<'gc> Compiler<'gc> {
                         mc,
                         chunk.code.iter().copied(),
                         chunk.constants.iter().cloned(),
-                        chunk.lambdas.iter().cloned(),
-                        chunk.promises.iter().cloned(),
+                        chunk.lambdas.iter().copied(),
+                        chunk.macros.iter().copied(),
+                        chunk.promises.iter().copied(),
                         chunk.upvalues,
                         chunk.import_env,
                         chunk.labels.as_ref().clone(),
@@ -2782,8 +2817,9 @@ impl<'gc> Compiler<'gc> {
                             mc,
                             chunk.code.iter().copied(),
                             chunk.constants.iter().cloned(),
-                            chunk.lambdas.iter().cloned(),
-                            chunk.promises.iter().cloned(),
+                            chunk.lambdas.iter().copied(),
+                            chunk.macros.iter().copied(),
+                            chunk.promises.iter().copied(),
                             chunk.upvalues,
                             chunk.import_env,
                             chunk.labels.as_ref().clone(),
@@ -3160,6 +3196,23 @@ impl<'gc> Compiler<'gc> {
             _knob: new_knob,
         };
         Arc::new(syntax)
+    }
+
+    // TODO make these pub once vetted
+    /// Create a placeholder for a transformer, given a name.
+    ///
+    /// (from this point onward, acts as if the transformer was installed)
+    ///
+    /// (requiring substitution from this syntax before it is defined will cause a compiler error)
+    pub(crate) fn define_transformer_placeholder(&mut self, name: lasso::Spur) {
+        self.define_macro(name, Arc::new(PrivateTransformerPlaceholder { name }));
+    }
+
+    /// Request a new macro index. Used by threads to share environments between macro invocations
+    pub(crate) fn request_macro_env_id(&mut self) -> usize {
+        let ret = self.macro_env_counter;
+        self.macro_env_counter += 1;
+        ret
     }
 
     pub fn define_macro(&mut self, symbol: lasso::Spur, syntax: ArcSyntax) {

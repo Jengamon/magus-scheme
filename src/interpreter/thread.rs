@@ -1843,6 +1843,8 @@ impl<'gc> Thread<'gc> {
                             parameter.borrow_mut(&ctx).parameterize(frame.id, value);
                             advance_to_next_inst!();
                         }
+                        Bytecode::ReserveMacroEnv { env_id } => todo!(),
+                        Bytecode::Macro { index, env_id } => todo!(),
                     }
                 }
                 Execution::Native { native } => {
@@ -2191,6 +2193,7 @@ mod tests {
                 [Constant::Number(Number::Integer(
                     BigInt::from_u32(3).unwrap(),
                 ))],
+                [],
                 [],
                 [],
                 0,

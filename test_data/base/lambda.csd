@@ -38,6 +38,7 @@ Chunk {
                         ),
                     ],
                     lambdas: [],
+                    macros: [],
                     promises: [],
                     import_env: RefLock(
                         Environment {
@@ -138,6 +139,7 @@ Chunk {
                                         ),
                                     ],
                                     lambdas: [],
+                                    macros: [],
                                     promises: [],
                                     import_env: RefLock(
                                         Environment {
@@ -197,6 +199,7 @@ Chunk {
                             },
                         ),
                     ],
+                    macros: [],
                     promises: [],
                     import_env: RefLock(
                         Environment {
@@ -299,6 +302,7 @@ Chunk {
                                         ),
                                     ],
                                     lambdas: [],
+                                    macros: [],
                                     promises: [],
                                     import_env: RefLock(
                                         Environment {
@@ -399,6 +403,7 @@ Chunk {
                                                         ),
                                                     ],
                                                     lambdas: [],
+                                                    macros: [],
                                                     promises: [],
                                                     import_env: RefLock(
                                                         Environment {
@@ -458,6 +463,7 @@ Chunk {
                                             },
                                         ),
                                     ],
+                                    macros: [],
                                     promises: [],
                                     import_env: RefLock(
                                         Environment {
@@ -519,6 +525,7 @@ Chunk {
                             },
                         ),
                     ],
+                    macros: [],
                     promises: [],
                     import_env: RefLock(
                         Environment {
@@ -630,6 +637,7 @@ Chunk {
                                         ),
                                     ],
                                     lambdas: [],
+                                    macros: [],
                                     promises: [],
                                     import_env: RefLock(
                                         Environment {
@@ -730,6 +738,7 @@ Chunk {
                                                         ),
                                                     ],
                                                     lambdas: [],
+                                                    macros: [],
                                                     promises: [],
                                                     import_env: RefLock(
                                                         Environment {
@@ -789,6 +798,7 @@ Chunk {
                                             },
                                         ),
                                     ],
+                                    macros: [],
                                     promises: [],
                                     import_env: RefLock(
                                         Environment {
@@ -891,6 +901,7 @@ Chunk {
                                                         ),
                                                     ],
                                                     lambdas: [],
+                                                    macros: [],
                                                     promises: [],
                                                     import_env: RefLock(
                                                         Environment {
@@ -991,6 +1002,7 @@ Chunk {
                                                                         ),
                                                                     ],
                                                                     lambdas: [],
+                                                                    macros: [],
                                                                     promises: [],
                                                                     import_env: RefLock(
                                                                         Environment {
@@ -1050,6 +1062,7 @@ Chunk {
                                                             },
                                                         ),
                                                     ],
+                                                    macros: [],
                                                     promises: [],
                                                     import_env: RefLock(
                                                         Environment {
@@ -1111,6 +1124,7 @@ Chunk {
                                             },
                                         ),
                                     ],
+                                    macros: [],
                                     promises: [],
                                     import_env: RefLock(
                                         Environment {
@@ -1181,6 +1195,7 @@ Chunk {
                             },
                         ),
                     ],
+                    macros: [],
                     promises: [],
                     import_env: RefLock(
                         Environment {
@@ -1269,6 +1284,7 @@ Chunk {
             },
         ),
     ],
+    macros: [],
     promises: [],
     import_env: RefLock(
         Environment {

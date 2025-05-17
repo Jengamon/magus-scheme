@@ -44,10 +44,10 @@ pub enum SchemeErrorType<'gc> {
     #[error("error handler failed: {0}")]
     HandlerFailed(Gc<'gc, SchemeErrorType<'gc>>),
     /// Rust code produced an error
-    #[error("Rust code produced an error: {0}")]
+    #[error("{0}")]
     Rust(#[collect(require_static)] Rc<anyhow::Error>),
     /// Rust code produced an error (continuable)
-    #[error("Rust code produced an error: {0}")]
+    #[error("{0}")]
     RustContinuable(
         #[collect(require_static)] Rc<anyhow::Error>,
         ContinuationPtr<'gc>,

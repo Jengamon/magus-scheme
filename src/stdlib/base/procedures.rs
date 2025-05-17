@@ -8,7 +8,9 @@ pub use conversions::{
 };
 pub use equality::{IsEq, IsEqual, IsEqv};
 pub use error::{Raise, RaiseContinuable};
-pub use list::{Caar, Cadr, Car, Cdar, Cddr, Cdr, ListCopy, ListSetBang, Map};
+pub use list::{
+    Caar, Cadr, Car, Cdar, Cddr, Cdr, ListCopy, ListSetBang, Map, SetCarBang, SetCdrBang,
+};
 pub use math::{
     Add, Ceiling, Denominator, Divide, ExactIntegerSqrt, Expt, Floor, FloorSlash, Gcd, Lcm,
     Multiply, Numerator, Round, Subtract, Truncate, TruncateSlash,
@@ -1907,6 +1909,84 @@ mod list {
                 )?)
                 .into_ptr(&ctx),
             ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct SetCarBang;
+
+    impl<'gc> NativeLambda<'gc> for SetCarBang {
+        fn arity(&self) -> Arity {
+            Arity::Exact(2)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
+            let Value::Cons(mut c) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "set-car! expects a pair as its first argument"
+                ))?;
+            };
+
+            if Gc::ptr_eq(args[0], ctx.thread_ctx.null_value) {
+                return Err(anyhow::anyhow!(
+                    "set-car! expects a pair as its first argument"
+                ))?;
+            }
+
+            c.car = if Gc::ptr_eq(args[1], ctx.thread_ctx.null_value) {
+                None
+            } else {
+                Some(args[1])
+            };
+
+            // mutation magic
+            *args[0].borrow_mut(&ctx) = Value::Cons(c);
+
+            Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct SetCdrBang;
+
+    impl<'gc> NativeLambda<'gc> for SetCdrBang {
+        fn arity(&self) -> Arity {
+            Arity::Exact(2)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
+            let Value::Cons(mut c) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "set-cdr! expects a pair as its first argument"
+                ))?;
+            };
+
+            if Gc::ptr_eq(args[0], ctx.thread_ctx.null_value) {
+                return Err(anyhow::anyhow!(
+                    "set-cdr! expects a pair as its first argument"
+                ))?;
+            }
+
+            c.cdr = if Gc::ptr_eq(args[1], ctx.thread_ctx.null_value) {
+                None
+            } else {
+                Some(args[1])
+            };
+
+            // mutation magic
+            *args[0].borrow_mut(&ctx) = Value::Cons(c);
+
+            Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]))
         }
     }
 }

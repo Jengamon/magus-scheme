@@ -11,6 +11,7 @@ Chunk {
         ),
     ],
     lambdas: [],
+    macros: [],
     promises: [],
     import_env: RefLock(
         Environment {

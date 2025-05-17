@@ -389,29 +389,31 @@ pub fn is_valid_unpiped_scheme_identifier(s: &str) -> bool {
     use unicode_general_category::GeneralCategory::*;
     // we don't allow Zl, Zp, Zs, Ps, Pi, Pf, Pe, Cs, Cf, Cc anywhere (except U+200C and U+200D)
     // nor Nd, Mc, Me initially
-    if s.chars().any(|c| {
-        matches!(
-            get_general_category(c),
-            Control
-                | Format
-                | Surrogate
-                | ClosePunctuation
-                | FinalPunctuation
-                | InitialPunctuation
-                | OpenPunctuation
-                | LineSeparator
-                | ParagraphSeparator
-                | SpaceSeparator
-        ) && !['\u{200d}', '\u{200c}'].contains(&c)
-    }) {
-        return false;
-    } else if s.starts_with(|c: char| {
-        matches!(
-            get_general_category(c),
-            DecimalNumber | SpacingMark | EnclosingMark
-        )
-    }) {
-        // due to lexing technicalities, we don't allow unquoted idenfiers to start with an ASCII digit
+    //
+    // also abbreviations and "." are not allowed unpiped
+    if [".", ",", "'", "`", ",@"].contains(&s)
+        || s.chars().any(|c| {
+            matches!(
+                get_general_category(c),
+                Control
+                    | Format
+                    | Surrogate
+                    | ClosePunctuation
+                    | FinalPunctuation
+                    | InitialPunctuation
+                    | OpenPunctuation
+                    | LineSeparator
+                    | ParagraphSeparator
+                    | SpaceSeparator
+            ) && !['\u{200d}', '\u{200c}'].contains(&c)
+        })
+        || s.starts_with(|c: char| {
+            matches!(
+                get_general_category(c),
+                DecimalNumber | SpacingMark | EnclosingMark
+            )
+        })
+    {
         return false;
     }
     true

@@ -253,6 +253,8 @@ pub struct Interpreter {
 
     // internal compiler id counter
     compiler_counter: usize,
+    /// A debt cap for automatic GC collection, None for explicit control
+    debt_cap: Option<f64>,
 }
 
 impl Default for Interpreter {
@@ -270,6 +272,8 @@ impl Default for Interpreter {
             compiler_knobs: SecondaryMap::new(),
             interner: lasso::Rodeo::new(),
             compiler_counter: 0,
+            // defaults to 10kb debt cap before collection
+            debt_cap: Some(10_000.0),
         }
     }
 }
@@ -331,12 +335,18 @@ impl Interpreter {
             }
         });
 
-        if self.arena.metrics().allocation_debt() > 10_000.0 {
-            // once we have 10 kb allocated, start trying to collect memory
-            // (this is a failsafe)
-            // TODO provide a way to configure this cap
-            self.arena.collect_debt();
+        if let Some(debt_cap) = self.debt_cap {
+            if self.arena.metrics().allocation_debt() > debt_cap {
+                self.arena.collect_debt();
+            }
         }
+    }
+
+    /// Set debt cap for automatic garbage collection
+    ///
+    /// None disables any automatic collection
+    pub fn set_debt_cap(&mut self, debt_cap: Option<f64>) {
+        self.debt_cap = debt_cap;
     }
 
     // Expose collection methods

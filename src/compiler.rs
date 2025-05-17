@@ -2801,6 +2801,10 @@ impl<'gc> Compiler<'gc> {
                             }
                         }
 
+                        let chunk = c.chunk;
+                        if let Some(fallback) = chunk.fallback {
+                            map.extend(fallback.borrow().iter().map(|(k, v)| (*k, *v)));
+                        }
                         let fallback = if !map.is_empty() {
                             Some(Gc::new(mc, RefLock::new(map)))
                         } else {
@@ -2811,7 +2815,6 @@ impl<'gc> Compiler<'gc> {
                         // TODO Might be *too* permissive, but w/e for now
                         // and this might be *uber* buggy, but this *kinda* works, so fix things from
                         // this starting point
-                        let chunk = c.chunk;
                         let new_chunk = Chunk::with_fallback(
                             self.id,
                             mc,

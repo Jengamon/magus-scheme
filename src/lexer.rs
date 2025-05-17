@@ -1073,6 +1073,11 @@ mod tests {
         arbtest(|u| {
             let number: ExactReal = u.arbitrary()?;
             let decimal = format!("#e{}", number.display(10).unwrap());
+            if !number.is_numeric() {
+                // inf and nan do *not* roundtrip and are rejected by lexer
+                // so just shortcut and say yes
+                return Ok(());
+            }
             assert!(
                 SyntaxToken::lexer(&decimal).next()
                     == Some(Ok(SyntaxToken::Number(SchemeNumber::Exact(number)))),
@@ -1106,6 +1111,11 @@ mod tests {
                 },
                 im.display(10).unwrap(),
             );
+            if !im.is_numeric() {
+                // inf and nan do *not* roundtrip exact and are rejected by lexer
+                // so just shortcut and say yes
+                return Ok(());
+            }
             assert!(
                 SyntaxToken::lexer(&im_decimal).next()
                     == Some(Ok(SyntaxToken::Number(SchemeNumber::ExactComplex {

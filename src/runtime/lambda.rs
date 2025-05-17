@@ -415,9 +415,9 @@ impl Eq for Lambda<'_> {}
 impl std::fmt::Pointer for Lambda<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Native(np) => write!(f, "{:p}", *np),
+            Self::Native(np) => write!(f, "0x{:x}", (&raw const *np.borrow()).addr()),
             Self::Compiled(cp) | Self::ClosureCompiled { compiled: cp, .. } => {
-                write!(f, "{:p}", *cp)
+                write!(f, "0x{:x}", (&raw const *cp.as_ref()).addr())
             }
         }
     }

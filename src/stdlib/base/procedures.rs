@@ -22,7 +22,7 @@ pub use predicates::{
 };
 pub use string::{StringAppend, StringConstructor, StringCopy, StringLength, StringRef, Substring};
 pub use structure::{CallWithValues, Cons, Values};
-pub use vector::VectorRef;
+pub use vector::{VectorLength, VectorRef};
 
 mod conversions;
 
@@ -1994,7 +1994,7 @@ mod list {
 
 mod vector {
     //! Scheme Vector stuff
-    use gc_arena::Collect;
+    use gc_arena::{Collect, Gc};
 
     use crate::{
         Value,
@@ -2039,6 +2039,33 @@ mod vector {
             Ok(LambdaReturn::Return(vec![v.vec.get(i).copied().ok_or(
                 anyhow::anyhow!("vector-ref: index {i} out of range"),
             )?]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct VectorLength;
+
+    impl<'gc> NativeLambda<'gc> for VectorLength {
+        fn arity(&self) -> Arity {
+            Arity::Exact(1)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            let Value::Vector(v) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "vector-length expects a vector as its argument"
+                ))?;
+            };
+
+            Ok(LambdaReturn::Return(vec![
+                Value::Number(Gc::new(&ctx, Number::from_integer(v.vec.len()).unwrap()))
+                    .into_ptr(&ctx),
+            ]))
         }
     }
 }

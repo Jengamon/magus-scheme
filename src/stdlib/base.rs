@@ -36,7 +36,7 @@ pub use procedures::{
     Numerator, Raise, RaiseContinuable, Round, SetCarBang, SetCdrBang, StringAppend,
     StringConstructor, StringCopy, StringLength, StringRef, StringToList, StringToNumber,
     StringToSymbol, StringToUtf8, Substring, Subtract, SymbolToString, Truncate, TruncateSlash,
-    Utf8ToString, Values, VectorRef,
+    Utf8ToString, Values, VectorLength, VectorRef,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -415,6 +415,7 @@ impl Module for Base {
             "list-set!",
             "list-copy",
             "vector-ref",
+            "vector-length",
             "vector?",
             "string->utf8",
             "utf8->string",
@@ -530,6 +531,7 @@ impl Module for Base {
             "list-copy" => lambda!(ListCopy),
             "vector?" => lambda!(IsVector),
             "vector-ref" => lambda!(VectorRef),
+            "vector-length" => lambda!(VectorLength),
             "string->utf8" => lambda!(StringToUtf8),
             "utf8->string" => lambda!(Utf8ToString),
             "bytevector" => lambda!(Bytevector),

@@ -7,7 +7,7 @@ import { EditorView, keymap } from "@codemirror/view";
 import { indentWithTab } from "@codemirror/commands";
 import { birdsOfParadise } from "thememirror";
 
-import { createEffect, createSignal, onMount } from "solid-js";
+import { createEffect, createSignal, onMount, Show } from "solid-js";
 import { makePersisted } from "@solid-primitives/storage";
 
 import { z } from "zod";
@@ -64,7 +64,11 @@ function ScriptExec() {
   const [instDump, setInstDump] = createSignal([] as string[]);
   const [caseInsensitive, setCaseInsensitive] = createSignal(false);
 
+  const [ms, setMs] = createSignal(null as null | number);
+  const [recentUpdate, setRecentUpdate] = createSignal(false);
+
   const errSchema = z.string();
+  let start = null as null | number;
   function executeScript() {
     // clear the current output of the interpreter
     interpreter.clear_output();
@@ -84,6 +88,7 @@ function ScriptExec() {
       setInstDump(chunk.instructions());
 
       thread.load(chunk);
+      start = performance.now();
     } catch (e) {
       thread = null;
       setError(errSchema.parse(e));
@@ -92,6 +97,7 @@ function ScriptExec() {
   }
 
   const fuel = new MagusFuel(1_000);
+  let updateTimeout: null | number = null;
   setInterval(() => {
     setInterpreterOutput(interpreter.current_output());
     if (thread && !thread.is_finished()) {
@@ -99,6 +105,15 @@ function ScriptExec() {
       thread.run(fuel);
     } else if (thread) {
       try {
+        if (start != null) {
+          const dur = performance.now() - start;
+          setMs(dur);
+          setRecentUpdate(true);
+          if (updateTimeout != null) {
+            clearTimeout(updateTimeout);
+          }
+          updateTimeout = setTimeout(() => setRecentUpdate(false), 1000);
+        }
         setOutput(JSON.stringify(thread.result(), (_name, val) => {
           return typeof val === "number" && (isNaN(val) || !isFinite(val))
             ? val.toString()
@@ -106,6 +121,7 @@ function ScriptExec() {
         }, "  "));
         setError(null);
       } catch (e) {
+        start = null;
         setError(errSchema.parse(e));
         setOutput("");
       }
@@ -131,9 +147,22 @@ function ScriptExec() {
         Case Insensitive
       </label>
       <div ref={editor}></div>
-      <button class="btn" type="button" onClick={executeScript}>
-        <i class="ph-fill ph-play" />Run
-      </button>
+      <div class="flex items-center">
+        <button class="btn" type="button" onClick={executeScript}>
+          <i class="ph-fill ph-play" />Run
+        </button>
+        <Show when={ms() != null}>
+          <span
+            class={`transition ease-out px-3 ${
+              recentUpdate()
+                ? "text-success duration-0"
+                : "opacity-50 text-neutral-content duration-1000"
+            }`}
+          >
+            Duration: {ms() as number / 1000.0}s
+          </span>
+        </Show>
+      </div>
       <p class="font-mono whitespace-pre">{interpreterOutput()}</p>
       <p class="font-mono whitespace-pre">{output()}</p>
       <p class="text-error font-mono whitespace-pre">{error()}</p>

@@ -1,11 +1,11 @@
 use either::Either;
 use gc_arena::{Collect, Gc, RefLock};
-use num::{bigint::Sign, BigInt, BigRational, BigUint, One};
+use num::{BigInt, BigRational, BigUint, One, bigint::Sign};
 
 use crate::{
+    Value,
     runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
     value::{self, ConsCell, Number},
-    Value,
 };
 
 #[derive(Debug, Collect)]
@@ -138,10 +138,9 @@ impl<'gc> NativeLambda<'gc> for NumberToString {
             },
         };
 
-        Ok(LambdaReturn::Return(vec![Value::String(
-            Gc::new(&ctx, RefLock::new(output_string)).into(),
-        )
-        .into_ptr(&ctx)]))
+        Ok(LambdaReturn::Return(vec![
+            Value::String(Gc::new(&ctx, RefLock::new(output_string)).into()).into_ptr(&ctx),
+        ]))
     }
 }
 
@@ -250,19 +249,20 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
 
         // Manually reimplement lexerish behavior (None means failed to read radix flag)
 
-        fn read_flags(mut input: &str) -> Option<(bool, Option<u32>, &str)> {
-            let mut is_exact = true;
+        fn read_flags(mut input: &str) -> Option<(Option<bool>, Option<u32>, &str)> {
+            let mut is_exact = None;
             let mut radix = None;
 
             let mut has_exactness = false;
             while input.starts_with('#') {
                 match input.chars().nth(1) {
                     Some('e') if !has_exactness => {
+                        is_exact = Some(true);
                         has_exactness = true;
                         input = &input[2..];
                     }
                     Some('i') if !has_exactness => {
-                        is_exact = false;
+                        is_exact = Some(false);
                         has_exactness = true;
                         input = &input[2..];
                     }
@@ -353,15 +353,18 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                 is_neg: bool,
             },
             ReadDigit {
+                read_digit: bool,
                 is_neg: bool,
                 prefix: BigUint,
             },
             Decimal {
+                pre_dot: bool,
                 is_neg: bool,
                 value: BigUint,
                 post_digits: Vec<u8>,
             },
             DecimalExponent {
+                pre_dot: bool,
                 is_neg: bool,
                 value: BigUint,
                 post_digits: Vec<u8>,
@@ -383,65 +386,77 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                     Some(Ok(StnComponent::Plus)) => ParsingState::ReadSign { is_neg: false },
                     Some(Ok(StnComponent::Minus)) => ParsingState::ReadSign { is_neg: true },
                     Some(Ok(StnComponent::Digit(0))) => ParsingState::ReadDigit {
+                        read_digit: true,
                         is_neg: false,
                         prefix: BigUint::ZERO,
                     },
                     Some(Ok(StnComponent::Digit(d))) if radix > d => ParsingState::ReadDigit {
+                        read_digit: true,
                         is_neg: false,
                         prefix: BigUint::new(vec![d]),
                     },
                     Some(Ok(StnComponent::Dot)) if radix == 10 => ParsingState::Decimal {
+                        pre_dot: false,
                         is_neg: false,
                         value: BigUint::ZERO,
                         post_digits: vec![],
                     },
                     Some(Ok(StnComponent::PosInf)) if lexer.next().is_none() => {
                         return Ok(LambdaReturn::Return(vec![
-                            Value::Inexact(f64::INFINITY).into_ptr(&ctx)
+                            Value::Inexact(f64::INFINITY).into_ptr(&ctx),
                         ]));
                     }
                     Some(Ok(StnComponent::NegInf)) if lexer.next().is_none() => {
-                        return Ok(LambdaReturn::Return(vec![Value::Inexact(
-                            f64::NEG_INFINITY,
-                        )
-                        .into_ptr(&ctx)]));
+                        return Ok(LambdaReturn::Return(vec![
+                            Value::Inexact(f64::NEG_INFINITY).into_ptr(&ctx),
+                        ]));
                     }
                     Some(Ok(StnComponent::PosNan | StnComponent::NegNan))
                         if lexer.next().is_none() =>
                     {
                         return Ok(LambdaReturn::Return(vec![
-                            Value::Inexact(f64::NAN).into_ptr(&ctx)
+                            Value::Inexact(f64::NAN).into_ptr(&ctx),
                         ]));
                     }
                     _ => break,
                 },
                 ParsingState::ReadSign { is_neg } => match lexer.next() {
                     Some(Ok(StnComponent::Digit(0))) => ParsingState::ReadDigit {
+                        read_digit: true,
                         is_neg,
                         prefix: BigUint::ZERO,
                     },
                     Some(Ok(StnComponent::Digit(d))) if radix > d => ParsingState::ReadDigit {
+                        read_digit: true,
                         is_neg,
                         prefix: BigUint::new(vec![d]),
                     },
                     Some(Ok(StnComponent::Dot)) if radix == 10 => ParsingState::Decimal {
+                        pre_dot: false,
                         is_neg,
                         value: BigUint::ZERO,
                         post_digits: vec![],
                     },
                     _ => break,
                 },
-                ParsingState::ReadDigit { is_neg, prefix } => match lexer.next() {
+                ParsingState::ReadDigit {
+                    is_neg,
+                    prefix,
+                    read_digit,
+                } => match lexer.next() {
                     Some(Ok(StnComponent::Digit(0))) => ParsingState::ReadDigit {
+                        read_digit: true,
                         is_neg,
                         prefix: prefix * BigUint::new(vec![radix]),
                     },
                     Some(Ok(StnComponent::Digit(d))) if radix > d => ParsingState::ReadDigit {
+                        read_digit: true,
                         is_neg,
                         prefix: prefix * BigUint::new(vec![radix]) + BigUint::new(vec![d]),
                     },
                     Some(Ok(StnComponent::Digit(0xe))) if radix == 10 => {
                         ParsingState::DecimalExponent {
+                            pre_dot: read_digit,
                             is_neg,
                             value: prefix,
                             post_digits: vec![],
@@ -450,6 +465,7 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                         }
                     }
                     Some(Ok(StnComponent::Dot)) if radix == 10 => ParsingState::Decimal {
+                        pre_dot: read_digit,
                         is_neg,
                         value: prefix,
                         post_digits: vec![],
@@ -464,7 +480,7 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                             if is_neg { Sign::Minus } else { Sign::Plus },
                             prefix,
                         ));
-                        return Ok(LambdaReturn::Return(vec![if is_exact {
+                        return Ok(LambdaReturn::Return(vec![if is_exact.unwrap_or(true) {
                             Value::Number(Gc::new(&ctx, num)).into_ptr(&ctx)
                         } else {
                             Value::Inexact(num.to_inexact()).into_ptr(&ctx)
@@ -473,41 +489,46 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                     _ => break,
                 },
                 ParsingState::Decimal {
+                    pre_dot,
                     is_neg,
                     value,
                     mut post_digits,
-                } => match lexer.next() {
-                    Some(Ok(StnComponent::Digit(d))) if d < 10 => {
-                        post_digits.push(d as u8);
-                        ParsingState::Decimal {
+                } => {
+                    match lexer.next() {
+                        Some(Ok(StnComponent::Digit(d))) if d < 10 => {
+                            post_digits.push(d as u8);
+                            ParsingState::Decimal {
+                                pre_dot: true,
+                                is_neg,
+                                value,
+                                post_digits,
+                            }
+                        }
+                        Some(Ok(StnComponent::Digit(0xe))) => ParsingState::DecimalExponent {
+                            pre_dot,
                             is_neg,
                             value,
                             post_digits,
-                        }
-                    }
-                    Some(Ok(StnComponent::Digit(0xe))) => ParsingState::DecimalExponent {
-                        is_neg,
-                        value,
-                        post_digits,
-                        exponent_sign: None,
-                        exponent_digits: vec![],
-                    },
-                    None => {
-                        if !post_digits.is_empty() {
-                            return Ok(LambdaReturn::Return(vec![if is_exact {
-                                Value::Number(Gc::new(
-                                    &ctx,
-                                    Number::from_rational(exact_decimal_stn(
-                                        is_neg,
-                                        value,
-                                        post_digits,
-                                        None,
-                                        vec![],
-                                    )),
-                                ))
-                                .into_ptr(&ctx)
-                            } else {
-                                Value::Inexact(
+                            exponent_sign: None,
+                            exponent_digits: vec![],
+                        },
+                        None => {
+                            if !post_digits.is_empty() || post_digits.is_empty() && pre_dot {
+                                return Ok(LambdaReturn::Return(vec![
+                                    if is_exact.unwrap_or(false) {
+                                        Value::Number(Gc::new(
+                                            &ctx,
+                                            Number::from_rational(exact_decimal_stn(
+                                                is_neg,
+                                                value,
+                                                post_digits,
+                                                None,
+                                                vec![],
+                                            )),
+                                        ))
+                                        .into_ptr(&ctx)
+                                    } else {
+                                        Value::Inexact(
                                 value
                                     .to_f64()
                                     .ok_or_else(|| {
@@ -528,14 +549,17 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                                         .collect::<Result<Vec<_>, _>>()?.into_iter().sum::<f64>()
                             )
                             .into_ptr(&ctx)
-                            }]));
-                        } else {
-                            break;
+                                    },
+                                ]));
+                            } else {
+                                break;
+                            }
                         }
+                        _ => break,
                     }
-                    _ => break,
-                },
+                }
                 ParsingState::DecimalExponent {
+                    pre_dot,
                     is_neg,
                     value,
                     post_digits,
@@ -546,6 +570,7 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                         if exponent_sign.is_none() && exponent_digits.is_empty() =>
                     {
                         ParsingState::DecimalExponent {
+                            pre_dot,
                             is_neg,
                             value,
                             post_digits,
@@ -557,6 +582,7 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                         if exponent_sign.is_none() && exponent_digits.is_empty() =>
                     {
                         ParsingState::DecimalExponent {
+                            pre_dot,
                             is_neg,
                             value,
                             post_digits,
@@ -567,6 +593,7 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                     Some(Ok(StnComponent::Digit(d))) if d < 10 => {
                         exponent_digits.push(d as u8);
                         ParsingState::DecimalExponent {
+                            pre_dot,
                             is_neg,
                             value,
                             post_digits,
@@ -575,8 +602,8 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                         }
                     }
                     None => {
-                        if !exponent_digits.is_empty() {
-                            return Ok(LambdaReturn::Return(vec![if is_exact {
+                        if !exponent_digits.is_empty() && !post_digits.is_empty() || pre_dot {
+                            return Ok(LambdaReturn::Return(vec![if is_exact.unwrap_or(false) {
                                 Value::Number(Gc::new(
                                     &ctx,
                                     Number::from_rational(exact_decimal_stn(
@@ -661,7 +688,7 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
                                 ),
                                 BigInt::from_biguint(Sign::Plus, denom),
                             ));
-                            return Ok(LambdaReturn::Return(vec![if is_exact {
+                            return Ok(LambdaReturn::Return(vec![if is_exact.unwrap_or(true) {
                                 Value::Number(Gc::new(&ctx, num)).into_ptr(&ctx)
                             } else {
                                 Value::Inexact(num.to_inexact()).into_ptr(&ctx)
@@ -703,7 +730,7 @@ impl<'gc> NativeLambda<'gc> for StringToSymbol {
         let sym = ctx.interner.get_or_intern(s.borrow().as_str());
 
         Ok(LambdaReturn::Return(vec![
-            Value::Symbol(sym.into()).into_ptr(&ctx)
+            Value::Symbol(sym.into()).into_ptr(&ctx),
         ]))
     }
 }
@@ -730,10 +757,13 @@ impl<'gc> NativeLambda<'gc> for SymbolToString {
 
         let str = ctx.interner.resolve(&s.0);
 
-        Ok(LambdaReturn::Return(vec![Value::String(
-            value::String::new_frozen(Gc::new(&ctx, RefLock::new(str.to_string()))),
-        )
-        .into_ptr(&ctx)]))
+        Ok(LambdaReturn::Return(vec![
+            Value::String(value::String::new_frozen(Gc::new(
+                &ctx,
+                RefLock::new(str.to_string()),
+            )))
+            .into_ptr(&ctx),
+        ]))
     }
 }
 
@@ -775,10 +805,9 @@ impl<'gc> NativeLambda<'gc> for ListToString {
             .collect::<Result<_, _>>()?;
         let s = String::from_iter(values);
 
-        Ok(LambdaReturn::Return(vec![Value::String(
-            Gc::new(&ctx, RefLock::new(s)).into(),
-        )
-        .into_ptr(&ctx)]))
+        Ok(LambdaReturn::Return(vec![
+            Value::String(Gc::new(&ctx, RefLock::new(s)).into()).into_ptr(&ctx),
+        ]))
     }
 }
 
@@ -940,10 +969,9 @@ impl<'gc> NativeLambda<'gc> for Utf8ToString {
         let s = String::from_utf8(b)
             .map_err(|_| anyhow::anyhow!("utf8->string: bytes were not valid UTF8"))?;
 
-        Ok(LambdaReturn::Return(vec![Value::String(
-            Gc::new(&ctx, RefLock::new(s)).into(),
-        )
-        .into_ptr(&ctx)]))
+        Ok(LambdaReturn::Return(vec![
+            Value::String(Gc::new(&ctx, RefLock::new(s)).into()).into_ptr(&ctx),
+        ]))
     }
 }
 
@@ -1021,10 +1049,9 @@ impl<'gc> NativeLambda<'gc> for StringToUtf8 {
             .collect::<String>();
         let bytes = im_rc::Vector::from_iter(s.as_bytes().iter().copied());
 
-        Ok(LambdaReturn::Return(vec![Value::Bytevector(
-            Gc::new(&ctx, gc_arena::Static(bytes)).into(),
-        )
-        .into_ptr(&ctx)]))
+        Ok(LambdaReturn::Return(vec![
+            Value::Bytevector(Gc::new(&ctx, gc_arena::Static(bytes)).into()).into_ptr(&ctx),
+        ]))
     }
 }
 

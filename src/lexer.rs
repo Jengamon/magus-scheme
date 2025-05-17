@@ -646,6 +646,8 @@ pub(crate) fn read_number(
                         real: real_part.inexact(),
                         imaginary: im_part.inexact(),
                     })
+                } else if (!real_part.is_numeric() || !im_part.is_numeric()) && contains_flag('e') {
+                    Err(LexerError::MalformedNumber)
                 } else {
                     Ok(SchemeNumber::ExactComplex {
                         real: real_part,
@@ -661,7 +663,11 @@ pub(crate) fn read_number(
                 deci @ ExactReal::Decimal { .. } if !contains_flag('e') => {
                     Ok(SchemeNumber::Inexact(deci.inexact()))
                 }
-                _ => Ok(SchemeNumber::Exact(real_part)),
+                _ if real_part.is_numeric() => Ok(SchemeNumber::Exact(real_part)),
+                ExactReal::Inf { .. } | ExactReal::Nan { .. } if !contains_flag('e') => {
+                    Ok(SchemeNumber::Exact(real_part))
+                }
+                _ => Err(LexerError::MalformedNumber),
             },
             None => match real_part {
                 // If the written representation of a number has no exactness prefix,
@@ -673,13 +679,23 @@ pub(crate) fn read_number(
                         imaginary: deci.inexact(),
                     })
                 }
-                _ => Ok(SchemeNumber::ExactComplex {
+                _ if real_part.is_numeric() => Ok(SchemeNumber::ExactComplex {
                     real: ExactReal::Integer {
                         value: 0,
                         is_neg: false,
                     },
                     imaginary: real_part,
                 }),
+                ExactReal::Inf { .. } | ExactReal::Nan { .. } if !contains_flag('e') => {
+                    Ok(SchemeNumber::ExactComplex {
+                        real: ExactReal::Integer {
+                            value: 0,
+                            is_neg: false,
+                        },
+                        imaginary: real_part,
+                    })
+                }
+                _ => Err(LexerError::MalformedNumber),
             },
         }
     } else {

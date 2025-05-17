@@ -55,6 +55,8 @@ function ScriptExec() {
   interpreter.enable_inexact();
   interpreter.enable_lazy();
   interpreter.enable_magus_help();
+  interpreter.enable_srfi_1();
+  interpreter.enable_srfi_151();
 
   let thread: MagusThread | null = null;
 

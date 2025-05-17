@@ -43,7 +43,7 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
     )?;
     let includer = NullIncluder;
     let comp = interp.new_compiler();
-    let thread = interp.new_thread();
+    let thread = interp.new_thread(std::io::stdin(), std::io::stdout(), std::io::stderr());
     interp.register_module(
         &thread,
         &comp,
@@ -273,7 +273,15 @@ fn compile_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()
             interner: &mut interner,
         };
         let value_pointers = ValuePointers::fake(mc);
-        let thread = gc_arena::Gc::new(mc, gc_arena::RefLock::new(Thread::new_empty()));
+        let thread = gc_arena::Gc::new(
+            mc,
+            gc_arena::RefLock::new(Thread::new(
+                mc,
+                std::io::stdin(),
+                std::io::stdout(),
+                std::io::stderr(),
+            )),
+        );
         let library_def = LibraryDefinitionContext {
             max_fuel: None,
             value_pointers,

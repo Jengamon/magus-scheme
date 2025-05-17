@@ -50,6 +50,7 @@ function ScriptExec() {
   });
   const interpreter = new MagusInterpreter(["demosite"]);
   interpreter.enable_base();
+  interpreter.enable_write();
   interpreter.enable_cxr();
   interpreter.enable_inexact();
   interpreter.enable_lazy();
@@ -58,12 +59,16 @@ function ScriptExec() {
   let thread: MagusThread | null = null;
 
   const [output, setOutput] = createSignal("");
+  const [interpreterOutput, setInterpreterOutput] = createSignal("");
   const [error, setError] = createSignal(null as string | null);
   const [instDump, setInstDump] = createSignal([] as string[]);
   const [caseInsensitive, setCaseInsensitive] = createSignal(false);
 
   const errSchema = z.string();
   function executeScript() {
+    // clear the current output of the interpreter
+    interpreter.clear_output();
+
     const source = doc();
 
     thread = interpreter.new_thread();
@@ -88,6 +93,7 @@ function ScriptExec() {
 
   const fuel = new MagusFuel(1_000);
   setInterval(() => {
+    setInterpreterOutput(interpreter.current_output());
     if (thread && !thread.is_finished()) {
       fuel.refill(1_000, 1_000);
       thread.run(fuel);
@@ -124,6 +130,7 @@ function ScriptExec() {
       <button class="btn" type="button" onClick={executeScript}>
         <i class="ph-fill ph-play" />Run
       </button>
+      <p class="font-mono whitespace-pre">{interpreterOutput()}</p>
       <p class="font-mono whitespace-pre">{output()}</p>
       <p class="text-error font-mono whitespace-pre">{error()}</p>
     </>

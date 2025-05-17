@@ -27,15 +27,16 @@ pub use macros::{DefineSyntax, LetRecSyntax, LetSyntax, SyntaxError, SyntaxRules
 pub use parameters::{MakeParameter, Parameterize};
 pub use procedures::{
     Add, Apply, Ascending, Bytevector, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr,
-    Ceiling, CharToInteger, Cons, Denominator, Descending, Divide, DynamicWind, Equal, Exact,
-    ExactIntegerSqrt, Expt, Features, Floor, FloorSlash, Gcd, Inexact, IntegerToChar, IsBytevector,
-    IsChar, IsEq, IsEqual, IsEqv, IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList,
-    IsNull, IsOdd, IsPair, IsProcedure, IsString, IsSymbol, IsVector, Lcm, ListCopy, ListSetBang,
-    ListToString, MakeBytevector, Map, MonotonicAscending, MonotonicDescending, Multiply,
-    NumberToString, Numerator, Raise, RaiseContinuable, Round, SetCarBang, SetCdrBang,
-    StringAppend, StringConstructor, StringCopy, StringLength, StringRef, StringToList,
-    StringToNumber, StringToSymbol, StringToUtf8, Substring, Subtract, SymbolToString, Truncate,
-    TruncateSlash, Utf8ToString, Values, VectorRef,
+    Ceiling, CharToInteger, Cons, CurrentErrorPort, CurrentInputPort, CurrentOutputPort,
+    Denominator, Descending, Divide, DynamicWind, Equal, Exact, ExactIntegerSqrt, Expt, Features,
+    Floor, FloorSlash, Gcd, Inexact, IntegerToChar, IsBytevector, IsChar, IsEq, IsEqual, IsEqv,
+    IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull, IsOdd, IsPair,
+    IsProcedure, IsString, IsSymbol, IsVector, Lcm, ListCopy, ListSetBang, ListToString,
+    MakeBytevector, Map, MonotonicAscending, MonotonicDescending, Multiply, NumberToString,
+    Numerator, Raise, RaiseContinuable, Round, SetCarBang, SetCdrBang, StringAppend,
+    StringConstructor, StringCopy, StringLength, StringRef, StringToList, StringToNumber,
+    StringToSymbol, StringToUtf8, Substring, Subtract, SymbolToString, Truncate, TruncateSlash,
+    Utf8ToString, Values, VectorRef,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -336,8 +337,6 @@ impl Syntax for CondExpand {
 #[derive(Default, Clone)]
 pub struct Base {
     /// Any additional features (features) should provide and runtime cond-expand should expand
-    // TODO Add a slot for where compile-time cond-expand should place additional features (probably in
-    // LibraryDeclarationContext)
     pub additional_features: Arc<[Arc<str>]>,
 }
 
@@ -445,6 +444,9 @@ impl Module for Base {
             "truncate",
             "set-car!",
             "set-cdr!",
+            "current-input-port",
+            "current-output-port",
+            "current-error-port",
         ]
         .into_iter()
         .map(|s| interner.get_or_intern_static(s))
@@ -553,6 +555,9 @@ impl Module for Base {
             "truncate" => lambda!(Truncate),
             "set-car!" => lambda!(SetCarBang),
             "set-cdr!" => lambda!(SetCdrBang),
+            "current-input-port" => lambda!(CurrentInputPort),
+            "current-output-port" => lambda!(CurrentOutputPort),
+            "current-error-port" => lambda!(CurrentErrorPort),
             _ => None,
         }
     }

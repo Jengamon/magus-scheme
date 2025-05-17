@@ -1,5 +1,5 @@
 //! Bindings to use magus on the web!
-use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, io::Cursor, rc::Rc, sync::Arc};
 
 use magus::ParseProgram;
 use wasm_bindgen::prelude::*;
@@ -10,6 +10,7 @@ struct ModuleRegistry {
     cxr: Option<magus::stdlib::cxr::Cxr>,
     lazy: Option<magus::stdlib::lazy::Lazy>,
     inexact: Option<magus::stdlib::inexact::Inexact>,
+    write: Option<magus::stdlib::write::Write>,
 
     srfi_1: Option<magus::stdlib::srfi::list::Srfi1>,
     help: Option<magus::stdlib::magus_help::MagusHelp>,
@@ -58,8 +59,30 @@ impl ModuleRegistry {
         module_register!(cxr);
         module_register!(srfi_1);
         module_register!(help);
+        module_register!(write);
 
         Ok(())
+    }
+}
+
+#[derive(Clone, Default)]
+struct PortCursor {
+    cursor: Rc<RefCell<Cursor<Vec<u8>>>>,
+}
+
+impl std::io::Write for PortCursor {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.cursor.borrow_mut().write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.cursor.borrow_mut().flush()
+    }
+}
+
+impl std::io::Read for PortCursor {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.cursor.borrow_mut().read(buf)
     }
 }
 
@@ -69,6 +92,10 @@ pub struct MagusInterpreter {
     world: Rc<RefCell<magus::World>>,
     registry: ModuleRegistry,
     additional_features: Arc<[Arc<str>]>,
+
+    input: PortCursor,
+    output: PortCursor,
+    error: PortCursor,
 }
 
 #[wasm_bindgen]
@@ -83,6 +110,10 @@ impl MagusInterpreter {
                 .into_iter()
                 .map(|s| Arc::from(s.as_str()))
                 .collect(),
+
+            input: PortCursor::default(),
+            output: PortCursor::default(),
+            error: PortCursor::default(),
         }
     }
 
@@ -139,6 +170,23 @@ impl MagusInterpreter {
         Ok(())
     }
 
+    /// Enable `(scheme write)`
+    pub fn enable_write(&mut self) -> Result<(), String> {
+        if self.registry.write.is_some() {
+            // don't reenable
+            return Ok(());
+        }
+
+        let write = magus::stdlib::write::Write;
+
+        self.interpreter
+            .borrow_mut()
+            .register_native_module(&mut self.world.borrow_mut(), &write, None)
+            .map_err(|e| e.to_string())?;
+        self.registry.write = Some(write);
+        Ok(())
+    }
+
     /// Enable `(scheme lazy)`
     pub fn enable_lazy(&mut self) -> Result<(), String> {
         if self.registry.lazy.is_some() {
@@ -183,7 +231,11 @@ impl MagusInterpreter {
 
     pub fn new_thread(&mut self) -> Result<MagusThread, String> {
         let compiler = self.interpreter.borrow_mut().new_compiler();
-        let thread = self.interpreter.borrow_mut().new_thread();
+        let thread = self.interpreter.borrow_mut().new_thread(
+            self.input.clone(),
+            self.output.clone(),
+            self.error.clone(),
+        );
 
         self.registry
             .register_enabled_local_modules(
@@ -203,6 +255,14 @@ impl MagusInterpreter {
             compiler,
             thread,
         })
+    }
+
+    pub fn current_output(&self) -> String {
+        String::from_utf8_lossy(self.output.cursor.borrow().get_ref().as_slice()).to_string()
+    }
+
+    pub fn clear_output(&mut self) {
+        self.output.cursor.borrow_mut().get_mut().clear();
     }
 }
 

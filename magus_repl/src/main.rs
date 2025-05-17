@@ -680,7 +680,7 @@ fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle, ThreadHan
     let mut world = World::default();
 
     let compiler = interpreter.new_compiler();
-    let thread = interpreter.new_thread();
+    let thread = interpreter.new_thread(std::io::stdin(), std::io::stdout(), std::io::stderr());
     // max_fuel = None is *inadvisable* in any form of production code, b/c it means that if an infinite loop is
     // defined and executed in a library, it will run forever.
     // Rather, pass in a large amount of fuel.

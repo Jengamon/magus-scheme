@@ -135,8 +135,8 @@ pub enum Value<'gc> {
     // onlu allow interned strings for now
     // GcString(GcString<'gc>),
     // I/O with ports
-    InputPort(Gc<'gc, InputPort>),
-    OutputPort(Gc<'gc, OutputPort>),
+    InputPort(Gc<'gc, RefLock<InputPort>>),
+    OutputPort(Gc<'gc, RefLock<OutputPort>>),
 
     Cons(ConsCell<'gc>),
     // Represents something runnable
@@ -1022,7 +1022,7 @@ impl Promise<'_> {
 /// A dynamically bound value location with a
 /// default value, and possibly a conversion lambda
 pub struct Parameter<'gc> {
-    init: ValuePtr<'gc>,
+    pub(crate) init: ValuePtr<'gc>,
     pub(crate) convert: Option<Lambda<'gc>>,
     // TODO an fxhash::FxHashMap of usize (which are the addresses of ThreadFrame::id) to ValuePtr
     // to find the value of a parameter we climb up the stack of frame in existence, and if not found *then* we use init

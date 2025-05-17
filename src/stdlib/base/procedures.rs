@@ -15,6 +15,7 @@ pub use math::{
     Add, Ceiling, Denominator, Divide, ExactIntegerSqrt, Expt, Floor, FloorSlash, Gcd, Lcm,
     Multiply, Numerator, Round, Subtract, Truncate, TruncateSlash,
 };
+pub use ports::{CurrentErrorPort, CurrentInputPort, CurrentOutputPort};
 pub use predicates::{
     IsBytevector, IsChar, IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull,
     IsOdd, IsPair, IsProcedure, IsString, IsSymbol, IsVector,
@@ -2936,6 +2937,75 @@ mod structure {
             Ok(crate::runtime::lambda::LambdaReturn::Return(vec![
                 Value::Cons(crate::value::ConsCell::new(Some(args[0]), Some(args[1])))
                     .into_ptr(&ctx),
+            ]))
+        }
+    }
+}
+
+mod ports {
+    use gc_arena::Collect;
+
+    use crate::{
+        Value, ValuePtr,
+        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+    };
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct CurrentInputPort;
+
+    impl<'gc> NativeLambda<'gc> for CurrentInputPort {
+        fn arity(&self) -> Arity {
+            Arity::Exact(0)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            _args: &[ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            Ok(LambdaReturn::Return(vec![
+                Value::Parameter(ctx.thread_ref.input_port()).into_ptr(&ctx),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct CurrentOutputPort;
+
+    impl<'gc> NativeLambda<'gc> for CurrentOutputPort {
+        fn arity(&self) -> Arity {
+            Arity::Exact(0)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            _args: &[ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            Ok(LambdaReturn::Return(vec![
+                Value::Parameter(ctx.thread_ref.output_port()).into_ptr(&ctx),
+            ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct CurrentErrorPort;
+
+    impl<'gc> NativeLambda<'gc> for CurrentErrorPort {
+        fn arity(&self) -> Arity {
+            Arity::Exact(0)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            _args: &[ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            Ok(LambdaReturn::Return(vec![
+                Value::Parameter(ctx.thread_ref.error_port()).into_ptr(&ctx),
             ]))
         }
     }

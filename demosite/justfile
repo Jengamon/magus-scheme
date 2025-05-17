@@ -1,8 +1,14 @@
-dev: pkg
+dev:
     deno task dev
 
 pkg:
     wasm-pack build --weak-refs --target deno ../magus_web --out-dir $(pwd)/pkg
 
+pkg-release:
+    wasm-pack build --release --weak-refs --target deno ../magus_web --out-dir $(pwd)/pkg
+
 clean-pkg:
     rm -Rf pkg
+
+release: pkg-release
+    deno task build

@@ -12,6 +12,7 @@ use crate::{
     compiler::{self, LibraryDeclaration, LibraryDefinitionContext, ParseProgram as _},
     environment::StackEnvironmentPtr,
     handle_type,
+    runtime::port::{Readable, Writeable},
     value::{ConsCell, Value, ValuePtr},
 };
 
@@ -555,10 +556,15 @@ impl Interpreter {
         self.register_local_module(thread, handle, world, &module, rename, library_def_fn)
     }
 
-    pub fn new_thread(&mut self) -> ThreadHandle {
+    pub fn new_thread(
+        &mut self,
+        input: impl Readable,
+        output: impl Writeable,
+        error: impl Writeable,
+    ) -> ThreadHandle {
         let knob = Arc::new(());
         self.arena.mutate_root(|mc, arena| {
-            let new_thread = thread::Thread::default();
+            let new_thread = thread::Thread::new(mc, input, output, error);
             let key = arena
                 .stash
                 .threads
@@ -568,10 +574,16 @@ impl Interpreter {
         })
     }
 
-    pub fn new_thread_with_config(&mut self, config: ThreadConfig) -> ThreadHandle {
+    pub fn new_thread_with_config(
+        &mut self,
+        input: impl Readable,
+        output: impl Writeable,
+        error: impl Writeable,
+        config: ThreadConfig,
+    ) -> ThreadHandle {
         let knob = Arc::new(());
         self.arena.mutate_root(|mc, arena| {
-            let new_thread = thread::Thread::with_config(config);
+            let new_thread = thread::Thread::with_config(mc, input, output, error, config);
             let key = arena
                 .stash
                 .threads

@@ -15,8 +15,9 @@ use crate::{
             Arity, DynamicWind, Lambda, LambdaError, LambdaReturn, NativeLambdaContext,
             NativeLambdaPtr,
         },
+        port::{InputPort, OutputPort, PortType, Readable, Writeable},
     },
-    value::{self, ConsCell, Continuation, ContinuationPtr, ValuePtr},
+    value::{self, ConsCell, Continuation, ContinuationPtr, Parameter, ParameterPtr, ValuePtr},
 };
 
 use super::{Context, Includer};
@@ -317,42 +318,31 @@ pub struct Thread<'gc> {
     upvalue_mapping: fxhash::FxHashMap<usize, fxhash::FxHashMap<usize, usize>>,
     // counter for the upvalue mapping
     next_upvalue_index: usize,
-}
 
-impl Default for Thread<'_> {
-    fn default() -> Self {
-        Self::new_empty()
-    }
+    // port parameters~
+    default_input_port: InputPort,
+    input_port: ParameterPtr<'gc>,
+    default_output_port: OutputPort,
+    output_port: ParameterPtr<'gc>,
+    default_error_port: OutputPort,
+    error_port: ParameterPtr<'gc>,
 }
 
 // Public-facing API
 impl<'gc> Thread<'gc> {
-    // pub fn new(mc: &Mutation<'gc>, chunk: ChunkPtr<'gc>) -> Self {
-    //     Self {
-    //         frames: vec![ThreadFrame {
-    //             execution: Execution::Bytecode {
-    //                 chunk,
-    //                 pc: 0,
-    //                 arity: Arity::Exact(0),
-    //                 fallback: chunk.fallback,
-    //             },
-    //             env: Gc::new(
-    //                 mc,
-    //                 RefLock::new(StackEnvironment::new(mc, Some(chunk.import_env))),
-    //             ),
-    //             upvalue_index: None,
-    //             args: Box::from([]),
-    //             handler: None,
-    //             dynamic_wind: None,
-    //             exception: None,
-    //             bottom: 0,
-    //         }],
-    //         upvalues: Vec::with_capacity(chunk.upvalues),
-    //         ..Self::new_empty()
-    //     }
-    // }
+    pub fn new(
+        mc: &Mutation<'gc>,
+        input: impl Readable,
+        output: impl Writeable,
+        error: impl Writeable,
+    ) -> Self {
+        use std::sync::{Arc, Mutex};
 
-    pub fn new_empty() -> Self {
+        let default_input_port = InputPort::from((Arc::new(Mutex::new(input)), PortType::Textual));
+        let default_output_port =
+            OutputPort::from((Arc::new(Mutex::new(output)), PortType::Textual));
+        let default_error_port = OutputPort::from((Arc::new(Mutex::new(error)), PortType::Textual));
+
         Self {
             config: ThreadConfig::default(),
             frames: vec![],
@@ -363,13 +353,44 @@ impl<'gc> Thread<'gc> {
             quote_holes: fxhash::FxHashMap::default(),
             upvalue_mapping: Default::default(),
             next_upvalue_index: 0,
+
+            input_port: Gc::new(
+                mc,
+                RefLock::new(Parameter::new(
+                    Value::InputPort(Gc::new(mc, RefLock::new(default_input_port.clone())))
+                        .into_ptr(mc),
+                )),
+            ),
+            default_input_port,
+            output_port: Gc::new(
+                mc,
+                RefLock::new(Parameter::new(
+                    Value::OutputPort(Gc::new(mc, RefLock::new(default_output_port.clone())))
+                        .into_ptr(mc),
+                )),
+            ),
+            default_output_port,
+            error_port: Gc::new(
+                mc,
+                RefLock::new(Parameter::new(
+                    Value::OutputPort(Gc::new(mc, RefLock::new(default_error_port.clone())))
+                        .into_ptr(mc),
+                )),
+            ),
+            default_error_port,
         }
     }
 
-    pub fn with_config(config: ThreadConfig) -> Self {
+    pub fn with_config(
+        mc: &Mutation<'gc>,
+        input: impl Readable,
+        output: impl Writeable,
+        error: impl Writeable,
+        config: ThreadConfig,
+    ) -> Self {
         Self {
             config,
-            ..Self::new_empty()
+            ..Self::new(mc, input, output, error)
         }
     }
 
@@ -472,6 +493,7 @@ impl<'gc> Thread<'gc> {
     }
 
     /// When a thread has no frames, then it is considered to be finished.
+    #[inline]
     pub fn is_finished(&self) -> bool {
         self.frames.is_empty()
     }
@@ -497,20 +519,24 @@ impl<'gc> Thread<'gc> {
         })
     }
 
+    #[inline]
     pub fn config(&self) -> &ThreadConfig {
         &self.config
     }
 
+    #[inline]
     pub fn config_mut(&mut self) -> &mut ThreadConfig {
         &mut self.config
     }
 
     // Defined on &mut rather than &self for lambda denial
+    #[inline]
     pub fn env(&mut self) -> Option<StackEnvironmentPtr<'gc>> {
         Self::current_env(&self.frames)
     }
 
     // Ditto
+    #[inline]
     pub fn envs(&mut self) -> impl Iterator<Item = StackEnvironmentPtr<'gc>> {
         self.frames.iter().map(|f| f.env)
     }
@@ -523,20 +549,54 @@ impl<'gc> Thread<'gc> {
         frames.last().map(|f| f.env)
     }
 
+    #[inline]
     pub fn stack(&self) -> &[ValuePtr<'gc>] {
         self.stack.as_slice()
     }
 
+    #[inline]
     pub fn stack_mut(&mut self) -> &mut Stack<'gc> {
         &mut self.stack
     }
 
+    #[inline]
     pub fn frames(&self) -> &[ThreadFrame<'gc>] {
         self.frames.as_slice()
     }
 
+    #[inline]
     pub fn exception(&self) -> Option<SchemeErrorPtr<'gc>> {
         self.error
+    }
+
+    #[inline]
+    pub fn default_input_port(&mut self) -> &mut InputPort {
+        &mut self.default_input_port
+    }
+
+    #[inline]
+    pub fn input_port(&self) -> ParameterPtr<'gc> {
+        self.input_port
+    }
+
+    #[inline]
+    pub fn default_output_port(&mut self) -> &mut OutputPort {
+        &mut self.default_output_port
+    }
+
+    #[inline]
+    pub fn output_port(&self) -> ParameterPtr<'gc> {
+        self.output_port
+    }
+
+    #[inline]
+    pub fn default_error_port(&mut self) -> &mut OutputPort {
+        &mut self.default_error_port
+    }
+
+    #[inline]
+    pub fn error_port(&self) -> ParameterPtr<'gc> {
+        self.error_port
     }
 }
 
@@ -2201,7 +2261,15 @@ mod tests {
                 Default::default(),
             );
 
-            let thread = Gc::new(mc, RefLock::new(Thread::default()));
+            let thread = Gc::new(
+                mc,
+                RefLock::new(Thread::new(
+                    mc,
+                    std::io::stdin(),
+                    std::io::stdout(),
+                    std::io::stderr(),
+                )),
+            );
             thread.borrow_mut(mc).include(mc, chunk, false);
             // thread
             //     .borrow_mut(mc)

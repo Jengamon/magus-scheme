@@ -23,8 +23,15 @@ impl fmt::Display for PortType {
 }
 
 // I/O ports that provide a threadsafe way to input/output bytes
-pub trait Writeable: Write + Any {}
-impl<T: Write + Any> Writeable for T {}
+pub trait Writeable: Write + Any {
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+impl<T: Write + Any> Writeable for T {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
 /// Output port
 ///
 /// Defaults to blocking write, but the inner mutex is

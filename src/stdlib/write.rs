@@ -12,69 +12,98 @@ mod procedures {
 
     use crate::{
         Value, ValuePtr,
-        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        runtime::{
+            lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+            port::PortType,
+        },
         value::{ModeDisplay, ModeWrite},
     };
+
+    macro_rules! write_lam {
+        ($lam:ty => $name:literal, $mode:ty) => {
+            impl<'gc> NativeLambda<'gc> for $lam {
+                fn arity(&self) -> Arity {
+                    Arity::Bounded { min: 1, max: 2 }
+                }
+
+                fn run(
+                    &mut self,
+                    ctx: NativeLambdaContext<'_, 'gc>,
+                    args: &[ValuePtr<'gc>],
+                ) -> Result<LambdaReturn<'gc>, LambdaError> {
+                    use std::io::Write;
+
+                    let port = if args.len() == 1 {
+                        // we are *not* given a port to use, so first get the current port value
+                        if ctx.stack.is_empty() {
+                            return Ok(LambdaReturn::Parameter {
+                                parameter: ctx.thread_ref.output_port(),
+                            });
+                        } else {
+                            // port to use is at top of stack (index 0)
+                            let Value::OutputPort(prt) = *ctx.stack.last().copied().unwrap().borrow()
+                            else {
+                                return Err(anyhow::anyhow!(
+                                    "{} expects current output port parameter to be a textual output port",
+                                    $name
+                                ))?;
+                            };
+
+                            if prt.borrow().port_type() != PortType::Textual {
+                                return Err(anyhow::anyhow!(
+                                    "{} expects current output port parameter to be a textual output port",
+                                    $name
+                                ))?;
+                            }
+
+                            prt
+                        }
+                    } else {
+                        let Value::OutputPort(prt) = *args[1].borrow() else {
+                            return Err(anyhow::anyhow!(
+                                "{} expects a textual output port as its second argument",
+                                $name
+                            ))?;
+                        };
+
+                        if prt.borrow().port_type() != PortType::Textual {
+                            return Err(anyhow::anyhow!(
+                                "{} expects a textual output port as its second argument",
+                                $name
+                            ))?;
+                        }
+
+                        prt
+                    };
+
+                    write!(
+                        port.borrow_mut(&ctx),
+                        "{}",
+                        Value::resolve_into::<_, $mode>(
+                            args[0],
+                            ctx.interner.clone(),
+                            ctx.thread_ctx.null_value
+                        )
+                    )
+                    .map_err(|e| anyhow::anyhow!("{}: failed to write to port: {e}", $name))?;
+
+                    Ok(LambdaReturn::Return(vec![]))
+                }
+            }
+        }
+    }
 
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct DisplayLam;
 
-    impl<'gc> NativeLambda<'gc> for DisplayLam {
-        fn arity(&self) -> Arity {
-            Arity::Bounded { min: 1, max: 2 }
-        }
-
-        fn run(
-            &mut self,
-            ctx: NativeLambdaContext<'_, 'gc>,
-            args: &[ValuePtr<'gc>],
-        ) -> Result<LambdaReturn<'gc>, LambdaError> {
-            if args.len() > 2 {
-                return Err(anyhow::anyhow!("display expects either 1 or 2 arguments"))?;
-            }
-
-            print!(
-                "{}",
-                Value::resolve_into::<_, ModeDisplay>(
-                    args[0],
-                    ctx.interner.clone(),
-                    ctx.thread_ctx.null_value
-                )
-            );
-
-            // rn just ignore ports, and just dump to stdout
-            Ok(LambdaReturn::Return(vec![]))
-        }
-    }
+    write_lam!(DisplayLam => "display", ModeDisplay);
 
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct WriteLam;
 
-    impl<'gc> NativeLambda<'gc> for WriteLam {
-        fn arity(&self) -> Arity {
-            Arity::Bounded { min: 1, max: 2 }
-        }
-
-        fn run(
-            &mut self,
-            ctx: NativeLambdaContext<'_, 'gc>,
-            args: &[ValuePtr<'gc>],
-        ) -> Result<LambdaReturn<'gc>, LambdaError> {
-            eprint!(
-                "{}",
-                Value::resolve_into::<_, ModeWrite>(
-                    args[0],
-                    ctx.interner.clone(),
-                    ctx.thread_ctx.null_value
-                )
-            );
-
-            // rn just ignore ports, and just dump to stdout
-            Ok(LambdaReturn::Return(vec![]))
-        }
-    }
+    write_lam!(WriteLam => "write", ModeWrite);
 
     #[derive(Debug, Collect)]
     #[collect(require_static)]
@@ -87,11 +116,52 @@ mod procedures {
 
         fn run(
             &mut self,
-            _ctx: NativeLambdaContext<'_, 'gc>,
-            _args: &[ValuePtr<'gc>],
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
-            // Ignore port for now
-            println!();
+            use std::io::Write;
+
+            let port = if args.is_empty() {
+                // we are *not* given a port to use, so first get the current port value
+                if ctx.stack.is_empty() {
+                    return Ok(LambdaReturn::Parameter {
+                        parameter: ctx.thread_ref.output_port(),
+                    });
+                } else {
+                    // port to use is at top of stack (index 0)
+                    let Value::OutputPort(prt) = *ctx.stack.last().copied().unwrap().borrow()
+                    else {
+                        return Err(anyhow::anyhow!(
+                            "newline expects current output port parameter to be a textual output port",
+                        ))?;
+                    };
+
+                    if prt.borrow().port_type() != PortType::Textual {
+                        return Err(anyhow::anyhow!(
+                            "newline expects current output port parameter to be a textual output port",
+                        ))?;
+                    }
+
+                    prt
+                }
+            } else {
+                let Value::OutputPort(prt) = *args[0].borrow() else {
+                    return Err(anyhow::anyhow!(
+                        "newline expects a textual output port as its argument",
+                    ))?;
+                };
+
+                if prt.borrow().port_type() != PortType::Textual {
+                    return Err(anyhow::anyhow!(
+                        "newline expects a textual output port as its argument",
+                    ))?;
+                }
+
+                prt
+            };
+
+            writeln!(port.borrow_mut(&ctx))
+                .map_err(|e| anyhow::anyhow!("newline: failed to write to port: {e}"))?;
 
             Ok(LambdaReturn::Return(vec![]))
         }
@@ -101,6 +171,7 @@ mod procedures {
 pub use procedures::{DisplayLam, Newline, WriteLam};
 
 // #[derive(Default)]
+/// `(scheme write)` implementation
 pub struct Write;
 // So that code can change the "default" input/output port, we have to emulate parameter objects natively.
 // And this module would be created with 2 ports that it considered the "default" (and so would set to the parameter objects

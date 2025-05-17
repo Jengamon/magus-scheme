@@ -14,6 +14,17 @@ use crate::{
 };
 
 #[derive(Debug)]
+pub struct LetSyntax;
+
+// TODO we'll need a way to "reserve" a syntax slot, so that our syntaxes can use themselves
+// in their own definition
+#[derive(Debug)]
+pub struct LetRecSyntax;
+
+#[derive(Debug)]
+pub struct SyntaxError;
+
+#[derive(Debug)]
 pub struct DefineSyntax;
 
 impl Syntax for DefineSyntax {

@@ -23,7 +23,7 @@ pub use define::{Define, SetBang};
 pub use error_obj::{Error as ErrorLambda, ErrorObject, ErrorObjectMessage, IsErrorObject};
 pub use exception::WithExceptionHandler;
 pub use include::{Include, IncludeCi};
-pub use macros::{DefineSyntax, SyntaxRules};
+pub use macros::{DefineSyntax, LetRecSyntax, LetSyntax, SyntaxError, SyntaxRules};
 pub use parameters::{MakeParameter, Parameterize};
 pub use procedures::{
     Add, Apply, Ascending, Bytevector, Caar, Cadr, CallCc, CallWithValues, Car, Cdar, Cddr, Cdr,

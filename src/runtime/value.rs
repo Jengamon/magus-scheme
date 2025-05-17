@@ -41,7 +41,6 @@ pub enum ValueType {
     Char,
     Vector,
     Bytevector,
-    Record,
     InputPort,
     OutputPort,
     Cons,
@@ -68,7 +67,6 @@ impl fmt::Display for ValueType {
             Self::Char => write!(f, "char"),
             Self::Vector => write!(f, "vector"),
             Self::Bytevector => write!(f, "bytevector"),
-            Self::Record => write!(f, "record"),
             Self::InputPort => write!(f, "inputport"),
             Self::OutputPort => write!(f, "outputport"),
             Self::Cons => write!(f, "cons"),
@@ -88,7 +86,7 @@ impl ValueType {
     pub fn can_recurse(self) -> bool {
         matches!(
             self,
-            Self::Vector | Self::Record | Self::Cons | Self::Parameter | Self::Promise
+            Self::Vector | Self::Cons | Self::Parameter | Self::Promise
         )
     }
 
@@ -130,7 +128,6 @@ pub enum Value<'gc> {
     Char(char),
     Vector(VectorPtr<'gc>),
     Bytevector(Bytevector<'gc>),
-    Record(()),
     // Strings might not need to be in the GC, so
     // onlu allow interned strings for now
     // GcString(GcString<'gc>),
@@ -206,7 +203,6 @@ impl Value<'_> {
                     false
                 }
             }
-            Value::Record(_) => todo!(),
             Value::InputPort(ip) => matches!(other, Value::InputPort(oip) if Gc::ptr_eq(ip, oip)),
             Value::OutputPort(op) => {
                 matches!(other, Value::OutputPort(oop) if Gc::ptr_eq(op, oop))
@@ -246,7 +242,6 @@ impl PartialEq for Value<'_> {
             Value::Bytevector(bv) => {
                 matches!(other, Value::Bytevector(obv) if Gc::ptr_eq(bv.vec, obv.vec))
             }
-            Value::Record(_) => todo!(),
             Value::InputPort(ip) => matches!(other, Value::InputPort(oip) if Gc::ptr_eq(*ip, *oip)),
             Value::OutputPort(op) => {
                 matches!(other, Value::OutputPort(oop) if Gc::ptr_eq(*op, *oop))
@@ -315,7 +310,6 @@ impl<'gc> Value<'gc> {
             Value::Char(_) => ValueType::Char,
             Value::Vector(_) => ValueType::Vector,
             Value::Bytevector(_) => ValueType::Bytevector,
-            Value::Record(_) => ValueType::Record,
             Value::InputPort(_) => ValueType::InputPort,
             Value::OutputPort(_) => ValueType::OutputPort,
             Value::Cons(_) => ValueType::Cons,
@@ -576,10 +570,18 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K, ModeWrite> {
                 write!(f, ")")?;
                 Ok(())
             }
-            // Handle with cons printer (or just display name and member names, so we don't have to!!)
-            Value::Record(_) => todo!(),
-            Value::InputPort(_) => todo!(),
-            Value::OutputPort(_) => todo!(),
+            Value::InputPort(ip) => write!(
+                f,
+                "#<input-port mode={} 0x{:x}>",
+                ip.borrow().port_type(),
+                (&raw const *ip.borrow()).addr()
+            ),
+            Value::OutputPort(op) => write!(
+                f,
+                "#<output-port mode={} 0x{:x}>",
+                op.borrow().port_type(),
+                (&raw const *op.borrow()).addr()
+            ),
             // TODO this needs special handling, b/c a cons might recurse into itself
             Value::Cons(ref cons) if cons.is_circular(self.value_ptr, None) => {
                 write!(
@@ -736,10 +738,18 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K, ModeDisplay> {
                 write!(f, ")")?;
                 Ok(())
             }
-            // Handle with cons printer (or just display name and member names, so we don't have to!!)
-            Value::Record(_) => todo!(),
-            Value::InputPort(_) => todo!(),
-            Value::OutputPort(_) => todo!(),
+            Value::InputPort(ip) => write!(
+                f,
+                "#<input-port mode={} 0x{:x}>",
+                ip.borrow().port_type(),
+                (&raw const *ip.borrow()).addr()
+            ),
+            Value::OutputPort(op) => write!(
+                f,
+                "#<output-port mode={} 0x{:x}>",
+                op.borrow().port_type(),
+                (&raw const *op.borrow()).addr()
+            ),
             // TODO this needs special handling, b/c a cons might recurse into itself
             Value::Cons(ref cons) if cons.is_circular(self.value_ptr, None) => {
                 write!(

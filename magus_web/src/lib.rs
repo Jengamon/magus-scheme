@@ -13,6 +13,7 @@ struct ModuleRegistry {
     write: Option<magus::stdlib::write::Write>,
 
     srfi_1: Option<magus::stdlib::srfi::list::Srfi1>,
+    srfi_151: Option<magus::stdlib::srfi::bitwise::Srfi151>,
     help: Option<magus::stdlib::magus_help::MagusHelp>,
 }
 
@@ -57,9 +58,10 @@ impl ModuleRegistry {
         module_register!(inexact);
         module_register!(lazy);
         module_register!(cxr);
-        module_register!(srfi_1);
         module_register!(help);
         module_register!(write);
+        module_register!(srfi_1);
+        module_register!(srfi_151);
 
         Ok(())
     }
@@ -184,6 +186,40 @@ impl MagusInterpreter {
             .register_native_module(&mut self.world.borrow_mut(), &write, None)
             .map_err(|e| e.to_string())?;
         self.registry.write = Some(write);
+        Ok(())
+    }
+
+    /// Enable `(srfi 1)`
+    pub fn enable_srfi_1(&mut self) -> Result<(), String> {
+        if self.registry.srfi_1.is_some() {
+            // don't reenable
+            return Ok(());
+        }
+
+        let srfi_1 = magus::stdlib::srfi::list::Srfi1;
+
+        self.interpreter
+            .borrow_mut()
+            .register_native_module(&mut self.world.borrow_mut(), &srfi_1, None)
+            .map_err(|e| e.to_string())?;
+        self.registry.srfi_1 = Some(srfi_1);
+        Ok(())
+    }
+
+    /// Enable `(srfi 151)`
+    pub fn enable_srfi_151(&mut self) -> Result<(), String> {
+        if self.registry.srfi_151.is_some() {
+            // don't reenable
+            return Ok(());
+        }
+
+        let srfi_151 = magus::stdlib::srfi::bitwise::Srfi151;
+
+        self.interpreter
+            .borrow_mut()
+            .register_native_module(&mut self.world.borrow_mut(), &srfi_151, None)
+            .map_err(|e| e.to_string())?;
+        self.registry.srfi_151 = Some(srfi_151);
         Ok(())
     }
 

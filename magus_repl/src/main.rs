@@ -785,6 +785,19 @@ fn repl_stuff() -> anyhow::Result<(Interpreter, World, CompilerHandle, ThreadHan
             thread,
         },
     )?;
+    interpreter.register_module(
+        &thread,
+        &compiler,
+        &mut world,
+        stdlib::srfi::bitwise::Srfi151,
+        None,
+        |thread, vp| LibraryDefinitionContext {
+            max_fuel: Some(10_000),
+            value_pointers: vp,
+            additional_features: Some(&additional_features),
+            thread,
+        },
+    )?;
 
     Ok((interpreter, world, compiler, thread))
 }

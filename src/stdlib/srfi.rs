@@ -57,3 +57,125 @@ pub mod list {
         }
     }
 }
+
+/// SRFI 151: bitwise operations
+pub mod bitwise {
+    use gc_arena::{Gc, RefLock, unsize};
+
+    use crate::{
+        LibraryName, Registerable,
+        compiler::Module,
+        library_name,
+        runtime::{convert::IntoValue, lambda},
+    };
+
+    mod procedures {
+        use gc_arena::{Collect, Gc};
+
+        use crate::{
+            Value,
+            runtime::lambda::{
+                Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext,
+            },
+            value::Number,
+        };
+
+        #[derive(Debug, Collect)]
+        #[collect(require_static)]
+        pub struct BitwiseNot;
+
+        impl<'gc> NativeLambda<'gc> for BitwiseNot {
+            fn arity(&self) -> Arity {
+                Arity::Exact(1)
+            }
+
+            fn run(
+                &mut self,
+                ctx: NativeLambdaContext<'_, 'gc>,
+                args: &[crate::ValuePtr<'gc>],
+            ) -> Result<LambdaReturn<'gc>, LambdaError> {
+                let Value::Number(n) = *args[0].borrow() else {
+                    return Err(anyhow::anyhow!(
+                        "bitwise-not expects an integer as its argument"
+                    ))?;
+                };
+
+                let Number::Integer(i) = &*n else {
+                    return Err(anyhow::anyhow!(
+                        "bitwise-not expects an integer as its argument"
+                    ))?;
+                };
+
+                Ok(LambdaReturn::Return(vec![
+                    Value::Number(Gc::new(&ctx, Number::Integer(!i))).into_ptr(&ctx),
+                ]))
+            }
+        }
+    }
+
+    pub use procedures::BitwiseNot;
+
+    #[derive(Debug)]
+    pub struct Srfi151;
+
+    impl Module for Srfi151 {
+        fn all_symbols(
+            &self,
+            interner: &mut lasso::Rodeo,
+        ) -> std::collections::HashSet<lasso::Spur> {
+            ["bitwise-not"]
+                .into_iter()
+                .map(|s| interner.get_or_intern_static(s))
+                .collect()
+        }
+
+        fn value<'gc>(
+            &self,
+            mc: &gc_arena::Mutation<'gc>,
+            symbol: &str,
+        ) -> Option<crate::ValuePtr<'gc>> {
+            macro_rules! lambda {
+                ($lmb:expr) => {
+                     Some(
+                        lambda::Lambda::Native(
+                            unsize![Gc::new(mc, RefLock::new($lmb)) => RefLock<dyn lambda::NativeLambda>],
+                        )
+                        .into_value(mc)
+                        .into_ptr(mc),
+                    )
+                };
+            }
+
+            match symbol {
+                "bitwise-not" => lambda!(BitwiseNot),
+                _ => None,
+            }
+        }
+    }
+
+    impl Registerable for Srfi151 {
+        fn name(interner: &mut lasso::Rodeo) -> crate::LibraryName {
+            LibraryName::from_iter(library_name!(interner => srfi 151))
+        }
+
+        fn native(
+            &self,
+        ) -> Option<std::sync::Arc<dyn crate::compiler::Module + Send + Sync + 'static>> {
+            Some(std::sync::Arc::new(Self))
+        }
+
+        fn scheme(&self) -> Option<(&str, &str)> {
+            None
+        }
+
+        fn scheme_native(
+            &self,
+            _interner: &mut lasso::Rodeo,
+        ) -> Vec<(
+            LibraryName,
+            std::sync::Arc<dyn crate::compiler::Module + Send + Sync + 'static>,
+        )> {
+            vec![]
+        }
+    }
+}

@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
 use std::collections::HashMap;
@@ -336,12 +336,11 @@ impl<'gc> Thread<'gc> {
         output: impl Writeable,
         error: impl Writeable,
     ) -> Self {
-        use std::sync::{Arc, Mutex};
-
-        let default_input_port = InputPort::from((Arc::new(Mutex::new(input)), PortType::Textual));
+        let default_input_port = InputPort::from((Rc::new(RefCell::new(input)), PortType::Textual));
         let default_output_port =
-            OutputPort::from((Arc::new(Mutex::new(output)), PortType::Textual));
-        let default_error_port = OutputPort::from((Arc::new(Mutex::new(error)), PortType::Textual));
+            OutputPort::from((Rc::new(RefCell::new(output)), PortType::Textual));
+        let default_error_port =
+            OutputPort::from((Rc::new(RefCell::new(error)), PortType::Textual));
 
         Self {
             config: ThreadConfig::default(),

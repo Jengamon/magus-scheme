@@ -77,7 +77,7 @@ pub mod bitwise {
             runtime::lambda::{
                 Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext,
             },
-            value::Number,
+            value::{ConsCell, Number},
         };
 
         #[derive(Debug, Collect)]
@@ -111,9 +111,73 @@ pub mod bitwise {
                 ]))
             }
         }
+
+        #[derive(Debug, Collect)]
+        #[collect(require_static)]
+        pub struct BitsToList;
+
+        impl<'gc> NativeLambda<'gc> for BitsToList {
+            fn arity(&self) -> Arity {
+                Arity::Bounded { min: 1, max: 2 }
+            }
+
+            fn run(
+                &mut self,
+                ctx: NativeLambdaContext<'_, 'gc>,
+                args: &[crate::ValuePtr<'gc>],
+            ) -> Result<LambdaReturn<'gc>, LambdaError> {
+                let Value::Number(bitn) = *args[0].borrow() else {
+                    return Err(anyhow::anyhow!(
+                        "bits->list expects a non-negative integer as its first argument"
+                    ))?;
+                };
+
+                if bitn.is_negative() || !matches!(&*bitn, Number::Integer(_)) {
+                    return Err(anyhow::anyhow!(
+                        "bits->list expects a non-negative integer as its first argument"
+                    ))?;
+                }
+
+                let Number::Integer(bitn) = &*bitn else {
+                    unreachable!()
+                };
+
+                let limit = match args.get(1).map(|v| *v.borrow()) {
+                    Some(Value::Number(n))
+                        if matches!(&*n, Number::Integer(_)) && !n.is_negative() =>
+                    {
+                        use num::ToPrimitive;
+                        let Number::Integer(n) = &*n else {
+                            unreachable!();
+                        };
+                        Some(
+                            n.to_u64()
+                                .ok_or(anyhow::anyhow!("bits->list: index too large"))?,
+                        )
+                    }
+                    Some(_) => {
+                        return Err(anyhow::anyhow!(
+                            "bits->list expect a non-negative integer as it's second argument"
+                        ))?;
+                    }
+                    None => None,
+                };
+
+                let bits = limit.unwrap_or(bitn.bits()).max(1);
+                let list = (0..bits).rev().map(|i| ctx.bool(bitn.bit(i)));
+                let cons = ConsCell::from_iter(&ctx, ctx.thread_ctx.null_value, list);
+
+                Ok(LambdaReturn::Return(vec![cons]))
+            }
+
+            fn doc_string(&self) -> Option<&str> {
+                Some("(argument 0 \"non-negative integer\") (argument 1 'optional \"non-negative integer\")
+return a list of booleans (upto argument 1) corresponding to each bit of argument 0")
+            }
+        }
     }
 
-    pub use procedures::BitwiseNot;
+    pub use procedures::{BitsToList, BitwiseNot};
 
     #[derive(Debug)]
     pub struct Srfi151;
@@ -123,7 +187,7 @@ pub mod bitwise {
             &self,
             interner: &mut lasso::Rodeo,
         ) -> std::collections::HashSet<lasso::Spur> {
-            ["bitwise-not"]
+            ["bitwise-not", "bits->list"]
                 .into_iter()
                 .map(|s| interner.get_or_intern_static(s))
                 .collect()
@@ -148,6 +212,7 @@ pub mod bitwise {
 
             match symbol {
                 "bitwise-not" => lambda!(BitwiseNot),
+                "bits->list" => lambda!(BitsToList),
                 _ => None,
             }
         }

@@ -741,7 +741,7 @@
     [ "srfi 151", "", bit-field-replace-same, false, "", ""],
     [ "srfi 151", "", bit-field-rotate, false, "", ""],
     [ "srfi 151", "", bit-field-reverse, false, "", ""],
-    [ "srfi 151", "", bits->list, false, "", ""],
+    [ "srfi 151", "procedure", bits->list, true, "return a list of bits from a non-negative integer", ""],
     [ "srfi 151", "", list->bits, false, "", ""],
     [ "srfi 151", "", bits->vector, false, "", ""],
     [ "srfi 151", "", vector->bits, false, "", ""],

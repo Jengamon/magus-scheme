@@ -12,10 +12,7 @@ mod procedures {
 
     use crate::{
         Value, ValuePtr,
-        runtime::{
-            lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
-            port::PortType,
-        },
+        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
         value::{ModeDisplay, ModeWrite},
     };
 
@@ -44,14 +41,14 @@ mod procedures {
                             let Value::OutputPort(prt) = *ctx.stack.last().copied().unwrap().borrow()
                             else {
                                 return Err(anyhow::anyhow!(
-                                    "{} expects current output port parameter to be a textual output port",
+                                    "{} expects current output port parameter to be an output port",
                                     $name
                                 ))?;
                             };
 
-                            if prt.borrow().port_type() != PortType::Textual {
+                            if prt.borrow().is_closed() {
                                 return Err(anyhow::anyhow!(
-                                    "{} expects current output port parameter to be a textual output port",
+                                    "{} expects current output port parameter to be an open output port",
                                     $name
                                 ))?;
                             }
@@ -61,14 +58,14 @@ mod procedures {
                     } else {
                         let Value::OutputPort(prt) = *args[1].borrow() else {
                             return Err(anyhow::anyhow!(
-                                "{} expects a textual output port as its second argument",
+                                "{} expects an output port as its second argument",
                                 $name
                             ))?;
                         };
 
-                        if prt.borrow().port_type() != PortType::Textual {
+                        if prt.borrow().is_closed() {
                             return Err(anyhow::anyhow!(
-                                "{} expects a textual output port as its second argument",
+                                "{} expects an open output port as its second argument",
                                 $name
                             ))?;
                         }
@@ -132,13 +129,13 @@ mod procedures {
                     let Value::OutputPort(prt) = *ctx.stack.last().copied().unwrap().borrow()
                     else {
                         return Err(anyhow::anyhow!(
-                            "newline expects current output port parameter to be a textual output port",
+                            "newline expects current output port parameter to be an output port",
                         ))?;
                     };
 
-                    if prt.borrow().port_type() != PortType::Textual {
+                    if prt.borrow().is_closed() {
                         return Err(anyhow::anyhow!(
-                            "newline expects current output port parameter to be a textual output port",
+                            "newline expects current output port parameter to be an open output port",
                         ))?;
                     }
 
@@ -147,13 +144,13 @@ mod procedures {
             } else {
                 let Value::OutputPort(prt) = *args[0].borrow() else {
                     return Err(anyhow::anyhow!(
-                        "newline expects a textual output port as its argument",
+                        "newline expects an output port as its argument",
                     ))?;
                 };
 
-                if prt.borrow().port_type() != PortType::Textual {
+                if prt.borrow().is_closed() {
                     return Err(anyhow::anyhow!(
-                        "newline expects a textual output port as its argument",
+                        "newline expects an open output port as its argument",
                     ))?;
                 }
 

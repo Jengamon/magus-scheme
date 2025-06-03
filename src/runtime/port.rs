@@ -56,6 +56,10 @@ impl OutputPort {
         self.port.take()
     }
 
+    pub fn is_closed(&self) -> bool {
+        self.port.is_none()
+    }
+
     pub fn port_type(&self) -> PortType {
         self.port_type
     }
@@ -133,6 +137,10 @@ pub struct InputPort {
 impl InputPort {
     pub fn close(&mut self) -> Option<Rc<RefCell<dyn Readable>>> {
         self.port.take()
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.port.is_none()
     }
 
     pub fn port_type(&self) -> PortType {

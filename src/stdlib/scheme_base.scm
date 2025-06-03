@@ -8,7 +8,8 @@
 (import (magus impl))
 (export list not memq memv member abs square boolean? boolean=?
     zero? positive? negative? length assq assv make-list list-ref
-    floor-quotient floor-remainder truncate-quotient truncate-remainder)
+    floor-quotient floor-remainder truncate-quotient truncate-remainder
+    reverse)
 (begin
   (define (list . in) in)
   (define (not x) (if x #f #t))
@@ -117,8 +118,15 @@
               (if (compare a (car lst))
                   lst
                   (member-iter a (cdr lst) compare))))
-      (if (> (length compare) 1) (raise "member expects 2 or 3 arguments"))
+      (if (> (length compare) 1) (error "member expects 2 or 3 arguments"))
       (member-iter x lst (if (null? compare) equal? (car compare))))
+  (define (reverse lst)
+      (define (reverse-iter lst a)
+          (if (null? a)
+              lst
+              (reverse-iter (cons (car a) lst) (cdr a))))
+      (if (not (list? lst)) (error "reverse expects a proper list as its argument"))
+      (reverse-iter '() lst))
   ; TODO member, which uses equal (does a length check, and should error if rest is too long,
   ; so waiting on impls equal?, raise)
   (define-syntax when

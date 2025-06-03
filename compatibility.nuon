@@ -180,7 +180,7 @@
     [ "base", "", "read-u8", false, "", "" ],
     [ "base", "", real?, false, "", "" ],
     [ "base", "", remainder, false, "", "" ],
-    [ "base", "", reverse, false, "", "" ],
+    [ "base", "procedure", reverse, true, "reverse a proper list", "implemented in Scheme" ],
     [ "base", "procedure", round, true, "round a number", "" ],
     [ "base", "syntax", set!, true, "set a variable to a value (if exists)", "" ],
     [ "base", "procedure", set-car!, true, "mutate the car pointer of a cons pair", "" ],

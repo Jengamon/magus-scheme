@@ -436,9 +436,14 @@ pub fn escape_write_char(c: char, is_single: bool) -> Vec<char> {
                 }
                 digits
             };
-            ['\\', 'x'].into_iter().chain(chars).collect()
+            if chars.is_empty() {
+                ['\\', 'x', '0'].to_vec()
+            } else {
+                ['\\', 'x'].into_iter().chain(chars).collect()
+            }
         }
         '\"' => vec!['\\', '"'],
+        c if is_single => vec!['\\', c],
         c => vec![c],
     }
 }
@@ -523,7 +528,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K, ModeWrite> {
             Value::Bool(b) => write!(f, "#{}", if b { "t" } else { "f" }),
             Value::Char(c) => write!(
                 f,
-                "#\\{}",
+                "#{}",
                 escape_write_char(c, true).into_iter().collect::<Box<str>>()
             ),
             Value::Vector(ref vec) if vec.is_circular(self.value_ptr) => {

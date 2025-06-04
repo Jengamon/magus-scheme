@@ -8,7 +8,7 @@ use std::{
 };
 
 use fxhash::{FxHashMap, FxHashSet};
-use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
+use gc_arena::{Collect, Gc, Mutation, RefLock, Static, unsize};
 use num::{BigInt, ToPrimitive};
 use program_parsers::StringProgramError;
 
@@ -139,7 +139,7 @@ pub enum ProgramData<'gc> {
     // Rational(bool, u64, u64),
     Inexact(f64),
     // TODO complex numbers
-    String(#[collect(require_static)] lasso::Spur),
+    String(Rc<str>),
     Symbol(#[collect(require_static)] lasso::Spur),
     Bool(bool),
     Char(char),
@@ -686,13 +686,14 @@ impl Scope {
 }
 
 /// A placeholder for a [`Transformer`] used for `letrec-syntax`
-#[derive(Debug)]
+#[derive(Debug, Collect)]
+#[collect(require_static)]
 struct PrivateTransformerPlaceholder {
     name: lasso::Spur,
 }
 
-impl Syntax for PrivateTransformerPlaceholder {
-    fn evaluate<'gc>(
+impl<'gc> Transformer<'gc> for PrivateTransformerPlaceholder {
+    fn evaluate(
         &self,
         ctx: &mut SyntaxContext<'_, '_, 'gc>,
         _compiler: &mut Compiler<'gc>,
@@ -1351,7 +1352,7 @@ impl<'gc> LibraryDeclaration<'gc> {
                     let filenames = body
                         .iter()
                         .filter_map(|b| match &b.data {
-                            ProgramData::String(s) => Some(Rc::from(interner.resolve(s))),
+                            ProgramData::String(s) => Some(Rc::clone(s)),
                             _ => unreachable!(),
                         })
                         .collect::<Rc<[_]>>();
@@ -1367,7 +1368,7 @@ impl<'gc> LibraryDeclaration<'gc> {
                     let filenames = body
                         .iter()
                         .filter_map(|b| match &b.data {
-                            ProgramData::String(s) => Some(Rc::from(interner.resolve(s))),
+                            ProgramData::String(s) => Some(Rc::clone(s)),
                             _ => unreachable!(),
                         })
                         .collect::<Rc<[_]>>();
@@ -1386,7 +1387,7 @@ impl<'gc> LibraryDeclaration<'gc> {
                     let filenames = body
                         .iter()
                         .filter_map(|b| match &b.data {
-                            ProgramData::String(s) => Some(Rc::from(interner.resolve(s))),
+                            ProgramData::String(s) => Some(Rc::clone(s)),
                             _ => unreachable!(),
                         })
                         .collect::<Rc<[_]>>();
@@ -1555,9 +1556,10 @@ impl<'gc> Compiler<'gc> {
         self.label_values.get(&label).copied()
     }
 
-    /// Convenience function for cleaning up unused transformers
+    /// Convenience function for cleaning up unused information and resetting (some) state
     pub fn cleanup(&mut self) {
         self.stash.cleanup();
+        self.reset_checkpoints();
     }
 
     /// Convenience function for generating the list of base features
@@ -1699,7 +1701,7 @@ impl<'gc> Compiler<'gc> {
         library_def: &LibraryDefinitionContext<'a, 'gc>,
         programs: impl IntoIterator<Item = ProgramPtr<'gc>>,
     ) -> Result<ChunkPtr<'gc>, CompileError> {
-        self.stash.cleanup();
+        self.cleanup();
 
         let mut programs = programs.into_iter().peekable();
         let mut imported = FxHashSet::default();
@@ -1815,9 +1817,8 @@ impl<'gc> Compiler<'gc> {
             ProgramData::Bytevector(bv) => {
                 simple_constant!(Arc::from(bv.as_ref()) => Bytevector)
             }
-            ProgramData::String(spur) => {
-                let index =
-                    ctx.add_constant(Constant::String(Arc::from(ctx.ecc.interner.resolve(spur))));
+            ProgramData::String(s) => {
+                let index = ctx.add_constant(Constant::String(Arc::from(s.as_ref())));
                 Ok(SyntaxReturn::Code(Box::from([Bytecode::PushConst {
                     index,
                 }])))
@@ -3119,6 +3120,10 @@ impl<'gc> Compiler<'gc> {
         self.environments[spec.0.get()]
     }
 
+    fn reset_checkpoints(&mut self) {
+        self.checkpoints.clear();
+    }
+
     /// Create a checkpoint for the current compiler state
     ///
     /// This allows a macro to restore the syntax items, variables, and argument symbols defined at this point in
@@ -3202,13 +3207,34 @@ impl<'gc> Compiler<'gc> {
     }
 
     // TODO make these pub once vetted
+    // NOTE This means that while syntax-rules, while being processed, and rely on if a name is bound, it cannot (and should not)
+    // actually execute any of the macros (or anything for that matter, which is left to the actual *invocation* of the transformer)
     /// Create a placeholder for a transformer, given a name.
-    ///
-    /// (from this point onward, acts as if the transformer was installed)
-    ///
-    /// (requiring substitution from this syntax before it is defined will cause a compiler error)
-    pub(crate) fn define_transformer_placeholder(&mut self, name: lasso::Spur) {
-        self.define_macro(name, Arc::new(PrivateTransformerPlaceholder { name }));
+    pub(crate) fn define_transformer_macro_with_placeholder(
+        &mut self,
+        mc: &Mutation<'gc>,
+        name: lasso::Spur,
+    ) -> TransformerKey {
+        let knob = Arc::new(());
+        let key = self.stash.transformers.insert(
+            unsize!(Gc::new(mc, PrivateTransformerPlaceholder { name }) => dyn Transformer<'gc> + 'gc),
+        );
+        self.stash.transformer_knobs.insert(key, knob.clone());
+        let syntax = PrivateTransformer {
+            key,
+            _knob: Arc::clone(&knob),
+        };
+        self.define_macro(name, Arc::new(syntax));
+        key
+    }
+
+    /// Replace the transformer defined by a key with a real transformer
+    pub(crate) fn install_transformer_at(
+        &mut self,
+        transformer: TransformerPtr<'gc>,
+        key: TransformerKey,
+    ) {
+        self.stash.transformers[key] = transformer;
     }
 
     /// Request a new macro index. Used by threads to share environments between macro invocations

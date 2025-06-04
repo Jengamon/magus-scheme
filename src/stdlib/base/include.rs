@@ -28,13 +28,12 @@ fn include_files<'gc>(
         .iter()
         .copied()
         .filter_map(|p| {
-            if let ProgramData::String(s) = p.data {
-                Some(ctx.ecc.interner.resolve(&s))
+            if let ProgramData::String(ref s) = p.data {
+                Some(Box::from(s.as_ref()))
             } else {
                 None
             }
         })
-        .map(Box::from)
         .collect::<Vec<_>>()
     {
         let source = ctx.ecc.includer.include(&filename)?;

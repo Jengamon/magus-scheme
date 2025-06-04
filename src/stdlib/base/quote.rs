@@ -75,7 +75,7 @@ fn quote_program<'gc>(
         ProgramData::Inexact(f) => constant_eval!(*f => Inexact),
         ProgramData::Bytevector(bv) => constant_eval!(Arc::from(bv.as_ref()) => Bytevector),
         ProgramData::String(s) => {
-            constant_eval!(Arc::from(qctx.ctx.ecc.interner.resolve(s)) => String)
+            constant_eval!(Arc::from(s.as_ref()) => String)
         }
         ProgramData::Symbol(s) => {
             constant_eval!(*s => Symbol)

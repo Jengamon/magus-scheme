@@ -1,5 +1,5 @@
 use core::fmt;
-use std::num::NonZeroU16;
+use std::{num::NonZeroU16, rc::Rc};
 
 use gc_arena::{Gc, Mutation};
 use num::{BigInt, BigRational, BigUint, One, bigint::Sign};
@@ -487,11 +487,13 @@ impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module) {
                     )));
                     return;
                 };
-                let spur = self.interner.get_or_intern(&stringv);
 
                 self.ptr = Some(Ok(Gc::new(
                     self.mc,
-                    Program::new(ProgramData::String(spur), source_data!(self, string)),
+                    Program::new(
+                        ProgramData::String(Rc::from(stringv.as_ref())),
+                        source_data!(self, string),
+                    ),
                 )))
             }
 

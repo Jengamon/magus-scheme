@@ -21,7 +21,7 @@ Chunk {
             ),
         ),
         Symbol(
-            Spur(10),
+            Spur(9),
         ),
     ],
     lambdas: [],

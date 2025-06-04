@@ -124,7 +124,7 @@ impl<'gc> Transformer<'gc> for SyntaxRulesImpl {
 enum Literal {
     Number(Number),
     Inexact(f64),
-    String(lasso::Spur),
+    String(Rc<str>),
     /// This can only match if the symbol is unbound in the invoking context!
     Symbol(lasso::Spur),
     Bool(bool),

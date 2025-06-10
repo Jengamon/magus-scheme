@@ -46,7 +46,7 @@ mod syntax {
 
                     if compiler.is_definition(args[0]) {
                         // Reject non-value delay
-                        anyhow::bail!("delay expects some value(s) to return")
+                        anyhow::bail!("delay: missing value(s) to return")
                     }
                     let code = compiler.compile_code(ctx, args[0])?.into_bytecode();
                     let mut labels = if let Some(source) = args[0].source {
@@ -119,7 +119,7 @@ mod syntax {
 
                         if compiler.is_definition(args[0]) {
                             // Reject non-value delay
-                            anyhow::bail!("delay-force expects some value(s) to return")
+                            anyhow::bail!("delay-force: missing value(s) to return")
                         }
                         let force_lambda = ctx.add_native_lambda(unsize!(Gc::new(ctx,
                                 RefLock::new(procedures::Force)) => RefLock<dyn NativeLambda>));
@@ -207,13 +207,9 @@ mod procedures {
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> LambdaResult<'gc> {
-            // TODO Do we allow the degenerate case of a cons cell with (None None)?
-            // It does mean that we can just do a pointer comparison...
-            //
-            // I think no, for the stdlib, the only pair considered to be null is the thread null value
-            let val = matches!(*args[0].borrow(), Value::Promise(_));
+            let is_promise = matches!(*args[0].borrow(), Value::Promise(_));
 
-            Ok(LambdaReturn::Return(vec![Value::Bool(val).into_ptr(&ctx)]))
+            Ok(LambdaReturn::Return(vec![ctx.bool(is_promise)]))
         }
     }
 
@@ -244,8 +240,11 @@ mod procedures {
                     unreachable!()
                 };
 
+                // collect arguments that are currently defined (as they are *not* stored in the any environment)
+                // and associate them with an environment so that the captured promise executes with knowledge of
+                // argument values too (this is why REFR *also* still exists, it might reference something with
+                // this magic [we just shouldn't go out of our way to try and find a value])
                 let mut arg_env = StackEnvironment::new(&ctx, None);
-                // TODO crawl up frames in reverse and put values as needed into environment
                 for frame in ctx.frames.iter().rev() {
                     if let Some((arg_names, rest_name)) = frame.arg_name_data() {
                         let args = frame.args();

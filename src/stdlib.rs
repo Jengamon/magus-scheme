@@ -6,15 +6,13 @@ use crate::{
 };
 
 pub mod base;
+pub mod cxr;
 pub mod inexact;
 pub mod lazy;
 pub mod magus_help;
 mod magus_impl;
 pub mod srfi;
 pub mod write;
-// For now, Scheme-only libraries are just exposed as strings here, but a *biiig* TODO is to find
-// a nice way for modules to be registered by users
-pub mod cxr;
 // We support (scheme file) but if compiled for the wasm32-unknown-unknown
 // - We add it to the features returned by (features) and to the features understood by the compiler
 //   (ok, instead we use target-triple to add TARGET as a feature, so you can always see what platform you are compiling

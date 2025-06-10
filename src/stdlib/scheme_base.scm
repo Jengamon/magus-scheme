@@ -81,9 +81,10 @@
               (if (eq? a (car lst))
                   lst
                   (memq-iter a (cdr lst)))))
+      (if (not (or (list? lst) (pair? lst))) (error "memq expects a list or pair as its second argument"))
       (memq-iter x lst))
   (define (assq x alist)
-      (define (assp-check p) (if (not (and (list? p) (or (null? p) (pair? (car p))))) (error "assq expects an association list as a second argument")))
+      (define (assp-check p) (if (not (and (list? p) (or (null? p) (pair? (car p))))) (error "assq expects an association list as its second argument")))
       (define (assq-iter k ascl)
           (assp-check ascl)
           (if (null? ascl)
@@ -100,9 +101,10 @@
               (if (eqv? a (car lst))
                   lst
                   (memv-iter a (cdr lst)))))
+      (if (not (or (list? lst) (pair? lst))) (error "memv expects a list or pair as its second argument"))
       (memv-iter x lst))
   (define (assv x alist)
-      (define (assp-check p) (if (not (and (list? p) (or (null? p) (pair? (car p))))) (error "assv expects an association list as a second argument")))
+      (define (assp-check p) (if (not (and (list? p) (or (null? p) (pair? (car p))))) (error "assv expects an association list as its second argument")))
       (define (assv-iter k ascl)
           (assp-check ascl)
           (if (null? ascl)
@@ -119,6 +121,8 @@
                   lst
                   (member-iter a (cdr lst) compare))))
       (if (> (length compare) 1) (error "member expects 2 or 3 arguments"))
+      (if (not (or (list? lst) (pair? lst))) (error "member expects a list or pair as its second argument"))
+      (if (not (or (null? compare) (procedure? (car compare)))) (error "member expects a procedure as its third argument"))
       (member-iter x lst (if (null? compare) equal? (car compare))))
   (define (reverse lst)
       (define (reverse-iter lst a)

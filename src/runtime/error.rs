@@ -31,6 +31,9 @@ pub struct StackFrame<'gc> {
 #[derive(Collect, Debug, thiserror::Error, Clone)]
 #[collect(no_drop)]
 pub enum SchemeErrorType<'gc> {
+    /// Tried to use ReturnHandler when function is not in error mode
+    #[error("native function returned from non-existent handler")]
+    InvalidReturnHandler,
     /// A value was raised by 'raise
     #[error("{0}")]
     Raise(ResolvedValue<'gc, lasso::RodeoResolver, ModeDisplay>),

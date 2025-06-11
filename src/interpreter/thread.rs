@@ -613,6 +613,7 @@ impl<'gc> Thread<'gc> {
         &mut self,
         ctx: &Context<'_, 'gc>,
         should_pop: bool,
+        preserve_stack: bool,
     ) -> Option<ThreadFrame<'gc>> {
         let Some(frame) = self.frames.last_mut() else {
             unreachable!("[ICE] no frame present");
@@ -655,29 +656,31 @@ impl<'gc> Thread<'gc> {
         // Native lambdas support this logic natively (if their Return vec len == 1, that value is unwrapped,
         // if 0, return Void, otherwise returns Values)
         // "Wind frames" don't actually return..., so we pop the return value, but ignore it
-        if !wind_frame {
-            let ret_val = self.stack.pop();
-            if self.stack.len() >= bottom {
+        if !preserve_stack {
+            if !wind_frame {
+                let ret_val = self.stack.pop();
+                if self.stack.len() >= bottom {
+                    self.stack.drain(bottom..);
+                }
+                // drain any extra value on stack
+                if let Some(ret) = ret_val {
+                    let ret = if let Value::Lambda(Lambda::Compiled(cl)) = *ret.borrow() {
+                        // Capture the current env as a closure
+                        Value::Lambda(Lambda::ClosureCompiled {
+                            compiled: cl,
+                            env: frame_env,
+                        })
+                        .into_ptr(ctx)
+                    } else {
+                        ret
+                    };
+                    self.stack.push(ret);
+                } else {
+                    self.stack.push(Value::Void.into_ptr(ctx));
+                }
+            } else if self.stack.len() >= bottom {
                 self.stack.drain(bottom..);
             }
-            // drain any extra value on stack
-            if let Some(ret) = ret_val {
-                let ret = if let Value::Lambda(Lambda::Compiled(cl)) = *ret.borrow() {
-                    // Capture the current env as a closure
-                    Value::Lambda(Lambda::ClosureCompiled {
-                        compiled: cl,
-                        env: frame_env,
-                    })
-                    .into_ptr(ctx)
-                } else {
-                    ret
-                };
-                self.stack.push(ret);
-            } else {
-                self.stack.push(Value::Void.into_ptr(ctx));
-            }
-        } else if self.stack.len() >= bottom {
-            self.stack.drain(bottom..);
         }
 
         let after_frame = if let Some((_, after_lam)) = dynamic_wind {
@@ -801,7 +804,7 @@ impl<'gc> Thread<'gc> {
         // Handle the previous frame return here
         let old_after = if is_tail {
             // Exiting the current frame
-            self.handle_frame_end(ctx, false)
+            self.handle_frame_end(ctx, false, false)
         } else {
             None
         };
@@ -1244,14 +1247,14 @@ impl<'gc> Thread<'gc> {
                 } => {
                     // If error is set, kill this frame (bytecode shouldn't run if actively erroring)
                     if self.error.is_some() {
-                        if let Some(after) = self.handle_frame_end(&ctx, true) {
+                        if let Some(after) = self.handle_frame_end(&ctx, true, true) {
                             self.frames.push(after);
                         }
                         continue;
                     }
                     // If framepointer is oob, then that means execution of this frame is finished
                     if chunk.code.len() <= *pc {
-                        if let Some(after) = self.handle_frame_end(&ctx, true) {
+                        if let Some(after) = self.handle_frame_end(&ctx, true, false) {
                             self.frames.push(after);
                         }
                         continue;
@@ -1912,17 +1915,25 @@ impl<'gc> Thread<'gc> {
                     fuel.consume(Self::NATIVE_COST);
                     // Make all our data fixed and nice to borrow
                     let native = *native;
-                    let Some(frame) = self.frames.last() else {
-                        unreachable!()
-                    };
-                    let args = frame.args.as_ref();
                     // reset stack if the frame is erroring, but doesn't have an exception set
                     if self.error.is_some()
                         && frame.exception.is_none()
                         && frame.bottom < self.stack.len()
                     {
-                        self.stack.drain(frame.bottom..);
+                        frame.bottom = self.stack.len();
+                        // self.stack.drain(frame.bottom..);
                     }
+                    let Some(frame) = self.frames.last() else {
+                        unreachable!()
+                    };
+                    let args = frame.args.as_ref();
+                    // dbg!(&self.stack);
+                    // if args
+                    //     .iter()
+                    //     .all(|a| a.borrow().value_type() != ValueType::Lambda)
+                    // {
+                    //     dbg!(&args);
+                    // }
                     let error = self.error.take().or(frame.exception);
                     let lctx = NativeLambdaContext {
                         self_ptr: native,
@@ -1941,16 +1952,22 @@ impl<'gc> Thread<'gc> {
                         thread_ref: self,
                     };
 
+                    let was_error;
                     let res = if let Some(err) = error {
                         // Let native code interfere with errors
+                        was_error = true;
                         native.borrow_mut(lctx.thread_ctx.mc).error(lctx, args, err)
                     } else {
+                        was_error = false;
                         native.borrow_mut(lctx.thread_ctx.mc).run(lctx, args)
                     };
                     // rebind frame to be mutable
                     let Some(frame) = self.frames.last_mut() else {
                         unreachable!()
                     };
+                    // if let Ok(ret) = res.as_ref() {
+                    //     println!("-> {ret}");
+                    // }
                     // now interpret the result!
                     match res {
                         Ok(LambdaReturn::Waiting) => {
@@ -1968,11 +1985,24 @@ impl<'gc> Thread<'gc> {
                                 self.stack
                                     .push(Value::Values(Gc::new(&ctx, vals)).into_ptr(&ctx));
                             }
-                            if let Some(cont) = error.and_then(|e| e.error_type.continuation()) {
-                                self.handle_continuation(&ctx, cont);
-                            } else if let Some(after) = self.handle_frame_end(&ctx, true) {
+                            if was_error {
+                                if let Some(cont) = error.and_then(|e| e.error_type.continuation())
+                                {
+                                    self.handle_continuation(&ctx, cont);
+                                }
+                            } else if let Some(after) = self.handle_frame_end(&ctx, true, false) {
                                 self.frames.push(after);
                             }
+                        }
+                        Ok(LambdaReturn::ReturnHandler) if was_error => {
+                            if let Some(cont) = error.and_then(|e| e.error_type.continuation()) {
+                                self.handle_continuation(&ctx, cont);
+                            } else if let Some(after) = self.handle_frame_end(&ctx, true, false) {
+                                self.frames.push(after);
+                            }
+                        }
+                        Ok(LambdaReturn::ReturnHandler) => {
+                            make_error!(SchemeErrorType::InvalidReturnHandler);
                         }
                         Ok(LambdaReturn::Continue { cont, args }) => {
                             if args.len() > 1 {
@@ -1999,7 +2029,7 @@ impl<'gc> Thread<'gc> {
                                     interner.clone(),
                                     ctx.null_value
                                 )));
-                                if let Some(after) = self.handle_frame_end(&ctx, true) {
+                                if let Some(after) = self.handle_frame_end(&ctx, true, false) {
                                     self.frames.push(after);
                                 }
                             }
@@ -2008,7 +2038,7 @@ impl<'gc> Thread<'gc> {
                             // TODO Check if same error
                             // If not, store the current error in the new error irritants
                             self.error = Some(err);
-                            if let Some(after) = self.handle_frame_end(&ctx, true) {
+                            if let Some(after) = self.handle_frame_end(&ctx, true, true) {
                                 self.frames.push(after);
                             }
                         }
@@ -2162,7 +2192,7 @@ impl<'gc> Thread<'gc> {
                                 }
                                 LambdaError::NonContinuable(e) => {
                                     make_error!(SchemeErrorType::Rust(std::rc::Rc::new(e)));
-                                    if let Some(after) = self.handle_frame_end(&ctx, true) {
+                                    if let Some(after) = self.handle_frame_end(&ctx, true, false) {
                                         self.frames.push(after);
                                     }
                                 }

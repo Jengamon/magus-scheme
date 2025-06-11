@@ -48,6 +48,10 @@ pub enum LambdaReturn<'gc> {
     ///
     /// `[call-end]`
     Return(Vec<ValuePtr<'gc>>),
+    /// Return from an error handler
+    ///
+    /// `[call-end]`
+    ReturnHandler,
     /// Call a continuation
     ///
     /// `[call-end]`
@@ -93,6 +97,23 @@ pub enum LambdaReturn<'gc> {
     },
     /// Get the value of the given parameter object, and push it to stack
     Parameter { parameter: ParameterPtr<'gc> },
+}
+
+impl std::fmt::Display for LambdaReturn<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LambdaReturn::Waiting => write!(f, "Waiting"),
+            LambdaReturn::Return(_) => write!(f, "Return"),
+            LambdaReturn::ReturnHandler => write!(f, "ReturnHandler"),
+            LambdaReturn::Continue { .. } => write!(f, "Continue"),
+            LambdaReturn::Raise { .. } => write!(f, "Raise"),
+            LambdaReturn::Propagate(_) => write!(f, "Propagate"),
+            LambdaReturn::Call { .. } => write!(f, "Call"),
+            LambdaReturn::CallHandler { .. } => write!(f, "CallHandler"),
+            LambdaReturn::TailCall { .. } => write!(f, "TailCall"),
+            LambdaReturn::Parameter { .. } => write!(f, "Parameter"),
+        }
+    }
 }
 
 // Since Collect is not dyn-compatible, we create a "Collectable" trait implement

@@ -91,7 +91,7 @@ impl<'gc> NativeLambda<'gc> for WithExceptionHandler {
 
             if Gc::ptr_eq(err, exception) {
                 // This should only be hit in non-continuable exceptions? but we arent checking here unless necessary
-                Ok(LambdaReturn::Return(vec![ctx.stack[0]]))
+                Ok(LambdaReturn::ReturnHandler)
             } else {
                 Ok(LambdaReturn::Propagate(err))
             }

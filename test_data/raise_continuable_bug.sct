@@ -1,0 +1,7 @@
+---
+6
+---
+; cuz a cluster of bugs, this was returning "9"
+(import (only (scheme base) define call/cc lambda with-exception-handler * raise-continuable))
+(define (try lam) (call/cc (lambda (k) (with-exception-handler (lambda (e) 3) lam))))
+(try (lambda () (* 2 1 (raise-continuable 2))))

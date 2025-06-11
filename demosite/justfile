@@ -12,3 +12,6 @@ clean-pkg:
 
 release: pkg-release
     deno task build
+
+release_base base="./": pkg-release
+    deno task build '--base={{base}}'

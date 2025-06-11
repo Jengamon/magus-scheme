@@ -3,3 +3,4 @@
 *.local.*
 /locale_data
 *.snap.new
+.DS_Store

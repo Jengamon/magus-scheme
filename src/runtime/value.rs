@@ -1436,6 +1436,8 @@ impl<'gc> ConsCell<'gc> {
         }
     }
 
+    // TODO Rewrite circular check to *actually* check for circularity recursively, and quickly using the fact that pointer addresses dont
+    // change.
     /// Returns if a cons cell can look like a list
     ///
     /// # Parameters

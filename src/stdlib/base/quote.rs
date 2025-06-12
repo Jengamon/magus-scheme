@@ -11,6 +11,7 @@ struct QuoteContext<'a, 'b, 'c, 'gc> {
     ctx: &'c mut SyntaxContext<'a, 'b, 'gc>,
     labels: &'c mut HashSet<usize>,
     requested_labels: &'c mut HashSet<usize>,
+    within_label: HashSet<usize>,
 
     /// contains the raw addresses of gc pointers that quotation has expanded
     expanded: &'c mut HashSet<usize>,
@@ -198,6 +199,7 @@ impl Syntax for Quote {
             labels: &mut labels,
             requested_labels: &mut requested_labels,
             expanded: &mut expanded,
+            within_label: HashSet::default(),
         };
         let code = quote_program(args[0], &mut qctx)?;
         compiler.add_labeled(labels);
@@ -428,7 +430,17 @@ fn quasiquote_program<'gc>(
         ProgramData::Labeled { label, item } => {
             qctx.labels.insert(*label);
             if *level > 0 {
-                quasiquote_program(*item, qctx, level, in_list)?
+                if !qctx.expanded.contains(&(&raw const *item).addr()) {
+                    qctx.expanded.insert((&raw const *item).addr());
+                    let mut code = quasiquote_program(*item, qctx, level, in_list)?;
+                    code.extend([
+                        Bytecode::FillQuoteHole { id: *label },
+                        Bytecode::MakeQuoteHole { id: *label },
+                    ]);
+                    code
+                } else {
+                    vec![Bytecode::MakeQuoteHole { id: *label }]
+                }
             } else {
                 // evaluate the list
                 evaluate!()
@@ -438,7 +450,20 @@ fn quasiquote_program<'gc>(
             qctx.requested_labels.insert(*label);
             if *level > 0 {
                 if let Some(val) = qctx.compiler.label_value(*label) {
-                    quasiquote_program(val, qctx, level, in_list)?
+                    if qctx.within_label.contains(label) {
+                        vec![Bytecode::MakeQuoteHole { id: *label }]
+                    } else {
+                        if matches!(
+                            val.data,
+                            ProgramData::Vector(_)
+                                | ProgramData::List { .. }
+                                | ProgramData::DottedList { .. }
+                        ) {
+                            qctx.within_label.insert(*label);
+                        }
+
+                        quasiquote_program(val, qctx, level, in_list)?
+                    }
                 } else {
                     // This code will fail anyways with a "undefined label" failure
                     vec![]
@@ -487,6 +512,7 @@ impl Syntax for Quasiquote {
             labels: &mut labels,
             requested_labels: &mut requested_labels,
             expanded: &mut expanded,
+            within_label: HashSet::default(),
         };
         let code: Vec<_> = quasiquote_program(args[0], &mut qctx, &mut level, false)?;
         // when quasiquote is finished, we should be at the level we started at if we implemented it correctly

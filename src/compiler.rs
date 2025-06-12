@@ -854,6 +854,8 @@ pub struct Compiler<'gc> {
     label_ref_labels: FxHashSet<usize>,
     /// label data
     label_values: FxHashMap<usize, ProgramPtr<'gc>>,
+    /// current labeled datum being compiled (used for circular detection)
+    compiling_labels: FxHashSet<usize>,
 
     // cache for native modules
     native_cache: FxHashMap<LibraryName, FxHashMap<Static<lasso::Spur>, NativeItem<'gc>>>,
@@ -915,6 +917,8 @@ pub enum CompileError {
     TooRecursive,
     #[error("ratio over 0 in source")]
     RatioOverZero(Option<SourceData>),
+    #[error("circular label: {0}")]
+    CircularLabel(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -1529,6 +1533,7 @@ impl<'gc> Compiler<'gc> {
             labeled_labels: FxHashSet::default(),
             label_ref_labels: FxHashSet::default(),
             label_values: FxHashMap::default(),
+            compiling_labels: FxHashSet::default(),
             env_ptr: 0,
             stash: Stash::default(),
             native_cache: FxHashMap::default(),
@@ -1647,6 +1652,7 @@ impl<'gc> Compiler<'gc> {
         let mut code = vec![];
         let mut labels = FxHashMap::default();
         for program in programs {
+            debug_assert!(self.compiling_labels.is_empty());
             self.label_ref_labels.clear();
             self.labeled_labels.clear();
             self.label_values.clear();
@@ -1919,12 +1925,16 @@ impl<'gc> Compiler<'gc> {
                 code.push(Bytecode::MakeVector { length });
                 Ok(SyntaxReturn::Code(code.into()))
             }
-            // TODO these are valid in code, so handle them.
             // They are self-evaluating (code eval is same as quote eval... ish)
             ProgramData::Labeled { label, item } => {
                 self.labeled_labels.insert(*label);
+
+                self.compiling_labels.insert(*label);
+                let code = self.compile_code(ctx, *item);
+                self.compiling_labels.remove(label);
+
                 Ok(SyntaxReturn::Code(
-                    self.compile_code(ctx, *item)?
+                    code?
                         .into_bytecode()
                         .into_iter()
                         .chain([
@@ -1935,6 +1945,10 @@ impl<'gc> Compiler<'gc> {
                 ))
             }
             ProgramData::LabelRef(label) => {
+                if self.compiling_labels.contains(label) {
+                    return Err(CompileError::CircularLabel(*label));
+                }
+
                 self.label_ref_labels.insert(*label);
                 Ok(SyntaxReturn::Code(Box::from([Bytecode::MakeHole {
                     id: *label,

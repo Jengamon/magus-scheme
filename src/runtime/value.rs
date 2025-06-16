@@ -702,7 +702,7 @@ impl<'gc, K: lasso::Resolver> fmt::Display for CircularPrinter<'_, 'gc, K, ModeD
         }?;
         print_plan
             .element
-            .write(f, self.resolver.clone(), self.null_ptr)?;
+            .display(f, self.resolver.clone(), self.null_ptr)?;
         // recurse into the value, keeping track of encountered cons cells
         // so that we don't recurse into them (labeling them as we encounter them)
         // then we should print the values as labeled.
@@ -921,7 +921,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K, ModeWrite> {
                 (&raw const *op.borrow()).addr()
             ),
             // TODO this needs special handling, b/c a cons might recurse into itself
-            Value::Cons(ref cons) if cons.is_circular(self.value_ptr, None) => {
+            Value::Cons(ref cons) if cons.is_circular(self.value_ptr) => {
                 write!(
                     f,
                     "{}",
@@ -1088,8 +1088,7 @@ impl<K: lasso::Resolver> fmt::Display for ResolvedValue<'_, K, ModeDisplay> {
                 op.borrow().port_type(),
                 (&raw const *op.borrow()).addr()
             ),
-            // TODO this needs special handling, b/c a cons might recurse into itself
-            Value::Cons(ref cons) if cons.is_circular(self.value_ptr, None) => {
+            Value::Cons(ref cons) if cons.is_circular(self.value_ptr) => {
                 write!(
                     f,
                     "{}",
@@ -1264,39 +1263,59 @@ unsafe impl<'gc> Collect<'gc> for Vector<'gc> {
     }
 }
 
-impl<'gc> Vector<'gc> {
-    fn is_circular_impl(&self, self_ptr: ValuePtr<'gc>, stack: &mut Vec<ValuePtr<'gc>>) -> bool {
-        stack.push(self_ptr);
-        for val in self.vec.iter().copied() {
-            if stack.contains(&val) {
-                return true;
-            }
+trait IsCircular<'gc> {
+    fn is_circular(&self, self_ptr: ValuePtr<'gc>, stack: &mut fxhash::FxHashSet<usize>) -> bool;
+}
 
-            match *val.borrow() {
-                Value::Cons(cell) => {
-                    if cell.is_circular(val, Some(stack)) {
-                        return true;
-                    }
-                }
-                Value::Vector(vec) => {
-                    if vec.is_circular_impl(val, stack) {
-                        return true;
-                    }
-                }
-                _ => {}
+impl<'gc> IsCircular<'gc> for Vector<'gc> {
+    fn is_circular(&self, self_ptr: ValuePtr<'gc>, stack: &mut fxhash::FxHashSet<usize>) -> bool {
+        let self_addr = (&raw const *self_ptr.borrow()).addr();
+        if stack.contains(&self_addr) {
+            return true;
+        }
+        stack.insert(self_addr);
+
+        self.vec.iter().any(|elem| elem.is_circular(*elem, stack))
+    }
+}
+
+impl<'gc> IsCircular<'gc> for ConsCell<'gc> {
+    fn is_circular(&self, self_ptr: ValuePtr<'gc>, stack: &mut fxhash::FxHashSet<usize>) -> bool {
+        let self_addr = (&raw const *self_ptr.borrow()).addr();
+        if stack.contains(&self_addr) {
+            return true;
+        }
+        stack.insert(self_addr);
+
+        let is_car_circular = self.car.map(|c| c.is_circular(c, stack));
+        let is_cdr_circular = self.cdr.map(|c| c.is_circular(c, stack));
+
+        is_car_circular.unwrap_or_default() || is_cdr_circular.unwrap_or_default()
+    }
+}
+
+impl<'gc> IsCircular<'gc> for ValuePtr<'gc> {
+    fn is_circular(&self, self_ptr: ValuePtr<'gc>, stack: &mut fxhash::FxHashSet<usize>) -> bool {
+        assert!(Gc::ptr_eq(*self, self_ptr));
+        match *self.borrow() {
+            Value::Vector(v) => IsCircular::is_circular(&*v, self_ptr, stack),
+            Value::Cons(c) => IsCircular::is_circular(&c, self_ptr, stack),
+            _ => {
+                stack.insert((&raw const *self.borrow()).addr());
+                false
             }
         }
-        assert!(Gc::ptr_eq(stack.pop().unwrap(), self_ptr));
-        false
     }
+}
 
+impl<'gc> Vector<'gc> {
     /// Returns if a vector is circular (self-referential)
     ///
     /// # Parameters
     /// - `self_ptr`: [`ValuePtr`] pointing to this [`ConsCell`]
     pub fn is_circular(&self, self_ptr: ValuePtr<'gc>) -> bool {
-        let mut stack = vec![];
-        self.is_circular_impl(self_ptr, &mut stack)
+        let mut stack = fxhash::FxHashSet::default();
+        IsCircular::is_circular(self, self_ptr, &mut stack)
     }
 }
 
@@ -1442,50 +1461,9 @@ impl<'gc> ConsCell<'gc> {
     ///
     /// # Parameters
     /// - `self_ptr`: [`ValuePtr`] pointing to this [`ConsCell`]
-    pub fn is_circular(
-        &self,
-        self_ptr: ValuePtr<'gc>,
-        addtl_stack: Option<&[ValuePtr<'gc>]>,
-    ) -> bool {
-        let mut stack = fxhash::FxHashSet::from_iter([(&raw const *self_ptr.borrow()).addr()]);
-
-        if let Some(addtl_stack) = addtl_stack {
-            stack.extend(
-                addtl_stack
-                    .iter()
-                    .map(|ptr| (&raw const *ptr.borrow()).addr()),
-            )
-        }
-
-        macro_rules! check_ptr {
-            ($ptr:expr) => {{
-                if stack.contains(&(&raw const *($ptr).borrow()).addr()) {
-                    return true;
-                }
-
-                if ($ptr).borrow().value_type().can_recurse() {
-                    stack.insert((&raw const *($ptr).borrow()).addr());
-                }
-            }};
-        }
-
-        let mut current = *self;
-        while let Some(vp) = current.cdr {
-            if let Some(car) = current.car {
-                check_ptr!(car);
-            }
-            check_ptr!(vp);
-
-            let Value::Cons(c) = *vp.borrow() else {
-                return false;
-            };
-            current = c;
-        }
-        if let Some(car) = current.car {
-            check_ptr!(car);
-        }
-
-        false
+    pub fn is_circular(&self, self_ptr: ValuePtr<'gc>) -> bool {
+        let mut stack = fxhash::FxHashSet::default();
+        IsCircular::is_circular(self, self_ptr, &mut stack)
     }
 
     /// Returns if a cons cell can look like a list

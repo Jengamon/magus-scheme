@@ -1,7 +1,6 @@
 //! Representation of Scheme values
 
 use core::fmt;
-use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::string::String as StdString;
@@ -405,14 +404,14 @@ where
 
 enum CircularPrintPlanElement<'gc> {
     Elem(ValuePtr<'gc>),
-    // Print an element a label (used for Shared mode)
-    Labeled(ValuePtr<'gc>, usize),
     // Refer to a previously labeled element
     LabelRef(usize),
 
     // special value for null list
     Null,
 
+    // Print an element a label (used for Shared mode)
+    Labeled(Box<CircularPrintPlanElement<'gc>>, usize),
     Vector(Vec<CircularPrintPlanElement<'gc>>, bool),
     List(Vec<CircularPrintPlanElement<'gc>>, bool),
     Cons(
@@ -420,6 +419,20 @@ enum CircularPrintPlanElement<'gc> {
         Box<CircularPrintPlanElement<'gc>>,
         bool,
     ),
+}
+
+impl CircularPrintPlanElement<'_> {
+    pub fn has_label_ref(&self, refn: usize) -> bool {
+        match self {
+            Self::Vector(v, _) => v.iter().any(|e| e.has_label_ref(refn)),
+            Self::List(v, _) => v.iter().any(|e| e.has_label_ref(refn)),
+            Self::Cons(car, cdr, _) => car.has_label_ref(refn) || cdr.has_label_ref(refn),
+            Self::LabelRef(r) if *r == refn => true,
+            Self::Labeled(_, r) if *r == refn => true,
+            Self::Labeled(e, _) => e.has_label_ref(refn),
+            _ => false,
+        }
+    }
 }
 
 impl<'gc> CircularPrintPlanElement<'gc> {
@@ -472,12 +485,12 @@ impl<'gc> CircularPrintPlanElement<'gc> {
                 cdr.display(f, resolver.clone(), null_ptr)?;
                 if frame { write!(f, ")") } else { Ok(()) }
             }
-            Self::Labeled(gc, r) => {
-                write!(
-                    f,
-                    "#{r}={}",
-                    Value::resolve::<_, ModeDisplay>(gc, resolver, null_ptr)
-                )
+            Self::Labeled(elem, r) => {
+                // TODO handle mode (shared mode might not be self-referential)
+                if elem.has_label_ref(r) {
+                    write!(f, "#{r}=")?;
+                }
+                elem.display(f, resolver.clone(), null_ptr)
             }
             Self::LabelRef(r) => write!(f, "#{r}#"),
             Self::Null => write!(f, "'()"),
@@ -504,7 +517,7 @@ impl<'gc> CircularPrintPlanElement<'gc> {
                 }
                 let v_len = v.len();
                 for (idx, elem) in v.into_iter().enumerate() {
-                    elem.display(f, resolver.clone(), null_ptr)?;
+                    elem.write(f, resolver.clone(), null_ptr)?;
                     if idx != v_len - 1 {
                         write!(f, " ")?;
                     }
@@ -517,7 +530,7 @@ impl<'gc> CircularPrintPlanElement<'gc> {
                 }
                 let v_len = v.len();
                 for (idx, elem) in v.into_iter().enumerate() {
-                    elem.display(f, resolver.clone(), null_ptr)?;
+                    elem.write(f, resolver.clone(), null_ptr)?;
                     if idx != v_len - 1 {
                         write!(f, " ")?;
                     }
@@ -528,17 +541,17 @@ impl<'gc> CircularPrintPlanElement<'gc> {
                 if frame {
                     write!(f, "(")?;
                 }
-                car.display(f, resolver.clone(), null_ptr)?;
+                car.write(f, resolver.clone(), null_ptr)?;
                 write!(f, " . ")?;
-                cdr.display(f, resolver.clone(), null_ptr)?;
+                cdr.write(f, resolver.clone(), null_ptr)?;
                 if frame { write!(f, ")") } else { Ok(()) }
             }
-            Self::Labeled(gc, r) => {
-                write!(
-                    f,
-                    "#{r}={}",
-                    Value::resolve::<_, ModeWrite>(gc, resolver, null_ptr)
-                )
+            Self::Labeled(elem, r) => {
+                if elem.has_label_ref(r) {
+                    // TODO handle mode (shared mode might not be self-referential)
+                    write!(f, "#{r}=")?;
+                }
+                elem.write(f, resolver.clone(), null_ptr)
             }
             Self::LabelRef(r) => write!(f, "#{r}#"),
             Self::Null => write!(f, "'()"),
@@ -552,16 +565,21 @@ struct CircularPrintPlan<'gc> {
     self_labeled: Option<usize>,
 }
 
+struct CircularEncountered<'gc> {
+    encountered: Vec<ValuePtr<'gc>>,
+    potential: Vec<ValuePtr<'gc>>,
+}
+
 impl<'gc> CircularPrintPlan<'gc> {
     fn analyze_vector(
         vec: &Vector<'gc>,
         null_ptr: ValuePtr<'gc>,
-        encountered: Rc<RefCell<impl FnMut(ValuePtr<'gc>) -> Option<usize>>>,
+        encountered: &mut CircularEncountered<'gc>,
         frame: bool,
     ) -> CircularPrintPlanElement<'gc> {
         let mut plan = Vec::with_capacity(vec.vec.len());
         for elem in vec.vec.iter() {
-            plan.push(Self::analyze_element(*elem, null_ptr, encountered.clone()))
+            plan.push(Self::analyze_element(*elem, null_ptr, encountered))
         }
         CircularPrintPlanElement::Vector(plan, frame)
     }
@@ -570,7 +588,7 @@ impl<'gc> CircularPrintPlan<'gc> {
         cons: ConsCell<'gc>,
         val: ValuePtr<'gc>,
         null_ptr: ValuePtr<'gc>,
-        encountered: Rc<RefCell<impl FnMut(ValuePtr<'gc>) -> Option<usize>>>,
+        encountered: &mut CircularEncountered<'gc>,
         frame: bool,
     ) -> CircularPrintPlanElement<'gc> {
         if cons.is_list(val, null_ptr) {
@@ -580,7 +598,7 @@ impl<'gc> CircularPrintPlan<'gc> {
                 .collect::<Vec<_>>();
             let mut plan = Vec::with_capacity(elems.len());
             for elem in elems {
-                plan.push(Self::analyze_element(elem, null_ptr, encountered.clone()));
+                plan.push(Self::analyze_element(elem, null_ptr, encountered));
             }
             if !plan.is_empty() {
                 CircularPrintPlanElement::List(plan, frame)
@@ -590,11 +608,11 @@ impl<'gc> CircularPrintPlan<'gc> {
         } else {
             let car = cons
                 .car
-                .map(|e| Self::analyze_element(e, null_ptr, encountered.clone()))
+                .map(|e| Self::analyze_element(e, null_ptr, encountered))
                 .unwrap_or(CircularPrintPlanElement::Null);
             let cdr = cons
                 .cdr
-                .map(|e| Self::analyze_element(e, null_ptr, encountered.clone()))
+                .map(|e| Self::analyze_element(e, null_ptr, encountered))
                 .unwrap_or(CircularPrintPlanElement::Null);
             CircularPrintPlanElement::Cons(Box::new(car), Box::new(cdr), frame)
         }
@@ -603,30 +621,66 @@ impl<'gc> CircularPrintPlan<'gc> {
     fn analyze_element(
         val: ValuePtr<'gc>,
         null_ptr: ValuePtr<'gc>,
-        encountered: Rc<RefCell<impl FnMut(ValuePtr<'gc>) -> Option<usize>>>,
+        encountered_values: &mut CircularEncountered<'gc>,
     ) -> CircularPrintPlanElement<'gc> {
-        if let Some(label) = (encountered.borrow_mut())(val) {
-            CircularPrintPlanElement::LabelRef(label)
+        // TODO handle shared mode (only encountered!)
+        let is_candidate = encountered_values
+            .potential
+            .iter()
+            .any(|v| Gc::ptr_eq(*v, val));
+
+        let found_label = encountered_values
+            .encountered
+            .iter()
+            .position(|v| Gc::ptr_eq(*v, val));
+
+        let should_label = if is_candidate
+            && !encountered_values
+                .encountered
+                .iter()
+                .any(|v| Gc::ptr_eq(*v, val))
+        {
+            let idx = encountered_values.encountered.len();
+            encountered_values.encountered.push(val);
+            Some(idx)
+        } else if !is_candidate {
+            encountered_values.potential.push(val);
+            None
         } else {
-            // TODO handle modes!
-            match val.borrow().value_type() {
-                ValueType::Vector => {
-                    let Value::Vector(vec) = *val.borrow() else {
-                        unreachable!();
-                    };
-                    Self::analyze_vector(&vec, null_ptr, encountered, true)
-                }
-                ValueType::Cons => {
-                    let Value::Cons(cons) = *val.borrow() else {
-                        unreachable!();
-                    };
-                    Self::analyze_cons(cons, val, null_ptr, encountered, true)
-                }
-                _ => {
-                    // todo might label if in Shared mode!
-                    CircularPrintPlanElement::Elem(val)
+            None
+        };
+
+        let mut ret = || {
+            if Gc::ptr_eq(val, null_ptr) {
+                CircularPrintPlanElement::Null
+            } else {
+                match val.borrow().value_type() {
+                    ValueType::Vector => {
+                        let Value::Vector(vec) = *val.borrow() else {
+                            unreachable!();
+                        };
+                        Self::analyze_vector(&vec, null_ptr, encountered_values, true)
+                    }
+                    ValueType::Cons => {
+                        let Value::Cons(cons) = *val.borrow() else {
+                            unreachable!();
+                        };
+                        Self::analyze_cons(cons, val, null_ptr, encountered_values, true)
+                    }
+                    _ => {
+                        // todo might label if in Shared mode!
+                        CircularPrintPlanElement::Elem(val)
+                    }
                 }
             }
+        };
+
+        if let Some(label) = found_label {
+            CircularPrintPlanElement::LabelRef(label)
+        } else if let Some(lbl) = should_label {
+            CircularPrintPlanElement::Labeled(Box::new(ret()), lbl)
+        } else {
+            ret()
         }
     }
 
@@ -635,26 +689,29 @@ impl<'gc> CircularPrintPlan<'gc> {
         self_ptr: ValuePtr<'gc>,
         null_ptr: ValuePtr<'gc>,
     ) -> Self {
-        let mut encountered_values = Vec::new();
-        let mut self_labeled = None;
-        let encountered = Rc::new(RefCell::new(|val: ValuePtr<'gc>| {
-            if let Some(pos) = encountered_values.iter().position(|p| Gc::ptr_eq(val, *p)) {
-                Some(pos)
-            } else if Gc::ptr_eq(val, self_ptr) {
-                let idx = encountered_values.len();
-                self_labeled = Some(idx);
-                encountered_values.push(self_ptr);
-                Some(idx)
-            } else {
-                None
-            }
-        }));
+        let mut encountered_values = CircularEncountered {
+            encountered: vec![self_ptr],
+            potential: vec![self_ptr],
+        };
+        // TODO handle modes!
 
         let element = match inner {
-            ConsInner::Vec(vec) => Self::analyze_vector(vec, null_ptr, encountered, false),
-            ConsInner::Cons(cons) => {
-                Self::analyze_cons(*cons, self_ptr, null_ptr, encountered, false)
+            ConsInner::Vec(vec) => {
+                Self::analyze_vector(vec, null_ptr, &mut encountered_values, false)
             }
+            ConsInner::Cons(cons) => {
+                Self::analyze_cons(*cons, self_ptr, null_ptr, &mut encountered_values, false)
+            }
+        };
+
+        let self_labeled = if let Some(pos) = encountered_values
+            .encountered
+            .iter()
+            .position(|v| Gc::ptr_eq(*v, self_ptr))
+        {
+            element.has_label_ref(pos).then_some(pos)
+        } else {
+            None
         };
 
         Self {
@@ -664,9 +721,7 @@ impl<'gc> CircularPrintPlan<'gc> {
     }
 }
 
-// TODO Change this to an implementation of Brent's algorithm
-// and DFS (as it currently is)
-impl<'gc, K: lasso::Resolver> fmt::Display for CircularPrinter<'_, 'gc, K, ModeWrite> {
+impl<K: lasso::Resolver> fmt::Display for CircularPrinter<'_, '_, K, ModeWrite> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let print_plan = CircularPrintPlan::analyze(self.cons, self.self_ptr, self.null_ptr);
 
@@ -689,7 +744,7 @@ impl<'gc, K: lasso::Resolver> fmt::Display for CircularPrinter<'_, 'gc, K, ModeW
     }
 }
 
-impl<'gc, K: lasso::Resolver> fmt::Display for CircularPrinter<'_, 'gc, K, ModeDisplay> {
+impl<K: lasso::Resolver> fmt::Display for CircularPrinter<'_, '_, K, ModeDisplay> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let print_plan = CircularPrintPlan::analyze(self.cons, self.self_ptr, self.null_ptr);
 

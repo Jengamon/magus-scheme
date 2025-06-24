@@ -4,12 +4,23 @@ Build status: [![builds.sr.ht status](https://builds.sr.ht/~jangermad/magus/comm
 
 R7RS Compatibility: [COMPATIBILITY.md](./COMPATIBILITY.md)
 
+## Project Goals
+
+In the vein of [piccolo](https://github.com/kyren/piccolo), we have pretty much the same goals in the same priority order (descending):
+  - Be an arguably working, useful Scheme interpreter.
+  - Be an easy way to *confidently* sandbox untrusted Scheme scripts.
+  - Be resilient against DoS from untrusted scripts (scripts should not be able to cause the interpreter to panic or use an unbounded amount of memory and should be guaranteed to return control to the caller in some bounded amount of time).
+  - Be an easy way to bind Rust APIs to Scheme safely, with a bindings system that is resilient against weirdness and edge cases, and with user types that can safely participate in runtime garbage collection. (this is more or less handled by [gc-arena](https://github.com/kyren/gc-arena), due to
+    Scheme types being opaque pointers)
+  - Be pragmatically compatible with Scheme as described by R7RS.
+  - Don't be obnoxiously slow. (Scheme is a slow language, so we can be more lenient than Piccolo/Lua, but not *too* lenient.)
+
 ## Architecture
 
 - Lexer
 - General Parser
 - Compiler
-- VM
+- VM (Thread)
 
 <!-- TODO write about each layer -->
 
@@ -20,9 +31,16 @@ all forms of numbers (and with how we store them, the Scheme `ieee-float` featur
 we currently do not have a runtime that supports numbers beyond exact integers (for my purposes,
 this is fine).
 
-TODO (future) Work on using BigIntegers in the Frontend
+TODO (future) Work on using BigIntegers (Number) in the Frontend. We only have to actually *do* it, as `SyntaxToken` is not Copy!
+The only real blocker is the need to split out and reorganize number lexing code for maintainability and avoid the "one function to
+rule them all" pattern we currently have (following the pattern of having many different regexes, each targeted at a slightly different valid pattern).
+The goal is to get most of everything else working, then circle back to this lexer part (desirably after complex numbers have landed more support in the runtime).
 
 **UPDATE** (2025-03-01): We don't actually support polar numbers. We should, eventually.
+**UPDATE** (2025-06-24): Polar lexer fix is planned for when we actually review number lexing and *hopefully* make it less of a clusterbomb (hindsight:
+using the whole *one function* pattern is not all that tenable esp. for post-authoring modificiation, we should take advantage of the fact that we technically pass a closure),
+*and*
+complex numbers start becoming more than just a lexer feature and the standard library starts handling them more.
 
 ## Example
 
@@ -73,7 +91,8 @@ I've been working with this mindset, but I want to record it here for posterity.
 gist is that Rust code is fully* trusted to know what it is doing, while Scheme code should not:
 - be able to run forever, unless Rust code explicitly allows it to do so
 - cause a panic (rn upvalue miscompilation causes a todo! to trigger, but this should
-  be turned into an SchemeErrorKind as soon as possible)
+  be turned into an SchemeErrorKind as soon as possible) (only reason it hasn't yet is that
+  at this point, triggering the todo! indicates a serious problem with upvalue usage)
 
 There sre 3 interaction points with Rust:
 - Syntax, defining ways to compile code forms (ProgramPtr) into code for

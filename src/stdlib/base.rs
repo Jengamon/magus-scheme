@@ -32,11 +32,11 @@ pub use procedures::{
     Floor, FloorSlash, Gcd, Inexact, IntegerToChar, IsBytevector, IsChar, IsEq, IsEqual, IsEqv,
     IsEven, IsExact, IsExactInteger, IsInexact, IsInteger, IsList, IsNull, IsOdd, IsPair,
     IsProcedure, IsString, IsSymbol, IsVector, Lcm, ListCopy, ListSetBang, ListToString,
-    MakeBytevector, Map, MonotonicAscending, MonotonicDescending, Multiply, NumberToString,
-    Numerator, Raise, RaiseContinuable, Round, SetCarBang, SetCdrBang, StringAppend,
-    StringConstructor, StringCopy, StringLength, StringRef, StringToList, StringToNumber,
-    StringToSymbol, StringToUtf8, Substring, Subtract, SymbolToString, Truncate, TruncateSlash,
-    Utf8ToString, Values, VectorLength, VectorRef,
+    MakeBytevector, MakeVector, Map, MonotonicAscending, MonotonicDescending, Multiply,
+    NumberToString, Numerator, Raise, RaiseContinuable, Round, SetCarBang, SetCdrBang,
+    StringAppend, StringConstructor, StringCopy, StringLength, StringRef, StringToList,
+    StringToNumber, StringToSymbol, StringToUtf8, Substring, Subtract, SymbolToString, Truncate,
+    TruncateSlash, Utf8ToString, Values, VectorLength, VectorRef,
 };
 pub use quote::{Quasiquote, Quote};
 
@@ -416,6 +416,7 @@ impl Module for Base {
             "list-copy",
             "vector-ref",
             "vector-length",
+            "make-vector",
             "vector?",
             "string->utf8",
             "utf8->string",
@@ -533,6 +534,7 @@ impl Module for Base {
             "vector?" => lambda!(IsVector),
             "vector-ref" => lambda!(VectorRef),
             "vector-length" => lambda!(VectorLength),
+            "make-vector" => lambda!(MakeVector),
             "string->utf8" => lambda!(StringToUtf8),
             "utf8->string" => lambda!(Utf8ToString),
             "bytevector" => lambda!(Bytevector),

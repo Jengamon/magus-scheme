@@ -22,7 +22,7 @@ pub use predicates::{
 };
 pub use string::{StringAppend, StringConstructor, StringCopy, StringLength, StringRef, Substring};
 pub use structure::{CallWithValues, Cons, Values};
-pub use vector::{VectorLength, VectorRef};
+pub use vector::{MakeVector, VectorLength, VectorRef};
 
 mod conversions;
 
@@ -2148,12 +2148,13 @@ mod list {
 
 mod vector {
     //! Scheme Vector stuff
-    use gc_arena::{Collect, Gc};
+    use gc_arena::{Collect, Gc, RefLock};
+    use num::BigInt;
 
     use crate::{
         Value,
         runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
-        value::Number,
+        value::{Number, Vector},
     };
 
     #[derive(Debug, Collect)]
@@ -2228,6 +2229,62 @@ mod vector {
                 Value::Number(Gc::new(&ctx, Number::from_integer(v.vec.len()).unwrap()))
                     .into_ptr(&ctx),
             ]))
+        }
+    }
+
+    #[derive(Debug, Collect)]
+    #[collect(require_static)]
+    pub struct MakeVector;
+
+    impl<'gc> NativeLambda<'gc> for MakeVector {
+        fn name(&self) -> &str {
+            "make-vector"
+        }
+
+        fn arity(&self) -> Arity {
+            Arity::Bounded { min: 1, max: 2 }
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[crate::ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, LambdaError> {
+            use num::ToPrimitive;
+            let Value::Number(n) = *args[0].borrow() else {
+                return Err(anyhow::anyhow!(
+                    "{} expects an exact nonnegative integer as its first argument",
+                    self.name()
+                ))?;
+            };
+            let Number::Integer(i) = &*n else {
+                return Err(anyhow::anyhow!(
+                    "{} expects an exact nonnegative integer as its first argument",
+                    self.name()
+                ))?;
+            };
+
+            if i < &BigInt::ZERO {
+                return Err(anyhow::anyhow!(
+                    "{} expects an exact nonnegative integer as its first argument",
+                    self.name()
+                ))?;
+            }
+            let count = i
+                .to_usize()
+                .ok_or(anyhow::anyhow!("{}: count too big", self.name()))?;
+
+            let val = args.get(1).copied().unwrap_or(ctx.thread_ctx.false_value);
+
+            Ok(LambdaReturn::Return(vec![Gc::new(
+                &ctx,
+                RefLock::new(
+                    Vector::new(im_rc::Vector::from_iter(
+                        std::iter::once(val).cycle().take(count),
+                    ))
+                    .into_value(&ctx),
+                ),
+            )]))
         }
     }
 }

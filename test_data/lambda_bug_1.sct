@@ -1,7 +1,7 @@
 error: car only operates on a pair
 
 Backtrace:
- - <<synthesized>> <<native>>
+ - <<synthesized>> <<native [car]>>
 ---
 ---
 (import (only (scheme base) define lambda car))

@@ -1,7 +1,7 @@
 error: cadr only operates on a pair
 
 Backtrace:
- - <<synthesized>> <<native>>
+ - <<synthesized>> <<native [cadr]>>
 ---
 ---
 (import (only (scheme base) define cadr))

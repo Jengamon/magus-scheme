@@ -42,9 +42,9 @@ pub enum Execution<'gc> {
 }
 
 impl Execution<'_> {
-    fn source_data(&self) -> Option<SourceData> {
+    fn source_data(&self, in_call: bool) -> Option<SourceData> {
         match self {
-            Execution::Bytecode { chunk, pc, .. } => chunk.find_label(*pc),
+            Execution::Bytecode { chunk, pc, .. } => chunk.find_label(*pc, !in_call),
             _ => None,
         }
     }
@@ -150,6 +150,8 @@ pub struct ThreadFrame<'gc> {
 
     // because rest can be set!, add an override
     rest_args: Option<ValuePtr<'gc>>,
+    // used for frame debug
+    in_call: bool,
 }
 
 impl ThreadFrame<'_> {
@@ -463,6 +465,7 @@ impl<'gc> Thread<'gc> {
             bottom: self.stack.len(),
             tail_call_args: Default::default(),
             rest_args: None,
+            in_call: false,
         });
     }
 
@@ -707,6 +710,7 @@ impl<'gc> Thread<'gc> {
                 env: Gc::new(ctx, RefLock::new(StackEnvironment::new(ctx, parent_env))),
                 tail_call_args: Default::default(),
                 rest_args: None,
+                in_call: false,
             })
         } else {
             None
@@ -725,11 +729,20 @@ impl<'gc> Thread<'gc> {
             .rev()
             .map(|f| {
                 // get the source data of the *parent* frame, which is what called this frame
-                let psd = f.execution.source_data();
+                let psd = f.execution.source_data(f.in_call);
                 StackFrame {
                     source_filename: psd.map(|psd| psd.source_id),
                     range: psd.map(|psd| psd.range),
-                    execution: f.execution,
+                    execution: {
+                        let mut exec = f.execution;
+                        if f.in_call {
+                            // rewind ptr if "in call"
+                            if let Execution::Bytecode { pc, .. } = &mut exec {
+                                *pc -= 1;
+                            }
+                        }
+                        exec
+                    },
                 }
             })
             .collect()
@@ -854,6 +867,7 @@ impl<'gc> Thread<'gc> {
             env: frame_env(),
             tail_call_args: Default::default(),
             rest_args,
+            in_call: false,
         };
         let before_frame = if let Some((before_lam, _)) = dynamic_wind {
             let (bef_ex, bef_upvalue_id, bef_env) = Execution::from_lambda(
@@ -881,6 +895,7 @@ impl<'gc> Thread<'gc> {
                 tail_call_args: Default::default(),
                 env,
                 rest_args: None,
+                in_call: false,
             })
         } else {
             None
@@ -967,17 +982,6 @@ impl<'gc> Thread<'gc> {
     }
 
     fn handle_continuation(&mut self, mc: &Mutation<'gc>, c: ContinuationPtr<'gc>) {
-        // TODO Make sure to add before and after calls on *top* of the native call for all
-        // frames that are left
-        // with all befores below all afters , e.g.:
-        // if two dynamic-wind lambdas are to be exited [n f1 ... f2]
-        // then the frame stack should look like
-        // [n after(f2) after(f1) before(f1) before(f2)]
-        // (which is reversed call order, because stack)
-        // n can be a native frame or nothing (null continuation means "go to first native call below this")
-
-        // TODO handle dynamic-wind and non-empty continuations
-        // Don't advance the frame b/c it will be wiped by the continuation
         if c.frames.is_empty() {
             // For all frames we *left*, add their afters as frames
             let afters = self
@@ -1010,6 +1014,7 @@ impl<'gc> Thread<'gc> {
                             env: Gc::new(mc, RefLock::new(StackEnvironment::new(mc, parent_env))),
                             tail_call_args: Default::default(),
                             rest_args: None,
+                            in_call: false,
                         })
                     } else {
                         None
@@ -1019,34 +1024,6 @@ impl<'gc> Thread<'gc> {
             // We just dump execution
             self.frames = afters;
         } else {
-            // TODO The above would work but for upvalues (and dynamic-wind handling TODO). Figure out why.
-            // "Duh". The continuation at capture might not have an upvalue_index assigned at capture, while the current continuation
-            // *might*. What is the behavior expected of a continuation call?
-            // My idea is that the continuation copies the upvalue indices (if not present) of the current frame (if
-            // at the start) or the previous frame (if there was an index), something to the effect of:
-            // c.frames.iter()
-            // .scan(last_upvalue_index, |upvalue_index, f| if f.upvalue_index.is_none() { ThreadFrame{upvalue_index, ..f} } else { *upvalue_index = f.upvalue_index; f }).collect()
-            // let Some(last) = self.frames.last() else {
-            //     unreachable!()
-            // };
-            // let upvalue_index = last.upvalue_index;
-            // let cont = c
-            //     .frames
-            //     .iter()
-            //     .scan(upvalue_index, |ui, f| {
-            //         if f.upvalue_index.is_none() {
-            //             Some(ThreadFrame {
-            //                 upvalue_index: *ui,
-            //                 ..f.clone()
-            //             })
-            //         } else if let Some(v) = f.upvalue_index {
-            //             *ui = Some(v);
-            //             Some(f.clone())
-            //         } else {
-            //             Some(f.clone())
-            //         }
-            //     })
-            //     .collect::<Vec<_>>();
             let afters = self
                 .frames
                 .drain(..)
@@ -1077,6 +1054,7 @@ impl<'gc> Thread<'gc> {
                             env: Gc::new(mc, RefLock::new(StackEnvironment::new(mc, parent_env))),
                             tail_call_args: Default::default(),
                             rest_args: None,
+                            in_call: false,
                         })
                     } else {
                         None
@@ -1114,6 +1092,7 @@ impl<'gc> Thread<'gc> {
                             env: Gc::new(mc, RefLock::new(StackEnvironment::new(mc, parent_env))),
                             tail_call_args: Default::default(),
                             rest_args: None,
+                            in_call: false,
                         })
                     } else {
                         None
@@ -1241,6 +1220,8 @@ impl<'gc> Thread<'gc> {
                     fallback,
                     ..
                 } => {
+                    // unset in call flag for this frame
+                    frame.in_call = false;
                     // If error is set, kill this frame (bytecode shouldn't run if actively erroring)
                     if self.error.is_some() {
                         if let Some(after) = self.handle_frame_end(&ctx, true, true) {
@@ -1599,6 +1580,7 @@ impl<'gc> Thread<'gc> {
                                     let code = std::rc::Rc::clone(&chunk.code);
                                     // advance to next inst *before* pushing lambda
                                     advance_to_next_inst!();
+                                    frame.in_call = true;
                                     l = self.duplicate_upvalue_mapping(&ctx, l);
                                     if let Err(err) = self.call_lambda(
                                         &ctx,

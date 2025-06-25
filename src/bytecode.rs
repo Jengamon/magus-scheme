@@ -357,10 +357,10 @@ impl<'gc> Chunk<'gc> {
     }
 
     /// Find the corresponding [`SourceData`] for a given index into bytecode
-    pub fn find_label(&self, pc: usize) -> Option<SourceData> {
+    pub fn find_label(&self, pc: usize, allow_eq: bool) -> Option<SourceData> {
         self.labels
             .keys()
-            .filter(|k| **k <= pc)
+            .filter(|k| if allow_eq { **k <= pc } else { **k < pc })
             .max()
             .and_then(|idx| self.labels.get(idx).copied())
     }

@@ -46,6 +46,8 @@ target-lexicon = "0.13.2"
 target-triple = "0.1.4"
 thiserror = "2"
 unicode-general-category = "1.0.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 yansi.workspace = true
 
 [dev-dependencies]

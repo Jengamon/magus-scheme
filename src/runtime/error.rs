@@ -170,12 +170,27 @@ pub struct DisplaySchemeError<'s, 'gc, R: lasso::Resolver> {
     sources: &'s SourcesMap,
 }
 
+#[cfg(target_arch = "wasm32")]
+fn style_text(_idx: usize, t: String) -> String {
+    t
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn style_text(idx: usize, s: String) -> String {
+    use yansi::Paint;
+    if idx == 0 {
+        s.red().to_string()
+    } else {
+        s.blue().to_string()
+    }
+}
+
 impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "error: {}", self.error.error_type)?;
 
         if !self.error.backtrace.is_empty() {
-            // write the backtrace (TODO move this to codesnake / yansi)
+            // write the backtrace
             write!(f, "\n\nBacktrace:")?;
             // Now we go through the frames and build up codesnake blocks to display.
             // codesnake *cannot* have overlapping spans so we go backwards through frames and do:
@@ -194,18 +209,11 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
                     });
 
                     if let Some(li) = line_index.as_ref() {
-                        use yansi::Paint;
                         let block = codesnake::Block::new(
                             li,
                             [codesnake::Label::new(range.0..range.1)
                                 .with_text(format!("frame {idx}"))
-                                .with_style(move |s| {
-                                    if idx == 0 {
-                                        s.red().to_string()
-                                    } else {
-                                        s.blue().to_string()
-                                    }
-                                })],
+                                .with_style(move |s| style_text(idx, s))],
                         )
                         .expect("code ref out-of-range")
                         .map_code(|c| codesnake::CodeWidth::new(c, c.len()));

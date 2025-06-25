@@ -1,7 +1,13 @@
 error: `ls` does not exist in environment
 
 Backtrace:
- - (74, 76) test_data/lambda_bug_4.sct.scm <<code>>: ls
+  ╭─<<test_data/lambda_bug_4.sct.scm>>
+  │
+4 │ ls
+  ┆ ─┬
+  ┆  │
+  ┆  ╰─ frame 0
+──╯
 ---
 ---
 ; should *fail*

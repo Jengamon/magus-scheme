@@ -7,10 +7,10 @@ rust-version.workspace = true
 [dependencies]
 anyhow = "1.0.86"
 clap = { version = "4.5.16", features = ["derive"] }
-codesnake = "0.2.1"
-magus = { version = "0.1.0", path = ".." }
-yansi = { version = "1.0.1", features = ["detect-env", "detect-tty"] }
-reedline = { version = "0.39", features = ["sqlite", "system_clipboard"] }
-humantime = "2.2.0"
+codesnake.workspace = true
 ctrlc = "3.4.6"
+humantime = "2.2.0"
+magus = { version = "0.1.0", path = ".." }
 nu-ansi-term = "0.50.1"
+reedline = { version = "0.39", features = ["sqlite", "system_clipboard"] }
+yansi.workspace = true

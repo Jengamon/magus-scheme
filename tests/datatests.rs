@@ -5,7 +5,9 @@ use magus::{
     general_parser::general_parse,
     interpreter::{Interpreter, NullIncluder, ValuePointers, thread::Thread},
     lexer::Token,
-    library_name, stdlib,
+    library_name,
+    runtime::error::SourcesMap,
+    stdlib,
     value::ModeWrite,
 };
 use similar::{ChangeTag, TextDiff};
@@ -15,6 +17,7 @@ use similar::{ChangeTag, TextDiff};
 pub struct DatatestError(Box<Utf8Path>);
 
 fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()> {
+    yansi::disable();
     let (data, errs) = datatest_parse::parse(&contents);
     let Some(data) = data else {
         println!(
@@ -89,13 +92,14 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
     let chunk = interp.compiler_context::<anyhow::Error>(
         &thread,
         &comp,
-        |mc, comp, value_pointers, thread, interner| {
-            let programs =
-                (file_name.as_str(), data.source()).parse_program(mc, interner, false)?;
+        |mc, comp, value_pointers, thread, interner, sources| {
+            let programs = (file_name.as_str(), data.source(), &mut *sources)
+                .parse_program(mc, interner, false)?;
             let mut ecc = ExternalCompilerContext {
                 world: &test_world,
                 includer: &includer,
                 interner,
+                sources,
             };
             let library_def = LibraryDefinitionContext {
                 max_fuel: None,
@@ -107,14 +111,14 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
         },
     )?;
     let mut fuel = Fuel::with(1_000_000);
-    interp.run(&thread, |ctx, arena, _| {
+    interp.run(&thread, |ctx, arena, _, _| {
         let chunk = arena.chunk(&chunk);
         ctx.thread.borrow_mut(&ctx).include(&ctx, chunk, false);
     });
     // Run thread until out-of-fuel or finished
     let mut is_finished = false;
     while fuel.remaining() > 0 && !is_finished {
-        interp.run(&thread, |ctx, _arena, interner| {
+        interp.run(&thread, |ctx, _arena, interner, _| {
             if ctx.thread.borrow().is_finished() {
                 is_finished = true;
             } else {
@@ -125,8 +129,7 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
         });
     }
 
-    let file_name_spur = interp.interner_mut().get_or_intern(file_name);
-    let results = interp.try_run(&thread, |ctx, _arena, interner| {
+    let results = interp.try_run(&thread, |ctx, _arena, interner, sources| {
         if is_finished {
             match ctx.thread.borrow().result().expect("finished execution") {
                 Ok(v) => Ok(v
@@ -138,13 +141,10 @@ fn scheme_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()>
                     .map(|s| Box::from(s.as_str()))
                     .collect::<Vec<_>>()),
                 // Alternate display, which removes pointer data (for UI tests)
-                Err(e) => Err(format!(
-                    "{:#}",
-                    e.display(interner, [(file_name_spur, data.source())])
-                )
-                .split('\n')
-                .map(Box::from)
-                .collect::<Vec<_>>()),
+                Err(e) => Err(format!("{:#}", e.display(interner, sources))
+                    .split('\n')
+                    .map(Box::from)
+                    .collect::<Vec<_>>()),
             }
         } else {
             Err(vec![Box::from("test ran out of fuel")])
@@ -264,13 +264,18 @@ fn compile_test(path: &Utf8Path, contents: String) -> datatest_stable::Result<()
     let mut error_text = None;
     let maybe_error: Option<anyhow::Error> = gc_arena::arena::rootless_mutate(|mc| {
         let includer = NullIncluder;
-        let programs =
-            (format!("{path}.scm"), data.source()).parse_program(mc, &mut interner, false)?;
+        let mut sources = SourcesMap::default();
+        let programs = (format!("{path}.scm"), data.source(), &mut sources).parse_program(
+            mc,
+            &mut interner,
+            false,
+        )?;
         let mut compiler = Compiler::new(mc, 1351);
         let mut ecc = ExternalCompilerContext {
             world: &test_world,
             includer: &includer,
             interner: &mut interner,
+            sources: &mut sources,
         };
         let value_pointers = ValuePointers::fake(mc);
         let thread = gc_arena::Gc::new(

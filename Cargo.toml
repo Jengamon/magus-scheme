@@ -9,6 +9,8 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 anyhow = "1.0.93"
+codesnake = "0.2.1"
+yansi = { version = "1.0.1", features = ["detect-env", "detect-tty"] }
 
 [package]
 name = "magus"
@@ -28,6 +30,7 @@ harness = false
 [dependencies]
 anyhow.workspace = true
 arbitrary = { version = "1", features = ["derive"] }
+codesnake.workspace = true
 either = "1.14.0"
 fxhash = "0.2.1"
 gc-arena = { git = "https://github.com/kyren/gc-arena", rev = "d651e3b4363d525a2d502c2305bc73e291835c84" }
@@ -37,13 +40,13 @@ lasso = { version = "0.7.2" }
 logos = { version = "0.15" }
 num = { version = "0.4.3", features = ["num-bigint"] }
 paste = "1.0.15"
-# petgraph = "0.6.5"
 rowan = "0.16"
 slotmap = "1.0.7"
 target-lexicon = "0.13.2"
 target-triple = "0.1.4"
 thiserror = "2"
 unicode-general-category = "1.0.0"
+yansi.workspace = true
 
 [dev-dependencies]
 arbtest = "0.3.1"

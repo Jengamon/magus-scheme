@@ -47,12 +47,13 @@ fn main() -> anyhow::Result<()> {
     let chunk = interpreter.compiler_context::<anyhow::Error>(
         &thread,
         &compiler,
-        |mc, compiler, value_pointers, thread, interner| {
-            let programs = ("input.scm", code).parse_program(mc, interner, false)?;
+        |mc, compiler, value_pointers, thread, interner, sources| {
+            let programs = ("input.scm", code, &mut *sources).parse_program(mc, interner, false)?;
             let mut ecc = magus::ExternalCompilerContext {
                 world: &world,
                 includer: &includer,
                 interner,
+                sources,
             };
             let library_def = magus::LibraryDefinitionContext {
                 max_fuel: Some(10_000),
@@ -64,14 +65,14 @@ fn main() -> anyhow::Result<()> {
         },
     )?;
     let mut fuel = magus::Fuel::with(1_000_000);
-    interpreter.run(&thread, |ctx, arena, _| {
+    interpreter.run(&thread, |ctx, arena, _, _| {
         let chunk = arena.chunk(&chunk);
         ctx.thread.borrow_mut(&ctx).include(&ctx, chunk, false);
     });
     // Run thread until out-of-fuel or finished
     let mut is_finished = false;
     while fuel.remaining() > 0 && !is_finished {
-        interpreter.run(&thread, |ctx, _arena, interner| {
+        interpreter.run(&thread, |ctx, _arena, interner, _| {
             if ctx.thread.borrow().is_finished() {
                 is_finished = true;
             } else {
@@ -82,8 +83,7 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
-    let file_name = interpreter.interner_mut().get_or_intern_static("input.scm");
-    interpreter.try_run(&thread, |ctx, _arena, interner| {
+    interpreter.try_run(&thread, |ctx, _arena, interner, sources| {
         println!(
             "STDOUT: `{}`",
             String::from_utf8_lossy(
@@ -115,10 +115,7 @@ fn main() -> anyhow::Result<()> {
                 }
                 Ok(())
             }
-            Some(Err(e)) => Err(anyhow::anyhow!(
-                "{}",
-                e.display(interner, [(file_name, code)])
-            ))?,
+            Some(Err(e)) => Err(anyhow::anyhow!("{}", e.display(interner, sources)))?,
             None => {
                 eprintln!(">> NO RESULTS <<");
                 Ok(())

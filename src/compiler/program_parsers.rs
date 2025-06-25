@@ -10,6 +10,7 @@ use crate::{
     bytecode::SourceData,
     compiler::{ListHead, Program, ProgramData},
     general_parser::GeneralParserError,
+    runtime::error::SourcesMap,
     value::Number,
 };
 
@@ -130,6 +131,42 @@ impl<T: AsRef<str>, SN: AsRef<str>> ParseProgram for (SN, T) {
             &crate::Module::cast(gast.syntax()).expect("ICE: top-level code cannot be Module"),
         )
             .parse_program(mc, interner, case_insensitive)?)
+    }
+}
+
+impl<T: AsRef<str>, SN: AsRef<str>> ParseProgram for (SN, T, &mut SourcesMap) {
+    type Error = StringProgramError;
+    fn parse_program<'gc>(
+        self,
+        mc: &Mutation<'gc>,
+        interner: &mut lasso::Rodeo,
+        case_insensitive: bool,
+    ) -> Result<Vec<ProgramPtr<'gc>>, Self::Error> {
+        let (source_name, source, sources) = self;
+        sources.insert(
+            interner.get_or_intern(source_name.as_ref()),
+            Box::from(source.as_ref()),
+        );
+
+        (source_name, source).parse_program(mc, interner, case_insensitive)
+    }
+}
+
+impl<SN: AsRef<str>> ParseProgram for (SN, &'_ crate::Module, &mut SourcesMap) {
+    type Error = GAstProgramError;
+    fn parse_program<'gc>(
+        self,
+        mc: &Mutation<'gc>,
+        interner: &mut lasso::Rodeo,
+        case_insensitive: bool,
+    ) -> Result<Vec<ProgramPtr<'gc>>, Self::Error> {
+        let (source_name, source, sources) = self;
+        sources.insert(
+            interner.get_or_intern(source_name.as_ref()),
+            Box::from(source.syntax().text().to_string().as_str()),
+        );
+
+        (source_name, source).parse_program(mc, interner, case_insensitive)
     }
 }
 

@@ -474,16 +474,14 @@ impl MagusThread {
             .compiler_context::<anyhow::Error>(
                 &self.thread,
                 &self.compiler,
-                |mc, compiler, vp, thread, interner| {
-                    let programs = (filename.clone(), source.clone()).parse_program(
-                        mc,
-                        interner,
-                        case_insensitive,
-                    )?;
+                |mc, compiler, vp, thread, interner, sources| {
+                    let programs = (filename.clone(), source.clone(), &mut *sources)
+                        .parse_program(mc, interner, case_insensitive)?;
                     let mut ecc = magus::ExternalCompilerContext {
                         world: &self.world.borrow(),
                         interner,
                         includer: &magus::NullIncluder,
+                        sources,
                     };
                     let library_def = magus::LibraryDefinitionContext {
                         max_fuel: Some(library_fuel_cap),
@@ -516,7 +514,7 @@ impl MagusThread {
     }
 
     pub fn is_finished(&self) -> bool {
-        self.interpreter.borrow_mut().try_enter(|_, arena, _| {
+        self.interpreter.borrow_mut().try_enter(|_, arena, _, _| {
             let thread = arena.thread(&self.thread);
             thread.borrow().is_finished()
         })
@@ -525,7 +523,7 @@ impl MagusThread {
     pub fn result(&self, verbose: Option<bool>) -> Result<JsValue, String> {
         self.interpreter
             .borrow_mut()
-            .try_enter(|_mc, arena, interner| {
+            .try_enter(|_mc, arena, interner, sources| {
                 let thread = arena.thread(&self.thread);
                 match thread.borrow().result() {
                     Some(Ok(res)) => {
@@ -544,17 +542,7 @@ impl MagusThread {
                                 .into()
                         })
                     }
-                    Some(Err(e)) => Err(e
-                        .display(
-                            interner,
-                            self.current_source
-                                .as_ref()
-                                // TODO Maybe keep all them chunks around?
-                                // or at least once supporting inclusion, included sources and
-                                // the main source
-                                .map(|(s, src)| (*s, &**src)),
-                        )
-                        .to_string()),
+                    Some(Err(e)) => Err(e.display(interner, sources).to_string()),
                     None => Ok(JsValue::null()),
                 }
             })
@@ -566,7 +554,7 @@ impl MagusThread {
             return Err("chunk not from thread".to_string());
         }
 
-        self.interpreter.borrow_mut().enter(|mc, arena, _| {
+        self.interpreter.borrow_mut().enter(|mc, arena, _, _| {
             let thread = arena.thread(&self.thread);
             let chunk = arena.chunk(&chunk.chunk);
             thread.borrow_mut(mc).include(mc, chunk, false);
@@ -584,7 +572,7 @@ impl MagusThread {
     pub fn run(&mut self, fuel: &mut MagusFuel) -> bool {
         self.interpreter
             .borrow_mut()
-            .run(&self.thread, |ctx, _, interner| {
+            .run(&self.thread, |ctx, _, interner, _| {
                 ctx.thread.borrow_mut(&ctx).step(
                     ctx,
                     interner,
@@ -601,7 +589,7 @@ impl MagusThread {
     pub fn reset(&mut self) {
         self.interpreter
             .borrow_mut()
-            .run(&self.thread, |ctx, _, _| {
+            .run(&self.thread, |ctx, _, _, _| {
                 ctx.thread.borrow_mut(&ctx).reset();
             });
     }
@@ -620,7 +608,7 @@ pub struct MagusChunk {
 impl MagusChunk {
     /// Dump mmemonics for instructions of this chunk
     pub fn instructions(&self) -> Vec<String> {
-        self.interpreter.borrow_mut().try_enter(|_, arena, _| {
+        self.interpreter.borrow_mut().try_enter(|_, arena, _, _| {
             let chunk = arena.chunk(&self.chunk);
             chunk.code.iter().map(ToString::to_string).collect()
         })

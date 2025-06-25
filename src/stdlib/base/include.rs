@@ -37,7 +37,7 @@ fn include_files<'gc>(
         .collect::<Vec<_>>()
     {
         let source = ctx.ecc.includer.include(&filename)?;
-        let mut programs = (filename.clone(), source)
+        let mut programs = (filename.clone(), source, &mut *ctx.ecc.sources)
             .parse_program(ctx.mc, ctx.ecc.interner, case_insensitive)?
             .into_iter()
             .peekable();

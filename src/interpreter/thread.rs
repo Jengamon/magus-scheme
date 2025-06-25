@@ -2213,7 +2213,7 @@ mod tests {
         compiler::{Compiler, World},
         environment::Environment,
         interpreter::{Context, Includer, NullIncluder},
-        runtime::convert::IntoValue,
+        runtime::{convert::IntoValue, error::SourcesMap},
         value::Number,
     };
 
@@ -2320,7 +2320,7 @@ mod tests {
             }
             eprintln!("finished? {}", thread.borrow().is_finished());
             if let Some(Err(err)) = thread.borrow().result() {
-                eprintln!("{}", err.display(&interner, []));
+                eprintln!("{}", err.display(&interner, &SourcesMap::default()));
             } else {
                 eprintln!(
                     "{:#?}",

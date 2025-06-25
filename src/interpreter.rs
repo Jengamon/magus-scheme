@@ -12,7 +12,10 @@ use crate::{
     compiler::{self, LibraryDeclaration, LibraryDefinitionContext, ParseProgram as _},
     environment::StackEnvironmentPtr,
     handle_type,
-    runtime::port::{Readable, Writeable},
+    runtime::{
+        error::SourcesMap,
+        port::{Readable, Writeable},
+    },
     value::{ConsCell, Value, ValuePtr},
 };
 
@@ -255,6 +258,8 @@ pub struct Interpreter {
     compiler_counter: usize,
     /// A debt cap for automatic GC collection, None for explicit control
     debt_cap: Option<f64>,
+    /// sources used for error reporting
+    sources: SourcesMap,
 }
 
 impl Default for Interpreter {
@@ -274,6 +279,7 @@ impl Default for Interpreter {
             compiler_counter: 0,
             // defaults to 10kb debt cap before collection
             debt_cap: Some(10_000.0),
+            sources: SourcesMap::default(),
         }
     }
 }
@@ -388,6 +394,16 @@ impl Interpreter {
         &mut self.interner
     }
 
+    /// sources for error reporting
+    pub fn sources(&self) -> &SourcesMap {
+        &self.sources
+    }
+
+    /// mutable access to sources for error reporting
+    pub fn sources_mut(&mut self) -> &mut SourcesMap {
+        &mut self.sources
+    }
+
     pub fn new_compiler(&mut self) -> CompilerHandle {
         let knob = Arc::new(());
         self.arena.mutate_root(|mc, arena| {
@@ -411,6 +427,7 @@ impl Interpreter {
             ValuePointers<'a>,
             ThreadPtr<'a>,
             &mut lasso::Rodeo,
+            &mut SourcesMap,
         ) -> Result<bytecode::ChunkPtr<'a>, E>,
     ) -> Result<ChunkHandle, E> {
         self.check_for_dropped();
@@ -427,7 +444,14 @@ impl Interpreter {
                 .get(thread.key)
                 .copied()
                 .expect("handle to freed thread");
-            let chunk = (func)(mc, compiler, pointers, thread, &mut self.interner)?;
+            let chunk = (func)(
+                mc,
+                compiler,
+                pointers,
+                thread,
+                &mut self.interner,
+                &mut self.sources,
+            )?;
             Ok(arena.create_chunk_handle(chunk))
         })
     }
@@ -447,7 +471,7 @@ impl Interpreter {
     ) -> anyhow::Result<()> {
         let library_name = rename.unwrap_or_else(|| R::name(&mut self.interner));
 
-        if let Some(source_data) = module.scheme() {
+        if let Some((source_name, source)) = module.scheme() {
             let mut dependencies = module.scheme_dependency(&mut self.interner);
             // There is a local scheme component
             let world = {
@@ -473,7 +497,11 @@ impl Interpreter {
 
             self.arena
                 .mutate_root(|mc, arena| {
-                    let programs = source_data.parse_program(mc, &mut self.interner, false)?;
+                    let programs = (source_name, source, &mut self.sources).parse_program(
+                        mc,
+                        &mut self.interner,
+                        false,
+                    )?;
                     let library_decls = programs
                         .into_iter()
                         .map(|p| LibraryDeclaration::convert(p, mc, &mut self.interner))
@@ -504,6 +532,7 @@ impl Interpreter {
                         // files.
                         includer: &NullIncluder,
                         interner: &mut self.interner,
+                        sources: &mut self.sources,
                     };
                     let library_def = library_def_fn(thread, value_pointers);
                     compiler.define_library(
@@ -605,21 +634,21 @@ impl Interpreter {
 
     pub fn enter(
         &mut self,
-        func: impl for<'a> FnOnce(&'a Mutation<'a>, &mut Arena<'a>, &mut lasso::Rodeo),
+        func: impl for<'a> FnOnce(&'a Mutation<'a>, &mut Arena<'a>, &mut lasso::Rodeo, &SourcesMap),
     ) {
         self.check_for_dropped();
         self.arena.mutate_root(|mc, arena| {
-            (func)(mc, arena, &mut self.interner);
+            (func)(mc, arena, &mut self.interner, &self.sources);
         })
     }
 
     pub fn try_enter<T>(
         &mut self,
-        func: impl for<'a> FnOnce(&'a Mutation<'a>, &mut Arena<'a>, &mut lasso::Rodeo) -> T,
+        func: impl for<'a> FnOnce(&'a Mutation<'a>, &mut Arena<'a>, &mut lasso::Rodeo, &SourcesMap) -> T,
     ) -> T {
         self.check_for_dropped();
         self.arena
-            .mutate_root(|mc, arena| (func)(mc, arena, &mut self.interner))
+            .mutate_root(|mc, arena| (func)(mc, arena, &mut self.interner, &self.sources))
     }
 
     /// Checks if a thread is considered finished
@@ -637,7 +666,7 @@ impl Interpreter {
     pub fn run(
         &mut self,
         handle: &ThreadHandle,
-        func: impl for<'a> FnOnce(Context<'_, 'a>, &mut Arena<'a>, &mut lasso::Rodeo),
+        func: impl for<'a> FnOnce(Context<'_, 'a>, &mut Arena<'a>, &mut lasso::Rodeo, &SourcesMap),
     ) {
         self.check_for_dropped();
         self.arena.mutate_root(|mc, arena| {
@@ -653,14 +682,14 @@ impl Interpreter {
                 true_value: arena.true_value,
                 false_value: arena.false_value,
             };
-            (func)(ctx, arena, &mut self.interner);
+            (func)(ctx, arena, &mut self.interner, &self.sources);
         })
     }
 
     pub fn try_run<T>(
         &mut self,
         handle: &ThreadHandle,
-        func: impl for<'a> FnOnce(Context<'_, 'a>, &mut Arena<'a>, &mut lasso::Rodeo) -> T,
+        func: impl for<'a> FnOnce(Context<'_, 'a>, &mut Arena<'a>, &mut lasso::Rodeo, &SourcesMap) -> T,
     ) -> T {
         self.check_for_dropped();
         self.arena.mutate_root(|mc, arena| {
@@ -676,7 +705,7 @@ impl Interpreter {
                 true_value: arena.true_value,
                 false_value: arena.false_value,
             };
-            (func)(ctx, arena, &mut self.interner)
+            (func)(ctx, arena, &mut self.interner, &self.sources)
         })
     }
 }

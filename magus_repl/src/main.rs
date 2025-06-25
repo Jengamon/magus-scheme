@@ -446,13 +446,18 @@ fn compile_to_chunk(
     interpreter.compiler_context(
         thread,
         compiler,
-        |mc, compiler, value_pointers, thread, interner| {
+        |mc, compiler, value_pointers, thread, interner, sources| {
             let additional_features = additional_features();
-            let programs = ("repl.scm", module).parse_program(mc, interner, case_insensitive)?;
+            let programs = ("repl.scm", module, &mut *sources).parse_program(
+                mc,
+                interner,
+                case_insensitive,
+            )?;
             let mut ecc = ExternalCompilerContext {
                 includer,
                 world,
                 interner,
+                sources,
             };
             let library_def = LibraryDefinitionContext {
                 max_fuel: Some(1_000_000),
@@ -466,7 +471,7 @@ fn compile_to_chunk(
 }
 
 fn chunk_debug(interpreter: &mut Interpreter, chunk: &ChunkHandle) {
-    interpreter.enter(|_mc, arena, interner| {
+    interpreter.enter(|_mc, arena, interner, _sources| {
         let chunk = arena.chunk(chunk);
         // TODO Make an actual debugger view?
         println!("==CONSTANTS TABLE==");
@@ -550,7 +555,6 @@ fn chunk_debug(interpreter: &mut Interpreter, chunk: &ChunkHandle) {
 /// Executes a given module
 #[expect(clippy::too_many_arguments)]
 fn execute(
-    source: impl AsRef<str>,
     case_insensitive: bool,
     module: &Module,
     includer: &dyn Includer,
@@ -589,7 +593,7 @@ fn execute(
             let mut fuel = Fuel::with(1_000);
             chunk_debug(interpreter, &chunk);
             // thread setup
-            interpreter.run(thread, |ctx, arena, _interner| {
+            interpreter.run(thread, |ctx, arena, _interner, _| {
                 let thread = ctx.thread;
                 {
                     let chunk = arena.chunk(&chunk);
@@ -618,7 +622,7 @@ fn execute(
             });
             // execution loop
             while !interpreter.is_finished(thread) {
-                let should_continue = interpreter.try_run(thread, |ctx, _arena, interner| {
+                let should_continue = interpreter.try_run(thread, |ctx, _arena, interner, _| {
                     let thread = ctx.thread;
                     {
                         let mut thread = thread.borrow_mut(&ctx);
@@ -636,12 +640,11 @@ fn execute(
                 }
             }
             // thread coda (get result)
-            interpreter.run(thread, |ctx, _, interner| {
+            interpreter.run(thread, |ctx, _, interner, sources| {
                 let thread = ctx.thread;
                 {
                     let mut thread = thread.borrow_mut(&ctx);
                     // dbg!(&thread);
-                    let sources = [(interner.get_or_intern_static("repl.scm"), source.as_ref())];
                     if let Some(res) = thread.result() {
                         match res {
                             Ok(res) => {
@@ -863,7 +866,6 @@ fn execute_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> an
         Ok(module) => {
             let (mut interpreter, world, compiler, thread) = repl_stuff()?;
             execute(
-                source,
                 case_insensitive,
                 &module,
                 &PwdIncluder,
@@ -918,7 +920,7 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
     // compiler setup
     let (mut interpreter, world, compiler, thread) = repl_stuff()?;
     // import (scheme base)
-    interpreter.enter(|mc, arena, interner| {
+    interpreter.enter(|mc, arena, interner, _sources| {
         let Some(compiler) = arena.compiler_mut(&compiler) else {
             unreachable!()
         };
@@ -929,7 +931,7 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
             .import(mc, interner, &world, &import_set, false)
             .unwrap();
     });
-    let stashed_env = interpreter.try_run(&thread, |ctx, arena, _| {
+    let stashed_env = interpreter.try_run(&thread, |ctx, arena, _, _| {
         // Create a shared environment between prompts (excluding macros for now)
         // TODO Switch this to using EnvironmentHandle (once supported), as Value::Environment will change meaning
         // to support import sets (and thus its *actual* goal of supporting `eval`)
@@ -1008,7 +1010,6 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
 
                         let start = Instant::now();
                         execute(
-                            src,
                             case_insensitive,
                             &module,
                             &PwdIncluder,

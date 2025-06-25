@@ -139,17 +139,18 @@ pub struct SchemeError<'gc> {
     pub error_type: SchemeErrorType<'gc>,
 }
 pub type SchemeErrorPtr<'gc> = Gc<'gc, SchemeError<'gc>>;
+pub type SourcesMap = fxhash::FxHashMap<lasso::Spur, Box<str>>;
 
 impl<'gc> SchemeError<'gc> {
     pub fn display<'s, R: lasso::Resolver>(
         &'s self,
         resolver: &'s R,
-        sources: impl IntoIterator<Item = (lasso::Spur, &'s str)>,
+        sources: &'s SourcesMap,
     ) -> DisplaySchemeError<'s, 'gc, R> {
         DisplaySchemeError {
             resolver,
             error: self,
-            sources: sources.into_iter().collect(),
+            sources,
         }
     }
 }
@@ -166,92 +167,110 @@ impl fmt::Debug for SchemeError<'_> {
 pub struct DisplaySchemeError<'s, 'gc, R: lasso::Resolver> {
     resolver: &'s R,
     error: &'s SchemeError<'gc>,
-    sources: fxhash::FxHashMap<lasso::Spur, &'s str>,
+    sources: &'s SourcesMap,
 }
 
 impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "error:")?;
+        write!(f, "error: {}", self.error.error_type)?;
 
-        let mut display_fn =
-            |err: &SchemeError<'gc>| -> fmt::Result { write!(f, " {}", err.error_type) };
+        if !self.error.backtrace.is_empty() {
+            // write the backtrace (TODO move this to codesnake / yansi)
+            write!(f, "\n\nBacktrace:")?;
+            // Now we go through the frames and build up codesnake blocks to display.
+            // codesnake *cannot* have overlapping spans so we go backwards through frames and do:
+            // - within the same sourcefile: check if a span overlaps, if it does, and the new frame is larger, use the
+            //   larger frame as the error span, if no overlap, create a secondary error
 
-        display_fn(self.error)?;
+            // For now we will use the "dumb" method of each frame getting it's own block
+            let mut indices =
+                fxhash::FxHashMap::<lasso::Spur, Option<codesnake::LineIndex>>::default();
+            for (idx, frame) in self.error.backtrace.iter().enumerate() {
+                if let Some((source_id, range)) = frame.source_filename.zip(frame.range) {
+                    let line_index = indices.entry(source_id).or_insert_with(|| {
+                        self.sources
+                            .get(&source_id)
+                            .map(|src| codesnake::LineIndex::new(src))
+                    });
 
-        // write the backtrace
-        write!(f, "\n\nBacktrace:")?;
-        for frame in self.error.backtrace.iter() {
-            let file_name = |source_id: Option<lasso::Spur>| {
-                if let Some(sid) = source_id {
-                    self.resolver.try_resolve(&sid).unwrap_or("<unnamed>")
-                } else {
-                    "<<external>>"
-                }
-            };
-
-            let source = |source_id: Option<lasso::Spur>| {
-                source_id.and_then(|sid| self.sources.get(&sid).copied())
-            };
-            // TODO Remove pointer data from errors in favor of something not as...exposed
-            if let Some(range) = frame.range {
-                write!(
-                    f,
-                    "\n - {:?} {} {}{}",
-                    range,
-                    file_name(frame.source_filename),
-                    match frame.execution {
-                        Execution::Bytecode { chunk, pc, .. } => format!(
-                            "<<code{}>>",
-                            if f.alternate() {
-                                String::new()
-                            } else {
-                                format!(" 0x{:x}@({pc})", (&raw const *chunk.as_ref()).addr())
+                    if let Some(li) = line_index.as_ref() {
+                        use yansi::Paint;
+                        let block = codesnake::Block::new(
+                            li,
+                            [codesnake::Label::new(range.0..range.1)
+                                .with_text(format!("frame {idx}"))
+                                .with_style(move |s| {
+                                    if idx == 0 {
+                                        s.red().to_string()
+                                    } else {
+                                        s.blue().to_string()
+                                    }
+                                })],
+                        )
+                        .expect("code ref out-of-range")
+                        .map_code(|c| codesnake::CodeWidth::new(c, c.len()));
+                        writeln!(
+                            f,
+                            "\n{}<<{}>>",
+                            block.prologue(),
+                            self.resolver.resolve(&source_id)
+                        )?;
+                        write!(f, "{block}")?;
+                        write!(f, "{}", block.epilogue())?;
+                    } else {
+                        write!(
+                            f,
+                            "\n - <<{}:[{}:{}]>> {}",
+                            self.resolver.resolve(&source_id),
+                            range.0,
+                            range.1,
+                            match frame.execution {
+                                Execution::Bytecode { chunk, pc, .. } => format!(
+                                    "<<code{}>>",
+                                    if f.alternate() {
+                                        String::new()
+                                    } else {
+                                        format!(
+                                            " 0x{:x}@({pc})",
+                                            (&raw const *chunk.as_ref()).addr()
+                                        )
+                                    }
+                                ),
+                                Execution::Native { native, .. } => format!(
+                                    "<<native{}>>",
+                                    if f.alternate() {
+                                        String::new()
+                                    } else {
+                                        format!(" 0x{:x}", (&raw const *native.borrow()).addr())
+                                    }
+                                ),
                             }
-                        ),
-                        Execution::Native { native, .. } => format!(
-                            "<<native{}>>",
-                            if f.alternate() {
-                                String::new()
-                            } else {
-                                format!(" 0x{:x}", (&raw const *native.borrow()).addr())
-                            }
-                        ),
-                    },
-                    (source)(frame.source_filename)
-                        .and_then(|s| {
-                            if !((0..s.len()).contains(&range.0) && (0..s.len()).contains(&range.1))
-                            {
-                                None
-                            } else {
-                                Some(s)
-                            }
-                        })
-                        .map(|s| format!(": {}", &s[range.0..range.1]))
-                        .unwrap_or(String::new()),
-                )?;
-            } else {
-                write!(
-                    f,
-                    "\n - <<synthesized>> {}",
-                    match frame.execution {
-                        Execution::Bytecode { chunk, pc, .. } => format!(
-                            "<<code{}>>",
-                            if f.alternate() {
-                                String::new()
-                            } else {
-                                format!(" 0x{:x}@({pc})", (&raw const *chunk.as_ref()).addr())
-                            }
-                        ),
-                        Execution::Native { native, .. } => format!(
-                            "<<native{}>>",
-                            if f.alternate() {
-                                String::new()
-                            } else {
-                                format!(" 0x{:x}", (&raw const *native.borrow()).addr())
-                            }
-                        ),
+                        )?;
                     }
-                )?;
+                } else {
+                    write!(
+                        f,
+                        "\n - <<synthesized>> {}",
+                        match frame.execution {
+                            Execution::Bytecode { chunk, pc, .. } => format!(
+                                "<<code{}>>",
+                                if f.alternate() {
+                                    String::new()
+                                } else {
+                                    format!(" 0x{:x}@({pc})", (&raw const *chunk.as_ref()).addr())
+                                }
+                            ),
+                            Execution::Native { native, .. } => format!(
+                                "<<native{}>>",
+                                if f.alternate() {
+                                    String::new()
+                                } else {
+                                    format!(" 0x{:x}", (&raw const *native.borrow()).addr())
+                                }
+                            ),
+                        }
+                    )?;
+                }
             }
         }
         Ok(())

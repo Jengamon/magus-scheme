@@ -17,7 +17,10 @@ use crate::{
     bytecode::{Bytecode, Chunk, ChunkPtr, Constant, ImportFallbackMap, SourceData},
     environment::{Environment, StackEnvironment, StackEnvironmentPtr},
     interpreter::{Includer, ValuePointers, thread::ThreadPtr},
-    runtime::lambda::{CompiledLambda, CompiledLambdaPtr, Lambda, NativeLambdaPtr},
+    runtime::{
+        error::SourcesMap,
+        lambda::{CompiledLambda, CompiledLambdaPtr, Lambda, NativeLambdaPtr},
+    },
     value::{Number, PromisePtr},
 };
 
@@ -1496,6 +1499,7 @@ pub struct ExternalCompilerContext<'a> {
     pub world: &'a World,
     pub interner: &'a mut lasso::Rodeo,
     pub includer: &'a dyn Includer,
+    pub sources: &'a mut SourcesMap,
 }
 
 /// Context struct for library definition parameters
@@ -2569,7 +2573,7 @@ impl<'gc> Compiler<'gc> {
                 let ret = if let Some(Err(e)) = thread_mut.result() {
                     // Rendered to string b/c DefineLibraryError is currently not using the 'gc lifetime
                     let err = DefineLibraryError::InterpError(Box::from(
-                        e.display(ecc.interner, []).to_string().as_str(),
+                        e.display(ecc.interner, ecc.sources).to_string().as_str(),
                     ));
                     Err(err)
                 } else {

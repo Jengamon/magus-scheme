@@ -1040,6 +1040,7 @@ dependencies = [
  "arbitrary",
  "arbtest",
  "assert2",
+ "codesnake",
  "datatest-stable",
  "datatest_parse",
  "divan",
@@ -1060,6 +1061,7 @@ dependencies = [
  "target-triple",
  "thiserror 2.0.12",
  "unicode-general-category",
+ "yansi",
 ]
 
 [[package]]

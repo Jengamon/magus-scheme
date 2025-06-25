@@ -198,6 +198,10 @@ mod procedures {
     pub struct IsPromise;
 
     impl<'gc> NativeLambda<'gc> for IsPromise {
+        fn name(&self) -> &str {
+            "promise?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -218,6 +222,10 @@ mod procedures {
     pub struct Force;
 
     impl<'gc> NativeLambda<'gc> for Force {
+        fn name(&self) -> &str {
+            "force"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -295,6 +303,10 @@ mod procedures {
     pub struct MakePromise;
 
     impl<'gc> NativeLambda<'gc> for MakePromise {
+        fn name(&self) -> &str {
+            "make-promise"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }

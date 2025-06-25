@@ -40,6 +40,10 @@ impl WithExceptionHandler {
 }
 
 impl<'gc> NativeLambda<'gc> for WithExceptionHandler {
+    fn name(&self) -> &str {
+        "with-exception-handler"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Exact(2)
     }

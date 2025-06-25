@@ -471,7 +471,8 @@ impl Module for Base {
             };
         }
         match symbol {
-            "call-with-current-continuation" | "call/cc" => lambda!(CallCc),
+            "call-with-current-continuation" => lambda!(CallCc { abbrev: false }),
+            "call/cc" => lambda!(CallCc { abbrev: true }),
             "+" => lambda!(Add),
             "-" => lambda!(Subtract),
             "*" => lambda!(Multiply),

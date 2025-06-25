@@ -21,6 +21,10 @@ mod procedures {
     pub struct Undefined;
 
     impl<'gc> NativeLambda<'gc> for Undefined {
+        fn name(&self) -> &str {
+            "undefined"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(0)
         }
@@ -40,6 +44,10 @@ mod procedures {
     pub struct Void;
 
     impl<'gc> NativeLambda<'gc> for Void {
+        fn name(&self) -> &str {
+            "void"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(0)
         }
@@ -59,6 +67,10 @@ mod procedures {
     pub struct DebugPrint;
 
     impl<'gc> NativeLambda<'gc> for DebugPrint {
+        fn name(&self) -> &str {
+            "debug"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }

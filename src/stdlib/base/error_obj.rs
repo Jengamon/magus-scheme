@@ -32,6 +32,10 @@ impl<'gc> ErrorObject<'gc> {
 pub struct Error;
 
 impl<'gc> NativeLambda<'gc> for Error {
+    fn name(&self) -> &str {
+        "error"
+    }
+
     fn arity(&self) -> Arity {
         Arity::AtLeast(1)
     }
@@ -69,6 +73,10 @@ impl<'gc> NativeLambda<'gc> for Error {
 pub struct IsErrorObject;
 
 impl<'gc> NativeLambda<'gc> for IsErrorObject {
+    fn name(&self) -> &str {
+        "is-error-object"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Exact(1)
     }
@@ -90,6 +98,10 @@ impl<'gc> NativeLambda<'gc> for IsErrorObject {
 pub struct ErrorObjectMessage;
 
 impl<'gc> NativeLambda<'gc> for ErrorObjectMessage {
+    fn name(&self) -> &str {
+        "error-object-message"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Exact(1)
     }

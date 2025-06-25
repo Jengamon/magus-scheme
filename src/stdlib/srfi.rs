@@ -85,6 +85,10 @@ pub mod bitwise {
         pub struct BitwiseNot;
 
         impl<'gc> NativeLambda<'gc> for BitwiseNot {
+            fn name(&self) -> &str {
+                "bitwise-not"
+            }
+
             fn arity(&self) -> Arity {
                 Arity::Exact(1)
             }
@@ -117,6 +121,10 @@ pub mod bitwise {
         pub struct BitsToList;
 
         impl<'gc> NativeLambda<'gc> for BitsToList {
+            fn name(&self) -> &str {
+                "bits->list"
+            }
+
             fn arity(&self) -> Arity {
                 Arity::Bounded { min: 1, max: 2 }
             }
@@ -168,11 +176,6 @@ pub mod bitwise {
                 let cons = ConsCell::from_iter(&ctx, ctx.thread_ctx.null_value, list);
 
                 Ok(LambdaReturn::Return(vec![cons]))
-            }
-
-            fn doc_string(&self) -> Option<&str> {
-                Some("(argument 0 \"non-negative integer\") (argument 1 'optional \"non-negative integer\")
-return a list of booleans (upto argument 1) corresponding to each bit of argument 0")
             }
         }
     }

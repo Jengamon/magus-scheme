@@ -15,6 +15,10 @@ use crate::{
 pub struct MakeParameter;
 
 impl<'gc> NativeLambda<'gc> for MakeParameter {
+    fn name(&self) -> &str {
+        "make-parameter"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Bounded { min: 1, max: 2 }
     }

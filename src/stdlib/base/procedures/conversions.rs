@@ -13,6 +13,10 @@ use crate::{
 pub struct Exact;
 
 impl<'gc> NativeLambda<'gc> for Exact {
+    fn name(&self) -> &str {
+        "exact"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Exact(1)
     }
@@ -41,6 +45,10 @@ impl<'gc> NativeLambda<'gc> for Exact {
 pub struct Inexact;
 
 impl<'gc> NativeLambda<'gc> for Inexact {
+    fn name(&self) -> &str {
+        "inexact"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Exact(1)
     }
@@ -65,6 +73,10 @@ impl<'gc> NativeLambda<'gc> for Inexact {
 pub struct NumberToString;
 
 impl<'gc> NativeLambda<'gc> for NumberToString {
+    fn name(&self) -> &str {
+        "number->string"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Bounded { min: 1, max: 2 }
     }
@@ -204,6 +216,10 @@ fn exact_decimal_stn(
 pub struct StringToNumber;
 
 impl<'gc> NativeLambda<'gc> for StringToNumber {
+    fn name(&self) -> &str {
+        "string->number"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Bounded { min: 1, max: 2 }
     }
@@ -712,6 +728,10 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
 pub struct StringToSymbol;
 
 impl<'gc> NativeLambda<'gc> for StringToSymbol {
+    fn name(&self) -> &str {
+        "string->symbol"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Exact(1)
     }
@@ -740,6 +760,10 @@ impl<'gc> NativeLambda<'gc> for StringToSymbol {
 pub struct SymbolToString;
 
 impl<'gc> NativeLambda<'gc> for SymbolToString {
+    fn name(&self) -> &str {
+        "symbol->string"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Exact(1)
     }
@@ -772,6 +796,10 @@ impl<'gc> NativeLambda<'gc> for SymbolToString {
 pub struct ListToString;
 
 impl<'gc> NativeLambda<'gc> for ListToString {
+    fn name(&self) -> &str {
+        "list->string"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Exact(1)
     }
@@ -816,6 +844,10 @@ impl<'gc> NativeLambda<'gc> for ListToString {
 pub struct StringToList;
 
 impl<'gc> NativeLambda<'gc> for StringToList {
+    fn name(&self) -> &str {
+        "string->list"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Bounded { min: 1, max: 3 }
     }
@@ -898,6 +930,10 @@ impl<'gc> NativeLambda<'gc> for StringToList {
 pub struct Utf8ToString;
 
 impl<'gc> NativeLambda<'gc> for Utf8ToString {
+    fn name(&self) -> &str {
+        "utf8->string"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Bounded { min: 1, max: 3 }
     }
@@ -980,6 +1016,10 @@ impl<'gc> NativeLambda<'gc> for Utf8ToString {
 pub struct StringToUtf8;
 
 impl<'gc> NativeLambda<'gc> for StringToUtf8 {
+    fn name(&self) -> &str {
+        "string->utf8"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Bounded { min: 1, max: 3 }
     }
@@ -1060,6 +1100,10 @@ impl<'gc> NativeLambda<'gc> for StringToUtf8 {
 pub struct CharToInteger;
 
 impl<'gc> NativeLambda<'gc> for CharToInteger {
+    fn name(&self) -> &str {
+        "char->integer"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Exact(1)
     }
@@ -1087,6 +1131,10 @@ impl<'gc> NativeLambda<'gc> for CharToInteger {
 pub struct IntegerToChar;
 
 impl<'gc> NativeLambda<'gc> for IntegerToChar {
+    fn name(&self) -> &str {
+        "integer->char"
+    }
+
     fn arity(&self) -> Arity {
         Arity::Exact(1)
     }

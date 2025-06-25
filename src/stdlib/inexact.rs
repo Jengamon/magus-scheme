@@ -19,6 +19,10 @@ mod procedures {
     #[collect(require_static)]
     pub struct Sin;
     impl<'gc> NativeLambda<'gc> for Sin {
+        fn name(&self) -> &str {
+            "sin"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -46,6 +50,10 @@ mod procedures {
     #[collect(require_static)]
     pub struct Cos;
     impl<'gc> NativeLambda<'gc> for Cos {
+        fn name(&self) -> &str {
+            "cos"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -73,6 +81,10 @@ mod procedures {
     #[collect(require_static)]
     pub struct Tan;
     impl<'gc> NativeLambda<'gc> for Tan {
+        fn name(&self) -> &str {
+            "tan"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -100,6 +112,10 @@ mod procedures {
     #[collect(require_static)]
     pub struct Asin;
     impl<'gc> NativeLambda<'gc> for Asin {
+        fn name(&self) -> &str {
+            "asin"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -127,6 +143,10 @@ mod procedures {
     #[collect(require_static)]
     pub struct Acos;
     impl<'gc> NativeLambda<'gc> for Acos {
+        fn name(&self) -> &str {
+            "acos"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -154,6 +174,10 @@ mod procedures {
     #[collect(require_static)]
     pub struct Atan;
     impl<'gc> NativeLambda<'gc> for Atan {
+        fn name(&self) -> &str {
+            "atan"
+        }
+
         fn arity(&self) -> Arity {
             Arity::AtLeast(1)
         }
@@ -204,6 +228,10 @@ mod procedures {
     #[collect(require_static)]
     pub struct Exp;
     impl<'gc> NativeLambda<'gc> for Exp {
+        fn name(&self) -> &str {
+            "exp"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -231,6 +259,10 @@ mod procedures {
     #[collect(require_static)]
     pub struct Log;
     impl<'gc> NativeLambda<'gc> for Log {
+        fn name(&self) -> &str {
+            "log"
+        }
+
         fn arity(&self) -> Arity {
             Arity::AtLeast(1)
         }
@@ -282,6 +314,10 @@ mod procedures {
     pub struct IsFinite;
 
     impl<'gc> NativeLambda<'gc> for IsFinite {
+        fn name(&self) -> &str {
+            "finite?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -311,6 +347,10 @@ mod procedures {
     pub struct IsInfinite;
 
     impl<'gc> NativeLambda<'gc> for IsInfinite {
+        fn name(&self) -> &str {
+            "infinite?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -342,6 +382,10 @@ mod procedures {
     pub struct IsNan;
 
     impl<'gc> NativeLambda<'gc> for IsNan {
+        fn name(&self) -> &str {
+            "nan?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -371,6 +415,10 @@ mod procedures {
     pub struct Sqrt;
 
     impl<'gc> NativeLambda<'gc> for Sqrt {
+        fn name(&self) -> &str {
+            "sqrt"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }

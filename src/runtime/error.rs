@@ -261,12 +261,13 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
                                 }
                             ),
                             Execution::Native { native, .. } => format!(
-                                "<<native{}>>",
+                                "<<native{} [{}]>>",
                                 if f.alternate() {
                                     String::new()
                                 } else {
                                     format!(" 0x{:x}", (&raw const *native.borrow()).addr())
-                                }
+                                },
+                                native.borrow().name(),
                             ),
                         }
                     )?;

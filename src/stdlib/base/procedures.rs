@@ -38,6 +38,10 @@ mod error {
     pub struct Raise;
 
     impl<'gc> NativeLambda<'gc> for Raise {
+        fn name(&self) -> &str {
+            "raise"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -59,6 +63,10 @@ mod error {
     pub struct RaiseContinuable;
 
     impl<'gc> NativeLambda<'gc> for RaiseContinuable {
+        fn name(&self) -> &str {
+            "raise-continuable"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -90,6 +98,10 @@ mod equality {
     pub struct IsEq;
 
     impl<'gc> NativeLambda<'gc> for IsEq {
+        fn name(&self) -> &str {
+            "eq?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(2)
         }
@@ -118,6 +130,10 @@ mod equality {
     pub struct IsEqv;
 
     impl<'gc> NativeLambda<'gc> for IsEqv {
+        fn name(&self) -> &str {
+            "eqv?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(2)
         }
@@ -138,6 +154,10 @@ mod equality {
     pub struct IsEqual;
 
     impl<'gc> NativeLambda<'gc> for IsEqual {
+        fn name(&self) -> &str {
+            "equal?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(2)
         }
@@ -167,9 +187,19 @@ mod control {
 
     #[derive(Collect, Debug)]
     #[collect(require_static)]
-    pub struct CallCc;
+    pub struct CallCc {
+        pub(crate) abbrev: bool,
+    }
 
     impl<'gc> NativeLambda<'gc> for CallCc {
+        fn name(&self) -> &str {
+            if !self.abbrev {
+                "call-with-current-continuation"
+            } else {
+                "call/cc"
+            }
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -215,6 +245,10 @@ mod control {
     pub struct Apply;
 
     impl<'gc> NativeLambda<'gc> for Apply {
+        fn name(&self) -> &str {
+            "apply"
+        }
+
         fn arity(&self) -> Arity {
             Arity::AtLeast(2)
         }
@@ -282,6 +316,10 @@ mod control {
     }
 
     impl<'gc> NativeLambda<'gc> for Features {
+        fn name(&self) -> &str {
+            "features"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(0)
         }
@@ -316,6 +354,10 @@ mod control {
     pub struct DynamicWind;
 
     impl<'gc> NativeLambda<'gc> for DynamicWind {
+        fn name(&self) -> &str {
+            "dynamic-wind"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(3)
         }
@@ -408,8 +450,12 @@ mod comparison {
     }
 
     macro_rules! comparison_impl {
-        ($cmp:expr => $tp:ty) => {
+        ($cmp:expr => $tp:ty = $name:literal) => {
             impl<'gc> NativeLambda<'gc> for $tp {
+                fn name(&self) -> &str {
+                    $name
+                }
+
                 fn arity(&self) -> Arity {
                     Arity::AtLeast(2)
                 }
@@ -461,31 +507,31 @@ mod comparison {
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct Equal;
-    comparison_impl!(|ord| ord == std::cmp::Ordering::Equal => Equal);
+    comparison_impl!(|ord| ord == std::cmp::Ordering::Equal => Equal = "=");
 
     // >= ("monotonically non-ascending")
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct Descending;
-    comparison_impl!(|ord| matches!(ord, std::cmp::Ordering::Greater | std::cmp::Ordering::Equal) => Descending);
+    comparison_impl!(|ord| matches!(ord, std::cmp::Ordering::Greater | std::cmp::Ordering::Equal) => Descending = ">=");
 
     // <= ("monotonically non-descending")
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct Ascending;
-    comparison_impl!(|ord| matches!(ord, std::cmp::Ordering::Less | std::cmp::Ordering::Equal) => Ascending);
+    comparison_impl!(|ord| matches!(ord, std::cmp::Ordering::Less | std::cmp::Ordering::Equal) => Ascending = "<=");
 
     // >
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct MonotonicDescending;
-    comparison_impl!(|ord| ord == std::cmp::Ordering::Greater => MonotonicDescending);
+    comparison_impl!(|ord| ord == std::cmp::Ordering::Greater => MonotonicDescending = ">");
 
     // <
     #[derive(Debug, Collect)]
     #[collect(require_static)]
     pub struct MonotonicAscending;
-    comparison_impl!(|ord| ord == std::cmp::Ordering::Less => MonotonicAscending);
+    comparison_impl!(|ord| ord == std::cmp::Ordering::Less => MonotonicAscending = "<");
 }
 
 mod math {
@@ -504,6 +550,10 @@ mod math {
     pub struct Expt;
 
     impl<'gc> NativeLambda<'gc> for Expt {
+        fn name(&self) -> &str {
+            "expt"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(2)
         }
@@ -598,6 +648,10 @@ mod math {
     pub struct ExactIntegerSqrt;
 
     impl<'gc> NativeLambda<'gc> for ExactIntegerSqrt {
+        fn name(&self) -> &str {
+            "exact-integer-sqrt"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -639,6 +693,10 @@ mod math {
     pub struct Add;
 
     impl<'gc> NativeLambda<'gc> for Add {
+        fn name(&self) -> &str {
+            "+"
+        }
+
         fn arity(&self) -> Arity {
             Arity::AtLeast(0)
         }
@@ -679,6 +737,10 @@ mod math {
     pub struct Subtract;
 
     impl<'gc> NativeLambda<'gc> for Subtract {
+        fn name(&self) -> &str {
+            "-"
+        }
+
         fn arity(&self) -> Arity {
             Arity::AtLeast(1)
         }
@@ -740,6 +802,10 @@ mod math {
     pub struct Multiply;
 
     impl<'gc> NativeLambda<'gc> for Multiply {
+        fn name(&self) -> &str {
+            "*"
+        }
+
         fn arity(&self) -> Arity {
             Arity::AtLeast(0)
         }
@@ -782,6 +848,10 @@ mod math {
     pub struct Divide;
 
     impl<'gc> NativeLambda<'gc> for Divide {
+        fn name(&self) -> &str {
+            "/"
+        }
+
         fn arity(&self) -> Arity {
             Arity::AtLeast(1)
         }
@@ -858,6 +928,10 @@ mod math {
     pub struct FloorSlash;
 
     impl<'gc> NativeLambda<'gc> for FloorSlash {
+        fn name(&self) -> &str {
+            "floor/"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(2)
         }
@@ -943,6 +1017,10 @@ mod math {
     pub struct TruncateSlash;
 
     impl<'gc> NativeLambda<'gc> for TruncateSlash {
+        fn name(&self) -> &str {
+            "truncate/"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(2)
         }
@@ -1026,6 +1104,10 @@ mod math {
     pub struct Floor;
 
     impl<'gc> NativeLambda<'gc> for Floor {
+        fn name(&self) -> &str {
+            "floor"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -1057,6 +1139,10 @@ mod math {
     pub struct Ceiling;
 
     impl<'gc> NativeLambda<'gc> for Ceiling {
+        fn name(&self) -> &str {
+            "ceiling"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -1087,6 +1173,10 @@ mod math {
     pub struct Truncate;
 
     impl<'gc> NativeLambda<'gc> for Truncate {
+        fn name(&self) -> &str {
+            "truncate"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -1118,6 +1208,10 @@ mod math {
     pub struct Round;
 
     impl<'gc> NativeLambda<'gc> for Round {
+        fn name(&self) -> &str {
+            "round"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -1150,6 +1244,10 @@ mod math {
     pub struct Numerator;
 
     impl<'gc> NativeLambda<'gc> for Numerator {
+        fn name(&self) -> &str {
+            "numerator"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -1196,6 +1294,10 @@ mod math {
     pub struct Denominator;
 
     impl<'gc> NativeLambda<'gc> for Denominator {
+        fn name(&self) -> &str {
+            "denominator"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -1240,6 +1342,10 @@ mod math {
     pub struct Gcd;
 
     impl<'gc> NativeLambda<'gc> for Gcd {
+        fn name(&self) -> &str {
+            "gcd"
+        }
+
         fn arity(&self) -> Arity {
             Arity::AtLeast(0)
         }
@@ -1329,6 +1435,10 @@ mod math {
     pub struct Lcm;
 
     impl<'gc> NativeLambda<'gc> for Lcm {
+        fn name(&self) -> &str {
+            "lcm"
+        }
+
         fn arity(&self) -> Arity {
             Arity::AtLeast(0)
         }
@@ -1431,6 +1541,10 @@ mod list {
     #[collect(require_static)]
     pub struct Car;
     impl<'gc> NativeLambda<'gc> for Car {
+        fn name(&self) -> &str {
+            "car"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -1458,6 +1572,10 @@ mod list {
     #[collect(require_static)]
     pub struct Caar;
     impl<'gc> NativeLambda<'gc> for Caar {
+        fn name(&self) -> &str {
+            "caar"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -1493,6 +1611,10 @@ mod list {
     #[collect(require_static)]
     pub struct Cadr;
     impl<'gc> NativeLambda<'gc> for Cadr {
+        fn name(&self) -> &str {
+            "cadr"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -1528,6 +1650,10 @@ mod list {
     #[collect(require_static)]
     pub struct Cdar;
     impl<'gc> NativeLambda<'gc> for Cdar {
+        fn name(&self) -> &str {
+            "cdar"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -1563,6 +1689,10 @@ mod list {
     #[collect(require_static)]
     pub struct Cddr;
     impl<'gc> NativeLambda<'gc> for Cddr {
+        fn name(&self) -> &str {
+            "cddr"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -1598,6 +1728,10 @@ mod list {
     #[collect(require_static)]
     pub struct Cdr;
     impl<'gc> NativeLambda<'gc> for Cdr {
+        fn name(&self) -> &str {
+            "cdr"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -1654,6 +1788,10 @@ mod list {
     }
 
     impl<'gc> NativeLambda<'gc> for Map<'gc> {
+        fn name(&self) -> &str {
+            "map"
+        }
+
         fn arity(&self) -> Arity {
             Arity::AtLeast(2)
         }
@@ -1803,6 +1941,10 @@ mod list {
     pub struct ListSetBang;
 
     impl<'gc> NativeLambda<'gc> for ListSetBang {
+        fn name(&self) -> &str {
+            "list-set!"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(3)
         }
@@ -1855,6 +1997,10 @@ mod list {
     pub struct ListCopy;
 
     impl<'gc> NativeLambda<'gc> for ListCopy {
+        fn name(&self) -> &str {
+            "list-copy"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -1918,6 +2064,10 @@ mod list {
     pub struct SetCarBang;
 
     impl<'gc> NativeLambda<'gc> for SetCarBang {
+        fn name(&self) -> &str {
+            "set-car!"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(2)
         }
@@ -1957,6 +2107,10 @@ mod list {
     pub struct SetCdrBang;
 
     impl<'gc> NativeLambda<'gc> for SetCdrBang {
+        fn name(&self) -> &str {
+            "set-cdr!"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(2)
         }
@@ -2007,6 +2161,10 @@ mod vector {
     pub struct VectorRef;
 
     impl<'gc> NativeLambda<'gc> for VectorRef {
+        fn name(&self) -> &str {
+            "vector-ref"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(2)
         }
@@ -2047,6 +2205,10 @@ mod vector {
     pub struct VectorLength;
 
     impl<'gc> NativeLambda<'gc> for VectorLength {
+        fn name(&self) -> &str {
+            "vector-length"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2087,6 +2249,10 @@ mod bytevector {
     pub struct Bytevector;
 
     impl<'gc> NativeLambda<'gc> for Bytevector {
+        fn name(&self) -> &str {
+            "bytevector"
+        }
+
         fn arity(&self) -> Arity {
             Arity::AtLeast(0)
         }
@@ -2131,6 +2297,10 @@ mod bytevector {
     pub struct MakeBytevector;
 
     impl<'gc> NativeLambda<'gc> for MakeBytevector {
+        fn name(&self) -> &str {
+            "make-bytevector"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Bounded { min: 1, max: 2 }
         }
@@ -2210,6 +2380,10 @@ mod string {
     pub struct StringConstructor;
 
     impl<'gc> NativeLambda<'gc> for StringConstructor {
+        fn name(&self) -> &str {
+            "string"
+        }
+
         fn arity(&self) -> Arity {
             Arity::AtLeast(0)
         }
@@ -2247,6 +2421,10 @@ mod string {
     pub struct StringCopy;
 
     impl<'gc> NativeLambda<'gc> for StringCopy {
+        fn name(&self) -> &str {
+            "string-copy"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Bounded { min: 1, max: 3 }
         }
@@ -2326,6 +2504,10 @@ mod string {
     pub struct Substring;
 
     impl<'gc> NativeLambda<'gc> for Substring {
+        fn name(&self) -> &str {
+            "substring"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(3)
         }
@@ -2395,6 +2577,10 @@ mod string {
     pub struct StringLength;
 
     impl<'gc> NativeLambda<'gc> for StringLength {
+        fn name(&self) -> &str {
+            "string-length"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2426,6 +2612,10 @@ mod string {
     pub struct StringAppend;
 
     impl<'gc> NativeLambda<'gc> for StringAppend {
+        fn name(&self) -> &str {
+            "string-append"
+        }
+
         fn arity(&self) -> Arity {
             Arity::AtLeast(0)
         }
@@ -2458,6 +2648,10 @@ mod string {
     pub struct StringRef;
 
     impl<'gc> NativeLambda<'gc> for StringRef {
+        fn name(&self) -> &str {
+            "string-ref"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(2)
         }
@@ -2529,6 +2723,10 @@ mod predicates {
     pub struct IsPair;
 
     impl<'gc> NativeLambda<'gc> for IsPair {
+        fn name(&self) -> &str {
+            "pair?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2553,6 +2751,10 @@ mod predicates {
     pub struct IsNull;
 
     impl<'gc> NativeLambda<'gc> for IsNull {
+        fn name(&self) -> &str {
+            "null?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2573,6 +2775,10 @@ mod predicates {
     pub struct IsList;
 
     impl<'gc> NativeLambda<'gc> for IsList {
+        fn name(&self) -> &str {
+            "list?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2593,6 +2799,10 @@ mod predicates {
     pub struct IsExact;
 
     impl<'gc> NativeLambda<'gc> for IsExact {
+        fn name(&self) -> &str {
+            "exact?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2614,6 +2824,10 @@ mod predicates {
     pub struct IsInexact;
 
     impl<'gc> NativeLambda<'gc> for IsInexact {
+        fn name(&self) -> &str {
+            "inexact?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2635,6 +2849,10 @@ mod predicates {
     pub struct IsSymbol;
 
     impl<'gc> NativeLambda<'gc> for IsSymbol {
+        fn name(&self) -> &str {
+            "symbol?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2655,6 +2873,10 @@ mod predicates {
     pub struct IsString;
 
     impl<'gc> NativeLambda<'gc> for IsString {
+        fn name(&self) -> &str {
+            "string?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2675,6 +2897,10 @@ mod predicates {
     pub struct IsProcedure;
 
     impl<'gc> NativeLambda<'gc> for IsProcedure {
+        fn name(&self) -> &str {
+            "procedure?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2696,6 +2922,10 @@ mod predicates {
     pub struct IsEven;
 
     impl<'gc> NativeLambda<'gc> for IsEven {
+        fn name(&self) -> &str {
+            "even?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2725,6 +2955,10 @@ mod predicates {
     pub struct IsOdd;
 
     impl<'gc> NativeLambda<'gc> for IsOdd {
+        fn name(&self) -> &str {
+            "odd?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2754,6 +2988,10 @@ mod predicates {
     pub struct IsInteger;
 
     impl<'gc> NativeLambda<'gc> for IsInteger {
+        fn name(&self) -> &str {
+            "integer?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2778,6 +3016,10 @@ mod predicates {
     pub struct IsExactInteger;
 
     impl<'gc> NativeLambda<'gc> for IsExactInteger {
+        fn name(&self) -> &str {
+            "exact-integer?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2801,6 +3043,10 @@ mod predicates {
     pub struct IsVector;
 
     impl<'gc> NativeLambda<'gc> for IsVector {
+        fn name(&self) -> &str {
+            "vector?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2821,6 +3067,10 @@ mod predicates {
     pub struct IsBytevector;
 
     impl<'gc> NativeLambda<'gc> for IsBytevector {
+        fn name(&self) -> &str {
+            "bytevector?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2841,6 +3091,10 @@ mod predicates {
     pub struct IsChar;
 
     impl<'gc> NativeLambda<'gc> for IsChar {
+        fn name(&self) -> &str {
+            "char?"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -2872,6 +3126,10 @@ mod structure {
     pub struct Values;
 
     impl<'gc> NativeLambda<'gc> for Values {
+        fn name(&self) -> &str {
+            "values"
+        }
+
         fn arity(&self) -> Arity {
             Arity::AtLeast(1)
         }
@@ -2897,6 +3155,10 @@ mod structure {
     pub struct CallWithValues;
 
     impl<'gc> NativeLambda<'gc> for CallWithValues {
+        fn name(&self) -> &str {
+            "call-with-values"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(2)
         }
@@ -2951,6 +3213,10 @@ mod structure {
     pub struct Cons;
 
     impl<'gc> NativeLambda<'gc> for Cons {
+        fn name(&self) -> &str {
+            "cons"
+        }
+
         fn arity(&self) -> crate::runtime::lambda::Arity {
             Arity::Exact(2)
         }
@@ -2982,6 +3248,10 @@ mod ports {
     pub struct CurrentInputPort;
 
     impl<'gc> NativeLambda<'gc> for CurrentInputPort {
+        fn name(&self) -> &str {
+            "current-input-port"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(0)
         }
@@ -3002,6 +3272,10 @@ mod ports {
     pub struct CurrentOutputPort;
 
     impl<'gc> NativeLambda<'gc> for CurrentOutputPort {
+        fn name(&self) -> &str {
+            "current-output-port"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(0)
         }
@@ -3022,6 +3296,10 @@ mod ports {
     pub struct CurrentErrorPort;
 
     impl<'gc> NativeLambda<'gc> for CurrentErrorPort {
+        fn name(&self) -> &str {
+            "current-error-port"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(0)
         }

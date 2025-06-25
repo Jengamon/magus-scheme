@@ -178,6 +178,8 @@ impl<'gc> std::ops::Deref for NativeLambdaContext<'_, 'gc> {
 ///   that use that `World`, depending on how that `World` defines them
 #[expect(private_bounds)]
 pub trait NativeLambda<'gc>: std::fmt::Debug + Collectable {
+    /// What name should this lambda use for error reporting?
+    fn name(&self) -> &str;
     /// What is the arity of this lambda?
     fn arity(&self) -> Arity;
 

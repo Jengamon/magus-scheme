@@ -19,6 +19,10 @@ mod procedures {
     macro_rules! write_lam {
         ($lam:ty => $name:literal, $mode:ty) => {
             impl<'gc> NativeLambda<'gc> for $lam {
+                fn name(&self) -> &str {
+                    $name
+                }
+
                 fn arity(&self) -> Arity {
                     Arity::Bounded { min: 1, max: 2 }
                 }
@@ -107,6 +111,10 @@ mod procedures {
     pub struct Newline;
 
     impl<'gc> NativeLambda<'gc> for Newline {
+        fn name(&self) -> &str {
+            "newline"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Bounded { min: 0, max: 1 }
         }

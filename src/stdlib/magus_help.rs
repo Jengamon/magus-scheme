@@ -24,6 +24,10 @@ mod procedures {
     pub struct Help;
 
     impl<'gc> NativeLambda<'gc> for Help {
+        fn name(&self) -> &str {
+            "help"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(1)
         }
@@ -53,6 +57,10 @@ mod procedures {
     pub struct SetHelp;
 
     impl<'gc> NativeLambda<'gc> for SetHelp {
+        fn name(&self) -> &str {
+            "set-help"
+        }
+
         fn arity(&self) -> Arity {
             Arity::Exact(2)
         }

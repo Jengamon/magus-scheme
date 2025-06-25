@@ -432,6 +432,7 @@ fn additional_features() -> std::sync::Arc<[std::sync::Arc<str>]> {
     )
 }
 
+#[expect(clippy::too_many_arguments)]
 fn compile_to_chunk(
     case_insensitive: bool,
     module: &Module,
@@ -440,6 +441,7 @@ fn compile_to_chunk(
     compiler: &CompilerHandle,
     thread: &ThreadHandle,
     world: &World,
+    filename: &str,
 ) -> anyhow::Result<ChunkHandle> {
     // Run the code in through our compiler to get a chunk,
     // then execute that chunk on a new thread
@@ -448,11 +450,8 @@ fn compile_to_chunk(
         compiler,
         |mc, compiler, value_pointers, thread, interner, sources| {
             let additional_features = additional_features();
-            let programs = ("repl.scm", module, &mut *sources).parse_program(
-                mc,
-                interner,
-                case_insensitive,
-            )?;
+            let programs =
+                (filename, module, &mut *sources).parse_program(mc, interner, case_insensitive)?;
             let mut ecc = ExternalCompilerContext {
                 includer,
                 world,
@@ -555,6 +554,7 @@ fn chunk_debug(interpreter: &mut Interpreter, chunk: &ChunkHandle) {
 /// Executes a given module
 #[expect(clippy::too_many_arguments)]
 fn execute(
+    filename: &str,
     case_insensitive: bool,
     module: &Module,
     includer: &dyn Includer,
@@ -586,6 +586,7 @@ fn execute(
         compiler,
         thread,
         world,
+        filename,
     );
 
     match chunk {
@@ -822,6 +823,7 @@ fn compile_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> an
                 &compiler,
                 &thread,
                 &world,
+                path.to_string_lossy().as_ref(),
             );
             match chunk {
                 Ok(chunk) => {
@@ -866,6 +868,7 @@ fn execute_file(path: impl AsRef<std::path::Path>, case_insensitive: bool) -> an
         Ok(module) => {
             let (mut interpreter, world, compiler, thread) = repl_stuff()?;
             execute(
+                path.to_string_lossy().as_ref(),
                 case_insensitive,
                 &module,
                 &PwdIncluder,
@@ -1010,6 +1013,7 @@ fn repl(case_insensitive: bool) -> anyhow::Result<()> {
 
                         let start = Instant::now();
                         execute(
+                            &format!("repl-{}.scm", prompt.completed_lines - 1),
                             case_insensitive,
                             &module,
                             &PwdIncluder,

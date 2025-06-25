@@ -24,6 +24,10 @@ In the vein of [piccolo](https://github.com/kyren/piccolo), we have pretty much 
 
 <!-- TODO write about each layer -->
 
+## Error reporting
+
+TODO move repl from codesnake to codespan-reporting
+
 ## Numbers
 
 Numbers are of particular interest to Schemers, and I'm happy to say that we support *lexing*

@@ -1,8 +1,8 @@
 error: `x` does not exist in environment
 
 Backtrace:
+ - (331, 332) test_data/fallback_testing.sct.scm <<code>>: x
  - (173, 182) test_data/fallback_testing.sct.scm <<code>>: (+ x (f))
- - <<synthesized>> <<code>>
 ---
 ---
 ; make sure fallback handing doesn't mean that scopes get messed up

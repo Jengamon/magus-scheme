@@ -669,7 +669,10 @@ impl<'gc> Thread<'gc> {
         // "Wind frames" don't actually return..., so we pop the return value, but ignore it
         if !preserve_stack {
             if !wind_frame {
-                let possible_ret_vals = self.stack.drain(bottom..).collect::<Vec<_>>();
+                let possible_ret_vals = self
+                    .stack
+                    .drain(bottom.min(self.stack.len())..)
+                    .collect::<Vec<_>>();
                 let ret_val = possible_ret_vals
                     .into_iter()
                     .rfind(|v| !matches!(*v.borrow(), Value::Void));
@@ -1381,7 +1384,6 @@ impl<'gc> Thread<'gc> {
                         Bytecode::FetchUpvalue { index } => {
                             // Get the *actual* index or error
                             // dbg!((&self.upvalue_mapping, frame.upvalue_index));
-                            let oindex = index;
                             let Some(index) = self
                                 .upvalue_mapping
                                 .get(

@@ -1881,26 +1881,45 @@ impl<'gc> Compiler<'gc> {
                     };
                 }
 
+                let las = self.argument_scope(0);
                 match self.is_argument(*spur) {
                     Some(Arg::Index { index, scope: 0 })
-                        if !self
-                            .argument_scope(0)
-                            .unwrap()
-                            .variables_defined
-                            .borrow()
-                            .contains_key(spur) =>
+                        if !las.unwrap().variables_defined.borrow().contains_key(spur)
+                            && las.unwrap().is_upvalue(*spur).is_ok() =>
+                    {
+                        let upv = las.unwrap().is_upvalue(*spur);
+                        if let Ok(Some(v)) = upv {
+                            Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
+                                index: v,
+                            }])))
+                        } else {
+                            Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchArg {
+                                index,
+                            }])))
+                        }
+                    }
+                    Some(Arg::Index { index, scope: 0 })
+                        if !las.unwrap().variables_defined.borrow().contains_key(spur) =>
                     {
                         Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchArg {
                             index,
                         }])))
                     }
                     Some(Arg::Rest { scope: 0 })
-                        if !self
-                            .argument_scope(0)
-                            .unwrap()
-                            .variables_defined
-                            .borrow()
-                            .contains_key(spur) =>
+                        if !las.unwrap().variables_defined.borrow().contains_key(spur)
+                            && las.unwrap().is_upvalue(*spur).is_ok() =>
+                    {
+                        let upv = las.unwrap().is_upvalue(*spur);
+                        if let Ok(Some(v)) = upv {
+                            Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchUpvalue {
+                                index: v,
+                            }])))
+                        } else {
+                            Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchRest])))
+                        }
+                    }
+                    Some(Arg::Rest { scope: 0 })
+                        if !las.unwrap().variables_defined.borrow().contains_key(spur) =>
                     {
                         Ok(SyntaxReturn::Code(Box::from([Bytecode::FetchRest])))
                     }

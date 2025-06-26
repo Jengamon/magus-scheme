@@ -5,7 +5,7 @@ members = [".", "datatest_parse", "magus_format", "magus_repl", "magus_web"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [workspace.dependencies]
 anyhow = "1.0.93"

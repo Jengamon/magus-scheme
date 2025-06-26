@@ -220,9 +220,7 @@ mod control {
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
             // get the continuation of the stack frame right above us
-            let cont = ctx
-                .thread_ref
-                .create_continuation(&ctx, Some((ctx.self_ptr, self)));
+            let cont = ctx.thread_ref.create_continuation();
 
             let cont_value = Value::Continuation(Gc::new(&ctx, cont)).into_ptr(&ctx);
 

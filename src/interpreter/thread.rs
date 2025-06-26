@@ -12,8 +12,8 @@ use crate::{
         convert::IntoValue,
         error::{SchemeError, SchemeErrorPtr, SchemeErrorType, StackFrame},
         lambda::{
-            Arity, DynamicWind, Lambda, LambdaError, LambdaReturn, NativeLambda,
-            NativeLambdaContext, NativeLambdaPtr,
+            Arity, DynamicWind, Lambda, LambdaError, LambdaReturn, NativeLambdaContext,
+            NativeLambdaPtr,
         },
         port::{InputPort, OutputPort, PortType, Readable, Writeable},
     },
@@ -702,7 +702,7 @@ impl<'gc> Thread<'gc> {
         };
 
         if let Some(frame) = frame {
-            self.calculate_after_frame(ctx, frame)
+            self.calculate_after_frame(ctx, &frame)
         } else {
             None
         }
@@ -711,7 +711,7 @@ impl<'gc> Thread<'gc> {
     fn calculate_after_frame(
         &self,
         ctx: &Context<'_, 'gc>,
-        frame: ThreadFrame<'gc>,
+        frame: &ThreadFrame<'gc>,
     ) -> Option<ThreadFrame<'gc>> {
         // used later
         let dynamic_wind = frame.dynamic_wind;
@@ -990,11 +990,7 @@ impl<'gc> Thread<'gc> {
     ///
     /// # Parameters
     /// - `is_tail`: will exclude the current frame if true.
-    pub fn create_continuation(
-        &self,
-        mc: &Mutation<'gc>,
-        in_native: Option<(NativeLambdaPtr<'gc>, &dyn NativeLambda<'gc>)>,
-    ) -> Continuation<'gc> {
+    pub fn create_continuation(&self) -> Continuation<'gc> {
         let frames_copy = (self.frames[..self.frames.len() - 1]).to_vec();
 
         Continuation::new(frames_copy)
@@ -2000,7 +1996,7 @@ impl<'gc> Thread<'gc> {
                             if is_continuable {
                                 make_error!(SchemeErrorType::RaiseContinuable(
                                     Value::resolve_into(error, interner.clone(), ctx.null_value),
-                                    Gc::new(&ctx, self.create_continuation(&ctx, None)),
+                                    Gc::new(&ctx, self.create_continuation()),
                                 ));
                             } else {
                                 make_error!(SchemeErrorType::Raise(Value::resolve_into(
@@ -2165,7 +2161,7 @@ impl<'gc> Thread<'gc> {
                                 LambdaError::Continuable(ce) => {
                                     make_error!(SchemeErrorType::RustContinuable(
                                         std::rc::Rc::new(ce),
-                                        Gc::new(&ctx, self.create_continuation(&ctx, None)),
+                                        Gc::new(&ctx, self.create_continuation()),
                                     ));
                                 }
                                 LambdaError::NonContinuable(e) => {

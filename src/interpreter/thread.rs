@@ -669,10 +669,11 @@ impl<'gc> Thread<'gc> {
         // "Wind frames" don't actually return..., so we pop the return value, but ignore it
         if !preserve_stack {
             if !wind_frame {
-                let ret_val = self.stack.pop();
-                if self.stack.len() >= bottom {
-                    self.stack.drain(bottom..);
-                }
+                let possible_ret_vals = self.stack.drain(bottom..).collect::<Vec<_>>();
+                let ret_val = possible_ret_vals
+                    .into_iter()
+                    .rfind(|v| !matches!(*v.borrow(), Value::Void));
+                // dbg!(ret_val);
                 // drain any extra value on stack
                 if let Some(ret) = ret_val {
                     let ret = if let Value::Lambda(Lambda::Compiled(cl)) = *ret.borrow() {
@@ -996,7 +997,31 @@ impl<'gc> Thread<'gc> {
         Continuation::new(frames_copy)
     }
 
-    fn handle_continuation(&mut self, mc: &Mutation<'gc>, c: ContinuationPtr<'gc>) {
+    fn handle_continuation(&mut self, mc: &Mutation<'gc>, c: ContinuationPtr<'gc>, args: usize) {
+        if args > 0 {
+            // pop the continued values, then
+            // pop values if they are void (and are not being returned!)
+            let values = self
+                .stack
+                .drain(self.stack.len().saturating_sub(args)..)
+                .collect::<Vec<_>>();
+            while self
+                .stack
+                .last()
+                .is_some_and(|s| matches!(*s.borrow(), Value::Void))
+            {
+                self.stack.pop();
+            }
+            if values.is_empty() {
+                self.stack.push(Value::Void.into_ptr(mc))
+            } else if values.len() == 1 {
+                self.stack.extend(values);
+            } else {
+                self.stack
+                    .push(Value::Values(Gc::new(mc, values)).into_ptr(mc));
+            }
+        }
+
         if c.frames.is_empty() {
             // For all frames we *left*, add their afters as frames
             let afters = self
@@ -1356,6 +1381,7 @@ impl<'gc> Thread<'gc> {
                         Bytecode::FetchUpvalue { index } => {
                             // Get the *actual* index or error
                             // dbg!((&self.upvalue_mapping, frame.upvalue_index));
+                            let oindex = index;
                             let Some(index) = self
                                 .upvalue_mapping
                                 .get(
@@ -1594,20 +1620,7 @@ impl<'gc> Thread<'gc> {
                                 }
                                 Value::Continuation(c) => {
                                     // Wrap the top *args* values into 1 value (or error with not enough values)
-                                    if args > 1 {
-                                        if self.stack.len() >= args {
-                                            let cont_input =
-                                                self.stack.drain(self.stack.len() - args..);
-                                            let values =
-                                                Value::Values(Gc::new(&ctx, cont_input.collect()))
-                                                    .into_ptr(&ctx);
-                                            self.stack.push(values);
-                                        } else {
-                                            make_error!(SchemeErrorType::NoValue(inst));
-                                            continue;
-                                        }
-                                    }
-                                    self.handle_continuation(&ctx, c);
+                                    self.handle_continuation(&ctx, c, args);
                                 }
                                 Value::Parameter(p) => {
                                     if args != 0 {
@@ -1963,7 +1976,7 @@ impl<'gc> Thread<'gc> {
                             if was_error {
                                 if let Some(cont) = error.and_then(|e| e.error_type.continuation())
                                 {
-                                    self.handle_continuation(&ctx, cont);
+                                    self.handle_continuation(&ctx, cont, 1);
                                 }
                             } else if let Some(after) = self.handle_frame_end(&ctx, true, false) {
                                 self.frames.push(after);
@@ -1971,7 +1984,7 @@ impl<'gc> Thread<'gc> {
                         }
                         Ok(LambdaReturn::ReturnHandler) if was_error => {
                             if let Some(cont) = error.and_then(|e| e.error_type.continuation()) {
-                                self.handle_continuation(&ctx, cont);
+                                self.handle_continuation(&ctx, cont, 1);
                             } else if let Some(after) = self.handle_frame_end(&ctx, true, false) {
                                 self.frames.push(after);
                             }
@@ -1980,14 +1993,9 @@ impl<'gc> Thread<'gc> {
                             make_error!(SchemeErrorType::InvalidReturnHandler);
                         }
                         Ok(LambdaReturn::Continue { cont, args }) => {
-                            if args.len() > 1 {
-                                self.stack
-                                    .push(Value::Values(Gc::new(&ctx, args)).into_ptr(&ctx));
-                            } else {
-                                // |args| <= 1, so this is correct
-                                self.stack.extend(args.first());
-                            }
-                            self.handle_continuation(&ctx, cont);
+                            let argsc = args.len();
+                            self.stack.extend(args);
+                            self.handle_continuation(&ctx, cont, argsc);
                         }
                         Ok(LambdaReturn::Raise {
                             error,

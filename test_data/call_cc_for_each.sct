@@ -1,7 +1,7 @@
 ---
 (0 1 2 you-fell-off-the-end)
 ---
-(import (only (scheme base) define for-each lambda set! call-with-current-continuation quote cons reverse cons))
+(import (only (scheme base) define for-each lambda set! call-with-current-continuation quote list))
 ;; [LISTOF X] -> ( -> X u 'you-fell-off-the-end)
 (define (generate-one-element-at-a-time lst)
   ;; Both internal functions are closures over lst
@@ -32,9 +32,9 @@
 
 (define generate-digit
   (generate-one-element-at-a-time '(0 1 2)))
-(define x '())
-(set! x (cons (generate-digit) x)) ;; 0
-(set! x (cons (generate-digit) x)) ;; 1
-(set! x (cons (generate-digit) x)) ;; 2
-(set! x (cons (generate-digit) x)) ;; you-fell-off-the-end
-(reverse x)
+(list
+  (generate-digit) ;; 0
+  (generate-digit) ;; 1
+  (generate-digit) ;; 2
+  (generate-digit) ;; you-fell-off-the-end
+)

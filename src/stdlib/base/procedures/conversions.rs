@@ -4,7 +4,9 @@ use num::{BigInt, BigRational, BigUint, One, bigint::Sign};
 
 use crate::{
     Value,
-    runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+    runtime::lambda::{
+        Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext, NativeLambdaState,
+    },
     value::{self, ConsCell, Number},
 };
 
@@ -22,7 +24,8 @@ impl<'gc> NativeLambda<'gc> for Exact {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[crate::ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -54,7 +57,8 @@ impl<'gc> NativeLambda<'gc> for Inexact {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[crate::ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -81,7 +85,8 @@ impl<'gc> NativeLambda<'gc> for NumberToString {
         Arity::Bounded { min: 1, max: 2 }
     }
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[crate::ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -225,7 +230,8 @@ impl<'gc> NativeLambda<'gc> for StringToNumber {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[crate::ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -737,7 +743,8 @@ impl<'gc> NativeLambda<'gc> for StringToSymbol {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[crate::ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -769,7 +776,8 @@ impl<'gc> NativeLambda<'gc> for SymbolToString {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[crate::ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -805,7 +813,8 @@ impl<'gc> NativeLambda<'gc> for ListToString {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[crate::ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -853,7 +862,8 @@ impl<'gc> NativeLambda<'gc> for StringToList {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[crate::ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -939,7 +949,8 @@ impl<'gc> NativeLambda<'gc> for Utf8ToString {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[crate::ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -1025,7 +1036,8 @@ impl<'gc> NativeLambda<'gc> for StringToUtf8 {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[crate::ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -1109,7 +1121,8 @@ impl<'gc> NativeLambda<'gc> for CharToInteger {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[crate::ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -1140,7 +1153,8 @@ impl<'gc> NativeLambda<'gc> for IntegerToChar {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[crate::ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {

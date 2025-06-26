@@ -30,7 +30,7 @@ mod error {
     use gc_arena::Collect;
 
     use crate::runtime::lambda::{
-        Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext,
+        Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext, NativeLambdaState,
     };
 
     #[derive(Debug, Collect)]
@@ -47,7 +47,8 @@ mod error {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             _ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -72,7 +73,8 @@ mod error {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             _ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -90,7 +92,9 @@ mod equality {
 
     use crate::{
         Value,
-        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        runtime::lambda::{
+            Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext, NativeLambdaState,
+        },
     };
 
     #[derive(Collect, Debug)]
@@ -107,7 +111,8 @@ mod equality {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -139,7 +144,8 @@ mod equality {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -163,7 +169,8 @@ mod equality {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -180,7 +187,7 @@ mod control {
     use crate::{
         Value, compiler,
         runtime::lambda::{
-            Arity, ContinuationValue, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext,
+            Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext, NativeLambdaState,
         },
         value::ConsCell,
     };
@@ -207,7 +214,8 @@ mod control {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -242,10 +250,6 @@ mod control {
                 ))?,
             }
         }
-
-        fn continuation(&self, _mc: &gc_arena::Mutation<'gc>) -> ContinuationValue<'gc> {
-            ContinuationValue::Null
-        }
     }
 
     #[derive(Collect, Debug)]
@@ -262,7 +266,8 @@ mod control {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -333,7 +338,8 @@ mod control {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             _args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -371,7 +377,8 @@ mod control {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -426,7 +433,9 @@ mod comparison {
 
     use crate::{
         Value, ValuePtr,
-        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        runtime::lambda::{
+            Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext, NativeLambdaState,
+        },
         value::NumberPtr,
     };
 
@@ -469,7 +478,8 @@ mod comparison {
                 }
 
                 fn run(
-                    &mut self,
+                    &self,
+                    _state: &mut NativeLambdaState<'gc>,
                     ctx: NativeLambdaContext<'_, 'gc>,
                     args: &[ValuePtr<'gc>],
                 ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -546,7 +556,9 @@ mod math {
     // TODO Add Complex, InexactComplex support
     use crate::{
         Value,
-        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        runtime::lambda::{
+            Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext, NativeLambdaState,
+        },
         value::Number,
     };
     use either::Either;
@@ -567,7 +579,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -665,7 +678,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -710,7 +724,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -754,7 +769,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -819,7 +835,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -865,7 +882,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -945,7 +963,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -1034,7 +1053,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -1121,7 +1141,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -1156,7 +1177,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -1190,7 +1212,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -1225,7 +1248,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -1261,7 +1285,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -1311,7 +1336,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -1359,7 +1385,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -1452,7 +1479,8 @@ mod math {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -1533,14 +1561,14 @@ mod math {
 
 mod list {
     use either::Either;
-    use gc_arena::{Collect, Gc, RefLock, unsize};
+    use gc_arena::{Collect, Gc, Rootable};
     use num::BigInt;
 
     use crate::{
-        Value, ValuePtr, ValueType,
+        Any, Value, ValuePtr, ValueType,
         runtime::lambda::{
-            Arity, ContinuationValue, Lambda, LambdaResult, LambdaReturn, NativeLambda,
-            NativeLambdaContext,
+            Arity, Lambda, LambdaResult, LambdaReturn, NativeLambda, NativeLambdaContext,
+            NativeLambdaState,
         },
         value::{ConsCell, ContinuationPtr, Number},
     };
@@ -1558,7 +1586,8 @@ mod list {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> LambdaResult<'gc> {
@@ -1589,7 +1618,8 @@ mod list {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> LambdaResult<'gc> {
@@ -1628,7 +1658,8 @@ mod list {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> LambdaResult<'gc> {
@@ -1667,7 +1698,8 @@ mod list {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> LambdaResult<'gc> {
@@ -1706,7 +1738,8 @@ mod list {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> LambdaResult<'gc> {
@@ -1745,7 +1778,8 @@ mod list {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> LambdaResult<'gc> {
@@ -1763,11 +1797,9 @@ mod list {
         }
     }
 
-    #[derive(Debug, Collect, Default)]
+    #[derive(Debug, Collect)]
     #[collect(no_drop)]
-    pub struct Map<'gc> {
-        state: Option<MapState<'gc>>,
-    }
+    pub struct Map;
 
     #[derive(Collect, Debug, Clone)]
     #[collect(no_drop)]
@@ -1795,7 +1827,7 @@ mod list {
         }
     }
 
-    impl<'gc> NativeLambda<'gc> for Map<'gc> {
+    impl<'gc> NativeLambda<'gc> for Map {
         fn name(&self) -> &str {
             "map"
         }
@@ -1805,11 +1837,12 @@ mod list {
         }
 
         fn run(
-            &mut self,
+            &self,
+            state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
-            if ctx.stack.is_empty() {
+            if state.is_none() {
                 // We are in a fresh call, reset state and start work
                 let proc = match *args[0].borrow() {
                     Value::Lambda(l) => Either::Left(l),
@@ -1870,7 +1903,7 @@ mod list {
                 // Get the first value of each list to call the proc!
                 let first_values: Vec<_> = lists.iter().map(|l| l[0]).collect();
 
-                let state = MapState {
+                let new_state = MapState {
                     // We evaluate 0 *right now*
                     index: 1,
                     max,
@@ -1878,10 +1911,11 @@ mod list {
                     proc: proc.into(),
                     results: vec![],
                 };
+                let new_state = Any::new::<Rootable![MapState<'_>]>(&ctx, new_state);
 
-                self.state = Some(state);
+                *state = Some(new_state);
 
-                match proc {
+                return match proc {
                     Either::Left(lambda) => Ok(LambdaReturn::Call {
                         lambda,
                         args: first_values,
@@ -1892,72 +1926,64 @@ mod list {
                         cont,
                         args: first_values,
                     }),
-                }
+                };
+            }
+
+            let Some(MapState {
+                index,
+                max,
+                lists,
+                proc,
+                mut results,
+            }) = state
+                .as_ref()
+                .and_then(|a| a.downcast::<Rootable![MapState<'_>]>().cloned())
+            else {
+                unreachable!()
+            };
+
+            let result = ctx.stack.last().copied().unwrap();
+            results.push(result);
+
+            if index == max {
+                Ok(LambdaReturn::Return(vec![ConsCell::from_iter(
+                    &ctx,
+                    ctx.thread_ctx.null_value,
+                    results,
+                )]))
             } else {
-                // Resume where we left off
-                let Some(MapState {
-                    index,
+                // Still more results to evaluate
+                let values: Vec<_> = lists.iter().map(|l| l[index]).collect();
+
+                let new_state = MapState {
+                    index: index + 1,
                     max,
                     lists,
-                    proc,
-                    mut results,
-                }) = self.state.take()
-                else {
-                    // if the stack is *not* empty, we should have some state
-                    // (if we don't, we are probably being called from a continuation after we've finished)
-                    // for map b/c we expect a value, we error
-                    return Err(anyhow::anyhow!("{}: terminated", self.name()))?;
+                    proc: proc.clone(),
+                    results,
                 };
+                let new_state = Any::new::<Rootable![MapState<'_>]>(&ctx, new_state);
 
-                let result = ctx.stack.last().copied().unwrap();
-                results.push(result);
+                *state = Some(new_state);
 
-                if index == max {
-                    Ok(LambdaReturn::Return(vec![ConsCell::from_iter(
-                        &ctx,
-                        ctx.thread_ctx.null_value,
-                        results,
-                    )]))
-                } else {
-                    // Still more results to evaluate
-                    let values: Vec<_> = lists.iter().map(|l| l[index]).collect();
-                    self.state = Some(MapState {
-                        index: index + 1,
-                        max,
-                        lists,
-                        proc: proc.clone(),
-                        results,
-                    });
-
-                    match proc {
-                        Procedure::Lambda(lambda) => Ok(LambdaReturn::Call {
-                            lambda,
-                            args: values,
-                            env: None,
-                            dynamic_wind: None,
-                        }),
-                        Procedure::Continuation(cont) => {
-                            Ok(LambdaReturn::Continue { cont, args: values })
-                        }
+                match proc {
+                    Procedure::Lambda(lambda) => Ok(LambdaReturn::Call {
+                        lambda,
+                        args: values,
+                        env: None,
+                        dynamic_wind: None,
+                    }),
+                    Procedure::Continuation(cont) => {
+                        Ok(LambdaReturn::Continue { cont, args: values })
                     }
                 }
             }
         }
-
-        fn continuation(&self, mc: &gc_arena::Mutation<'gc>) -> ContinuationValue<'gc> {
-            ContinuationValue::Given(unsize! [
-                Gc::new(mc, RefLock::new(Self {
-                    state: self.state.clone()
-                })) => RefLock<dyn NativeLambda<'gc> + 'gc>
-            ])
-        }
     }
 
-    #[derive(Debug, Collect, Default)]
+    #[derive(Debug, Collect)]
     #[collect(no_drop)]
-    pub struct ForEach<'gc> {
-        state: Option<ForEachState<'gc>>,
-    }
+    pub struct ForEach;
 
     #[derive(Collect, Debug, Clone)]
     #[collect(no_drop)]
@@ -1968,7 +1994,7 @@ mod list {
         proc: Procedure<'gc>,
     }
 
-    impl<'gc> NativeLambda<'gc> for ForEach<'gc> {
+    impl<'gc> NativeLambda<'gc> for ForEach {
         fn name(&self) -> &str {
             "for-each"
         }
@@ -1978,42 +2004,12 @@ mod list {
         }
 
         fn run(
-            &mut self,
+            &self,
+            state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
-            if let Some(ForEachState {
-                index,
-                max,
-                lists,
-                proc,
-            }) = self.state.take()
-            {
-                if index == max {
-                    Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]))
-                } else {
-                    // Still more results to evaluate
-                    let values: Vec<_> = lists.iter().map(|l| l[index]).collect();
-                    self.state = Some(ForEachState {
-                        index: index + 1,
-                        max,
-                        lists,
-                        proc: proc.clone(),
-                    });
-
-                    match proc {
-                        Procedure::Lambda(lambda) => Ok(LambdaReturn::Call {
-                            lambda,
-                            args: values,
-                            env: None,
-                            dynamic_wind: None,
-                        }),
-                        Procedure::Continuation(cont) => {
-                            Ok(LambdaReturn::Continue { cont, args: values })
-                        }
-                    }
-                }
-            } else if ctx.stack.is_empty() {
+            if state.is_none() {
                 // We are in a fresh call, reset state and start work
                 let proc = match *args[0].borrow() {
                     Value::Lambda(l) => Either::Left(l),
@@ -2078,16 +2074,17 @@ mod list {
                 // Get the first value of each list to call the proc!
                 let first_values: Vec<_> = lists.iter().map(|l| l[0]).collect();
 
-                let state = ForEachState {
+                let new_state = ForEachState {
                     index: 1,
                     max,
                     lists,
                     proc: proc.into(),
                 };
+                let new_state = Any::new::<Rootable![ForEachState<'_>]>(&ctx, new_state);
 
-                self.state = Some(state);
+                *state = Some(new_state);
 
-                match proc {
+                return match proc {
                     Either::Left(lambda) => Ok(LambdaReturn::Call {
                         lambda,
                         args: first_values,
@@ -2098,18 +2095,49 @@ mod list {
                         cont,
                         args: first_values,
                     }),
-                }
-            } else {
-                return Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]));
+                };
             }
-        }
 
-        fn continuation(&self, mc: &gc_arena::Mutation<'gc>) -> ContinuationValue<'gc> {
-            ContinuationValue::Given(unsize! [
-                Gc::new(mc, RefLock::new(Self {
-                    state: self.state.clone()
-                })) => RefLock<dyn NativeLambda<'gc> + 'gc>
-            ])
+            let Some(ForEachState {
+                index,
+                max,
+                lists,
+                proc,
+            }) = state
+                .as_ref()
+                .and_then(|a| a.downcast::<Rootable![ForEachState<'_>]>())
+            else {
+                unreachable!()
+            };
+
+            if index == max {
+                Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]))
+            } else {
+                // Still more results to evaluate
+                let values: Vec<_> = lists.iter().map(|l| l[*index]).collect();
+
+                let new_state = ForEachState {
+                    index: index + 1,
+                    max: *max,
+                    lists: lists.clone(),
+                    proc: proc.clone(),
+                };
+                let new_state = Any::new::<Rootable![ForEachState<'_>]>(&ctx, new_state);
+
+                *state = Some(new_state);
+
+                match *proc {
+                    Procedure::Lambda(lambda) => Ok(LambdaReturn::Call {
+                        lambda,
+                        args: values,
+                        env: None,
+                        dynamic_wind: None,
+                    }),
+                    Procedure::Continuation(cont) => {
+                        Ok(LambdaReturn::Continue { cont, args: values })
+                    }
+                }
+            }
         }
     }
 
@@ -2127,7 +2155,8 @@ mod list {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
@@ -2183,7 +2212,8 @@ mod list {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
@@ -2250,7 +2280,8 @@ mod list {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
@@ -2293,7 +2324,8 @@ mod list {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
@@ -2330,7 +2362,9 @@ mod vector {
 
     use crate::{
         Value,
-        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        runtime::lambda::{
+            Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext, NativeLambdaState,
+        },
         value::{Number, Vector},
     };
 
@@ -2348,7 +2382,8 @@ mod vector {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             _ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -2392,7 +2427,8 @@ mod vector {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -2423,7 +2459,8 @@ mod vector {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -2474,7 +2511,9 @@ mod bytevector {
 
     use crate::{
         Value,
-        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        runtime::lambda::{
+            Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext, NativeLambdaState,
+        },
         value::Number,
     };
 
@@ -2492,7 +2531,8 @@ mod bytevector {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -2540,7 +2580,8 @@ mod bytevector {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -2604,7 +2645,9 @@ mod string {
 
     use crate::{
         Value,
-        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        runtime::lambda::{
+            Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext, NativeLambdaState,
+        },
         value::Number,
     };
 
@@ -2623,7 +2666,8 @@ mod string {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -2664,7 +2708,8 @@ mod string {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -2747,7 +2792,8 @@ mod string {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -2820,7 +2866,8 @@ mod string {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -2855,7 +2902,8 @@ mod string {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -2891,7 +2939,8 @@ mod string {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -2938,7 +2987,9 @@ mod predicates {
 
     use crate::{
         Value,
-        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        runtime::lambda::{
+            Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext, NativeLambdaState,
+        },
         value::Number,
     };
 
@@ -2966,7 +3017,8 @@ mod predicates {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -2994,7 +3046,8 @@ mod predicates {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3018,7 +3071,8 @@ mod predicates {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3042,7 +3096,8 @@ mod predicates {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3067,7 +3122,8 @@ mod predicates {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3092,7 +3148,8 @@ mod predicates {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3116,7 +3173,8 @@ mod predicates {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3140,7 +3198,8 @@ mod predicates {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3165,7 +3224,8 @@ mod predicates {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3198,7 +3258,8 @@ mod predicates {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3231,7 +3292,8 @@ mod predicates {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3259,7 +3321,8 @@ mod predicates {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3286,7 +3349,8 @@ mod predicates {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3310,7 +3374,8 @@ mod predicates {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3334,7 +3399,8 @@ mod predicates {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3350,7 +3416,7 @@ mod structure {
 
     use crate::{
         Value,
-        runtime::lambda::{Arity, LambdaReturn, NativeLambda},
+        runtime::lambda::{Arity, LambdaReturn, NativeLambda, NativeLambdaState},
     };
 
     // Stuff like cons and values (and dealing with values)
@@ -3369,7 +3435,8 @@ mod structure {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: crate::runtime::lambda::NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<crate::runtime::lambda::LambdaReturn<'gc>, crate::runtime::lambda::LambdaError>
@@ -3398,7 +3465,8 @@ mod structure {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: crate::runtime::lambda::NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
@@ -3456,7 +3524,8 @@ mod structure {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: crate::runtime::lambda::NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<crate::runtime::lambda::LambdaReturn<'gc>, crate::runtime::lambda::LambdaError>
@@ -3474,7 +3543,9 @@ mod ports {
 
     use crate::{
         Value, ValuePtr,
-        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        runtime::lambda::{
+            Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext, NativeLambdaState,
+        },
     };
 
     #[derive(Debug, Collect)]
@@ -3491,7 +3562,8 @@ mod ports {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             _args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3515,7 +3587,8 @@ mod ports {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             _args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -3539,7 +3612,8 @@ mod ports {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             _args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {

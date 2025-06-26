@@ -6,6 +6,7 @@ use crate::{
     compiler::{ListHead, ProgramData, ProgramPtr},
     runtime::lambda::{
         Arity, CompiledLambda, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext,
+        NativeLambdaState,
     },
     value::Parameter,
 };
@@ -24,7 +25,8 @@ impl<'gc> NativeLambda<'gc> for MakeParameter {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[crate::ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {

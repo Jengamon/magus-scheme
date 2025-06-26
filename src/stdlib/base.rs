@@ -2,7 +2,7 @@
 
 use std::{collections::HashSet, sync::Arc};
 
-use gc_arena::{Gc, RefLock, unsize};
+use gc_arena::{Gc, unsize};
 
 use crate::{
     LibraryName,
@@ -465,7 +465,7 @@ impl Module for Base {
             ($lmb:expr) => {
                  Some(
                     lambda::Lambda::Native(
-                        unsize![Gc::new(mc, RefLock::new($lmb)) => RefLock<dyn lambda::NativeLambda>],
+                        unsize![Gc::new(mc, $lmb) => dyn lambda::NativeLambda],
                     )
                     .into_value(mc)
                     .into_ptr(mc),
@@ -519,8 +519,8 @@ impl Module for Base {
             "odd?" => lambda!(IsOdd),
             "with-exception-handler" => lambda!(WithExceptionHandler),
             "exact-integer-sqrt" => lambda!(ExactIntegerSqrt),
-            "map" => lambda!(Map::default()),
-            "for-each" => lambda!(ForEach::default()),
+            "map" => lambda!(Map),
+            "for-each" => lambda!(ForEach),
             "list->string" => lambda!(ListToString),
             "string->list" => lambda!(StringToList),
             "list?" => lambda!(IsList),

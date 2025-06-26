@@ -5,14 +5,16 @@ use crate::{
     library_name,
     runtime::{convert::IntoValue, lambda},
 };
-use gc_arena::{Gc, RefLock, unsize};
+use gc_arena::{Gc, unsize};
 
 mod procedures {
     use gc_arena::Collect;
 
     use crate::{
         Value, ValuePtr,
-        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        runtime::lambda::{
+            Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext, NativeLambdaState,
+        },
         value::{ModeDisplay, ModeWrite},
     };
 
@@ -28,7 +30,8 @@ mod procedures {
                 }
 
                 fn run(
-                    &mut self,
+                    &self,
+                    _state: &mut NativeLambdaState<'gc>,
                     ctx: NativeLambdaContext<'_, 'gc>,
                     args: &[ValuePtr<'gc>],
                 ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -120,7 +123,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -199,7 +203,7 @@ impl Module for Write {
             ($lmb:expr) => {
                  Some(
                     lambda::Lambda::Native(
-                        unsize![Gc::new(mc, RefLock::new($lmb)) => RefLock<dyn lambda::NativeLambda>],
+                        unsize![Gc::new(mc, $lmb) => dyn lambda::NativeLambda],
                     )
                     .into_value(mc)
                     .into_ptr(mc),

@@ -4,7 +4,7 @@ use gc_arena::{Collect, Gc, Mutation, RefLock, Static};
 use std::collections::HashMap;
 
 use crate::{
-    Fuel, Value, ValueType,
+    Any, Fuel, Value, ValueType,
     bytecode::{Bytecode, ChunkPtr, ImportFallback, SourceData},
     compiler::World,
     environment::{GetError, StackEnvironment, StackEnvironmentPtr},
@@ -12,7 +12,7 @@ use crate::{
         convert::IntoValue,
         error::{SchemeError, SchemeErrorPtr, SchemeErrorType, StackFrame},
         lambda::{
-            Arity, ContinuationValue, DynamicWind, Lambda, LambdaError, LambdaReturn, NativeLambda,
+            Arity, DynamicWind, Lambda, LambdaError, LambdaReturn, NativeLambda,
             NativeLambdaContext, NativeLambdaPtr,
         },
         port::{InputPort, OutputPort, PortType, Readable, Writeable},
@@ -38,6 +38,7 @@ pub enum Execution<'gc> {
     },
     Native {
         native: NativeLambdaPtr<'gc>,
+        state: Option<Any<'gc, ()>>,
     },
 }
 
@@ -57,7 +58,14 @@ impl<'gc> Execution<'gc> {
         prev_fallback: ImportFallback<'gc>,
     ) -> (Self, Option<usize>, Option<StackEnvironmentPtr<'gc>>) {
         match lambda {
-            Lambda::Native(gc) => (Self::Native { native: gc }, None, None),
+            Lambda::Native(gc) => (
+                Self::Native {
+                    native: gc,
+                    state: None,
+                },
+                None,
+                None,
+            ),
             Lambda::Compiled(gc) => (
                 Self::Bytecode {
                     chunk: gc.chunk,
@@ -112,11 +120,15 @@ impl PartialEq for Execution<'_> {
                     && (matches!((fallback, ofallback), (None, None))
                         || matches!((fallback, ofallback), (Some(f), Some(of)) if Gc::ptr_eq(*f, *of)))
             }
-            Execution::Native { native } => {
-                let Self::Native { native: onative } = other else {
+            Execution::Native { native, state } => {
+                let Self::Native {
+                    native: onative,
+                    state: ostate,
+                } = other
+                else {
                     return false;
                 };
-                Gc::ptr_eq(*native, *onative)
+                Gc::ptr_eq(*native, *onative) && state == ostate
             }
         }
     }
@@ -983,40 +995,7 @@ impl<'gc> Thread<'gc> {
         mc: &Mutation<'gc>,
         in_native: Option<(NativeLambdaPtr<'gc>, &dyn NativeLambda<'gc>)>,
     ) -> Continuation<'gc> {
-        let frames_copy =
-            (self.frames[..self.frames.len() - 1])
-                .iter()
-                .fold(vec![], |mut cont, f| {
-                    match f.execution {
-                        Execution::Native { native } => match if let Some((nptr, nbrw)) = in_native
-                        {
-                            if Gc::ptr_eq(native, nptr) {
-                                nbrw.continuation(mc)
-                            } else {
-                                native.borrow().continuation(mc)
-                            }
-                        } else {
-                            native.borrow().continuation(mc)
-                        } {
-                            ContinuationValue::Given(ptr) => cont.push(ThreadFrame {
-                                execution: Execution::Native { native: ptr },
-                                ..f.clone()
-                            }),
-                            ContinuationValue::CopySelf => {
-                                cont.push(f.clone());
-                            }
-                            ContinuationValue::Null => {
-                                cont.clear();
-                            }
-                            ContinuationValue::Empty => {}
-                        },
-                        _ => {
-                            cont.push(f.clone());
-                        }
-                    };
-
-                    cont
-                });
+        let frames_copy = (self.frames[..self.frames.len() - 1]).to_vec();
 
         Continuation::new(frames_copy)
     }
@@ -1902,27 +1881,11 @@ impl<'gc> Thread<'gc> {
                         Bytecode::Macro { index, env_id } => todo!(),
                     }
                 }
-                Execution::Native { native } => {
+                Execution::Native { native, state } => {
                     // TODO Remeber to check when [call-end] a native call to check for non-continuable errors
                     // TODO Remember to handle dynamic-wind properly when processing LambdaReturn::Continue
                     fuel.consume(Self::NATIVE_COST);
-                    // Make all our data fixed and nice to borrow
-                    let native = match native.borrow().continuation(&ctx) {
-                        ContinuationValue::Given(ptr) => ptr,
-                        _ => *native,
-                    };
-                    macro_rules! update_native {
-                        () => {{
-                            let Some(frame) = self.frames.last_mut() else {
-                                unreachable!();
-                            };
-                            let Execution::Native { native: native_ptr } = &mut frame.execution
-                            else {
-                                unreachable!();
-                            };
-                            *native_ptr = native;
-                        }};
-                    }
+                    let native = *native;
                     // reset stack if the frame is erroring, but doesn't have an exception set
                     if self.error.is_some()
                         && frame.exception.is_none()
@@ -1931,6 +1894,7 @@ impl<'gc> Thread<'gc> {
                         frame.bottom = self.stack.len();
                         // self.stack.drain(frame.bottom..);
                     }
+                    let mut frame_state = *state;
                     let Some(frame) = self.frames.last() else {
                         unreachable!()
                     };
@@ -1964,15 +1928,22 @@ impl<'gc> Thread<'gc> {
                     let res = if let Some(err) = error {
                         // Let native code interfere with errors
                         was_error = true;
-                        native.borrow_mut(lctx.thread_ctx.mc).error(lctx, args, err)
+                        native.error(&mut frame_state, lctx, args, err)
                     } else {
                         was_error = false;
-                        native.borrow_mut(lctx.thread_ctx.mc).run(lctx, args)
+                        native.run(&mut frame_state, lctx, args)
                     };
                     // rebind frame to be mutable
                     let Some(frame) = self.frames.last_mut() else {
                         unreachable!()
                     };
+                    // install changed state into frame
+                    {
+                        let Execution::Native { state, .. } = &mut frame.execution else {
+                            unreachable!()
+                        };
+                        *state = frame_state;
+                    }
                     // if let Ok(ret) = res.as_ref() {
                     //     println!("-> {ret}");
                     // }
@@ -1982,7 +1953,6 @@ impl<'gc> Thread<'gc> {
                             // Call interrupt (in case the lambda itself doesn't) so that
                             // the interpreter loop is disrupted
                             fuel.interrupt();
-                            update_native!();
                             continue;
                         }
                         Ok(LambdaReturn::Return(vals)) => {
@@ -2071,7 +2041,6 @@ impl<'gc> Thread<'gc> {
                                 lambda
                             };
                             let wind_frame = frame.wind_frame;
-                            update_native!();
                             if let Err(err) = self.call_lambda(
                                 &ctx,
                                 lambda,
@@ -2091,8 +2060,6 @@ impl<'gc> Thread<'gc> {
                             let frame_ids = self.frames.iter().map(|f| f.id).collect::<Vec<_>>();
                             let base_value = parameter.borrow().base_value(&frame_ids);
                             self.stack.push(base_value);
-                            update_native!();
-
                             if let Some(convert) = parameter.borrow().convert {
                                 let convert = if convert.needs_label() {
                                     convert.label(
@@ -2146,7 +2113,6 @@ impl<'gc> Thread<'gc> {
                                 lambda
                             };
                             let wind_frame = frame.wind_frame;
-                            update_native!();
                             if let Err(err) = self.call_lambda(
                                 &ctx,
                                 lambda,

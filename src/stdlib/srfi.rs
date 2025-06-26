@@ -60,7 +60,7 @@ pub mod list {
 
 /// SRFI 151: bitwise operations
 pub mod bitwise {
-    use gc_arena::{Gc, RefLock, unsize};
+    use gc_arena::{Gc, unsize};
 
     use crate::{
         LibraryName, Registerable,
@@ -76,6 +76,7 @@ pub mod bitwise {
             Value,
             runtime::lambda::{
                 Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext,
+                NativeLambdaState,
             },
             value::{ConsCell, Number},
         };
@@ -94,7 +95,8 @@ pub mod bitwise {
             }
 
             fn run(
-                &mut self,
+                &self,
+                _state: &mut NativeLambdaState<'gc>,
                 ctx: NativeLambdaContext<'_, 'gc>,
                 args: &[crate::ValuePtr<'gc>],
             ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -130,7 +132,8 @@ pub mod bitwise {
             }
 
             fn run(
-                &mut self,
+                &self,
+                _state: &mut NativeLambdaState<'gc>,
                 ctx: NativeLambdaContext<'_, 'gc>,
                 args: &[crate::ValuePtr<'gc>],
             ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -205,7 +208,7 @@ pub mod bitwise {
                 ($lmb:expr) => {
                      Some(
                         lambda::Lambda::Native(
-                            unsize![Gc::new(mc, RefLock::new($lmb)) => RefLock<dyn lambda::NativeLambda>],
+                            unsize![Gc::new(mc, $lmb) => dyn lambda::NativeLambda],
                         )
                         .into_value(mc)
                         .into_ptr(mc),

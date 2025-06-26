@@ -7,7 +7,7 @@ use crate::{
     runtime::{convert::IntoValue, lambda},
 };
 
-use gc_arena::{Gc, RefLock, unsize};
+use gc_arena::{Gc, unsize};
 use procedures::{Help, SetHelp};
 
 mod procedures {
@@ -15,7 +15,7 @@ mod procedures {
 
     use crate::{
         Value,
-        runtime::lambda::{Arity, LambdaReturn, NativeLambda},
+        runtime::lambda::{Arity, LambdaReturn, NativeLambda, NativeLambdaState},
         value,
     };
 
@@ -33,7 +33,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: crate::runtime::lambda::NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
@@ -66,7 +67,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: crate::runtime::lambda::NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
@@ -114,7 +116,7 @@ impl Module for MagusHelp {
             ($lmb:expr) => {
                  Some(
                     lambda::Lambda::Native(
-                        unsize![Gc::new(mc, RefLock::new($lmb)) => RefLock<dyn lambda::NativeLambda>],
+                        unsize![Gc::new(mc, $lmb) => dyn lambda::NativeLambda],
                     )
                     .into_value(mc)
                     .into_ptr(mc),

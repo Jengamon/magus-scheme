@@ -4,7 +4,9 @@ use gc_arena::{Collect, Gc, RefLock, Rootable};
 use crate::{
     Value, ValuePtr,
     runtime::{
-        lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        lambda::{
+            Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext, NativeLambdaState,
+        },
         userstruct::UserStruct,
     },
     value::String,
@@ -41,7 +43,8 @@ impl<'gc> NativeLambda<'gc> for Error {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -82,7 +85,8 @@ impl<'gc> NativeLambda<'gc> for IsErrorObject {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -107,7 +111,8 @@ impl<'gc> NativeLambda<'gc> for ErrorObjectMessage {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError> {

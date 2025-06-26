@@ -12,7 +12,9 @@ mod procedures {
 
     use crate::{
         Value, ValuePtr,
-        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        runtime::lambda::{
+            Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext, NativeLambdaState,
+        },
     };
 
     #[derive(Debug, Collect)]
@@ -28,7 +30,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -59,7 +62,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -90,7 +94,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -121,7 +126,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -152,7 +158,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -183,7 +190,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -237,7 +245,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -268,7 +277,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -323,7 +333,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -356,7 +367,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -391,7 +403,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -424,7 +437,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
@@ -480,7 +494,7 @@ impl Module for Inexact {
             ($lmb:expr) => {
                  Some(
                     $crate::runtime::lambda::Lambda::Native(
-                        gc_arena::unsize![gc_arena::Gc::new(mc, gc_arena::RefLock::new($lmb)) => gc_arena::RefLock<dyn $crate::runtime::lambda::NativeLambda>],
+                        gc_arena::unsize![gc_arena::Gc::new(mc, $lmb) => dyn $crate::runtime::lambda::NativeLambda],
                     )
                     .into_value(mc)
                     .into_ptr(mc),

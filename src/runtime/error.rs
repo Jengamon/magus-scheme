@@ -249,7 +249,7 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
                                     if f.alternate() {
                                         String::new()
                                     } else {
-                                        format!(" 0x{:x}", (&raw const *native.borrow()).addr())
+                                        format!(" 0x{:x}", (&raw const *native).addr())
                                     }
                                 ),
                             }
@@ -273,9 +273,9 @@ impl<'gc, R: lasso::Resolver> fmt::Display for DisplaySchemeError<'_, 'gc, R> {
                                 if f.alternate() {
                                     String::new()
                                 } else {
-                                    format!(" 0x{:x}", (&raw const *native.borrow()).addr())
+                                    format!(" 0x{:x}", (&raw const *native).addr())
                                 },
-                                native.borrow().name(),
+                                native.name(),
                             ),
                         }
                     )?;

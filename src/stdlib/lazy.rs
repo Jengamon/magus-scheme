@@ -8,7 +8,7 @@ use crate::{
     runtime::{convert::IntoValue, lambda},
 };
 
-use gc_arena::{Gc, RefLock, unsize};
+use gc_arena::{Gc, unsize};
 
 pub use procedures::{Force, IsPromise, MakePromise};
 pub use syntax::{Delay, DelayForce};
@@ -121,8 +121,9 @@ mod syntax {
                             // Reject non-value delay
                             anyhow::bail!("delay-force: missing value(s) to return")
                         }
-                        let force_lambda = ctx.add_native_lambda(unsize!(Gc::new(ctx,
-                                RefLock::new(procedures::Force)) => RefLock<dyn NativeLambda>));
+                        let force_lambda = ctx.add_native_lambda(
+                            unsize!(Gc::new(ctx, procedures::Force) => dyn NativeLambda),
+                        );
                         let code = compiler.compile_code(ctx, args[0])?.into_bytecode();
                         let mut labels = if let Some(source) = args[0].source {
                             [(0, source)].into_iter().collect()
@@ -189,7 +190,9 @@ mod procedures {
     use crate::{
         Value,
         environment::StackEnvironment,
-        runtime::lambda::{Arity, LambdaResult, LambdaReturn, NativeLambda, NativeLambdaContext},
+        runtime::lambda::{
+            Arity, LambdaResult, LambdaReturn, NativeLambda, NativeLambdaContext, NativeLambdaState,
+        },
         value::Promise,
     };
 
@@ -207,7 +210,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> LambdaResult<'gc> {
@@ -231,7 +235,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> LambdaResult<'gc> {
@@ -312,7 +317,8 @@ mod procedures {
         }
 
         fn run(
-            &mut self,
+            &self,
+            _state: &mut NativeLambdaState<'gc>,
             ctx: NativeLambdaContext<'_, 'gc>,
             args: &[crate::ValuePtr<'gc>],
         ) -> LambdaResult<'gc> {
@@ -360,7 +366,7 @@ impl Module for Lazy {
             ($lmb:expr) => {
                  Some(
                     lambda::Lambda::Native(
-                        unsize![Gc::new(mc, RefLock::new($lmb)) => RefLock<dyn lambda::NativeLambda>],
+                        unsize![Gc::new(mc, $lmb) => dyn lambda::NativeLambda],
                     )
                     .into_value(mc)
                     .into_ptr(mc),

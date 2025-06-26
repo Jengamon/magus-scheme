@@ -4,7 +4,10 @@ use crate::{
     Value, ValuePtr,
     runtime::{
         error::SchemeErrorPtr,
-        lambda::{Arity, Lambda, LambdaResult, LambdaReturn, NativeLambda, NativeLambdaContext},
+        lambda::{
+            Arity, Lambda, LambdaResult, LambdaReturn, NativeLambda, NativeLambdaContext,
+            NativeLambdaState,
+        },
     },
 };
 
@@ -49,7 +52,8 @@ impl<'gc> NativeLambda<'gc> for WithExceptionHandler {
     }
 
     fn run(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[ValuePtr<'gc>],
     ) -> LambdaResult<'gc> {
@@ -68,7 +72,8 @@ impl<'gc> NativeLambda<'gc> for WithExceptionHandler {
     }
 
     fn error(
-        &mut self,
+        &self,
+        _state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[ValuePtr<'gc>],
         err: SchemeErrorPtr<'gc>,

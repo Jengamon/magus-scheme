@@ -5,7 +5,7 @@ use gc_arena::{Collect, Gc, Mutation, RefLock};
 use std::rc::Rc;
 
 use crate::{
-    Fuel, ValuePtr,
+    Any, Fuel, ValuePtr,
     bytecode::ChunkPtr,
     compiler::World,
     environment::StackEnvironmentPtr,
@@ -171,14 +171,8 @@ impl<'gc> std::ops::Deref for NativeLambdaContext<'_, 'gc> {
     }
 }
 
-#[derive(Default)]
-pub enum ContinuationValue<'gc> {
-    Given(NativeLambdaPtr<'gc>),
-    #[default]
-    CopySelf,
-    Null,
-    Empty,
-}
+/// Type used for lambda state
+pub type NativeLambdaState<'gc> = Option<Any<'gc, ()>>;
 
 /// A native lambda is a Rust-implemented lambda
 ///
@@ -194,13 +188,15 @@ pub trait NativeLambda<'gc>: std::fmt::Debug + Collectable {
 
     /// Run in normal mode
     fn run(
-        &mut self,
+        &self,
+        state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[ValuePtr<'gc>],
     ) -> Result<LambdaReturn<'gc>, LambdaError>;
     /// Run when there is an error present
     fn error(
-        &mut self,
+        &self,
+        state: &mut NativeLambdaState<'gc>,
         ctx: NativeLambdaContext<'_, 'gc>,
         args: &[ValuePtr<'gc>],
         err: SchemeErrorPtr<'gc>,
@@ -209,22 +205,12 @@ pub trait NativeLambda<'gc>: std::fmt::Debug + Collectable {
         Ok(LambdaReturn::Propagate(err))
     }
 
-    /// Create a version of `self` that will continue off where this function
-    /// was called for this lambda (used in continuation impl)
-    ///
-    /// `None` signifies that this lambda can simply have its pointer
-    /// copied as a continuation (it does not mutate `self`)
-    fn continuation(&self, mc: &Mutation<'gc>) -> ContinuationValue<'gc> {
-        let _ = mc;
-        ContinuationValue::default()
-    }
-
     /// Provide a documentation string
     fn doc_string(&self) -> Option<&str> {
         None
     }
 }
-pub type NativeLambdaPtr<'gc> = Gc<'gc, RefLock<dyn NativeLambda<'gc> + 'gc>>;
+pub type NativeLambdaPtr<'gc> = Gc<'gc, dyn NativeLambda<'gc> + 'gc>;
 pub type LambdaResult<'gc> = Result<LambdaReturn<'gc>, LambdaError>;
 
 /// A compiled lambda is a wrapper around a [`ChunkPtr`] with additional information about arity
@@ -338,7 +324,7 @@ pub enum Lambda<'gc> {
 impl Lambda<'_> {
     pub fn arity(self) -> Arity {
         match self {
-            Self::Native(n) => n.borrow().arity(),
+            Self::Native(n) => n.arity(),
             Self::Compiled(c) => c.arity,
             Self::ClosureCompiled { compiled, .. } => compiled.arity,
         }
@@ -372,15 +358,15 @@ impl Lambda<'_> {
             Self::Native(n) => {
                 if let Some(native) = native_lam {
                     // compare addresses, if same, we are the same pointer, just use us
-                    let n_addr = n.as_ptr().addr();
+                    let n_addr = (&raw const **n).addr();
                     let our_addr = (native as *const dyn NativeLambda).addr();
                     if n_addr == our_addr {
                         native.doc_string().map(str::to_string)
                     } else {
-                        n.borrow().doc_string().map(str::to_string)
+                        n.doc_string().map(str::to_string)
                     }
                 } else {
-                    n.borrow().doc_string().map(str::to_string)
+                    n.doc_string().map(str::to_string)
                 }
             }
         }
@@ -447,7 +433,7 @@ impl Eq for Lambda<'_> {}
 impl std::fmt::Pointer for Lambda<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Native(np) => write!(f, "0x{:x}", (&raw const *np.borrow()).addr()),
+            Self::Native(np) => write!(f, "0x{:x}", (&raw const **np).addr()),
             Self::Compiled(cp) | Self::ClosureCompiled { compiled: cp, .. } => {
                 write!(f, "0x{:x}", (&raw const *cp.as_ref()).addr())
             }

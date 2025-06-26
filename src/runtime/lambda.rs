@@ -171,6 +171,15 @@ impl<'gc> std::ops::Deref for NativeLambdaContext<'_, 'gc> {
     }
 }
 
+#[derive(Default)]
+pub enum ContinuationValue<'gc> {
+    Given(NativeLambdaPtr<'gc>),
+    #[default]
+    CopySelf,
+    Null,
+    Empty,
+}
+
 /// A native lambda is a Rust-implemented lambda
 ///
 /// # Notes
@@ -205,9 +214,9 @@ pub trait NativeLambda<'gc>: std::fmt::Debug + Collectable {
     ///
     /// `None` signifies that this lambda can simply have its pointer
     /// copied as a continuation (it does not mutate `self`)
-    fn continuation(&self, mc: &Mutation<'gc>) -> Option<NativeLambdaPtr<'gc>> {
+    fn continuation(&self, mc: &Mutation<'gc>) -> ContinuationValue<'gc> {
         let _ = mc;
-        None
+        ContinuationValue::default()
     }
 
     /// Provide a documentation string

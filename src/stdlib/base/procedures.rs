@@ -9,7 +9,7 @@ pub use conversions::{
 pub use equality::{IsEq, IsEqual, IsEqv};
 pub use error::{Raise, RaiseContinuable};
 pub use list::{
-    Caar, Cadr, Car, Cdar, Cddr, Cdr, ListCopy, ListSetBang, Map, SetCarBang, SetCdrBang,
+    Caar, Cadr, Car, Cdar, Cddr, Cdr, ForEach, ListCopy, ListSetBang, Map, SetCarBang, SetCdrBang,
 };
 pub use math::{
     Add, Ceiling, Denominator, Divide, ExactIntegerSqrt, Expt, Floor, FloorSlash, Gcd, Lcm,
@@ -179,7 +179,9 @@ mod control {
 
     use crate::{
         Value, compiler,
-        runtime::lambda::{Arity, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext},
+        runtime::lambda::{
+            Arity, ContinuationValue, LambdaError, LambdaReturn, NativeLambda, NativeLambdaContext,
+        },
         value::ConsCell,
     };
     use either::Either;
@@ -210,7 +212,9 @@ mod control {
             args: &[crate::ValuePtr<'gc>],
         ) -> Result<LambdaReturn<'gc>, LambdaError> {
             // get the continuation of the stack frame right above us
-            let cont = ctx.thread_ref.create_continuation(&ctx, true);
+            let cont = ctx
+                .thread_ref
+                .create_continuation(&ctx, Some((ctx.self_ptr, self)));
 
             let cont_value = Value::Continuation(Gc::new(&ctx, cont)).into_ptr(&ctx);
 
@@ -237,6 +241,10 @@ mod control {
                     "call-with-current-continuation expects a procedure as its first argument",
                 ))?,
             }
+        }
+
+        fn continuation(&self, _mc: &gc_arena::Mutation<'gc>) -> ContinuationValue<'gc> {
+            ContinuationValue::Null
         }
     }
 
@@ -1531,8 +1539,8 @@ mod list {
     use crate::{
         Value, ValuePtr, ValueType,
         runtime::lambda::{
-            Arity, Lambda, LambdaResult, LambdaReturn, NativeLambda, NativeLambdaContext,
-            NativeLambdaPtr,
+            Arity, ContinuationValue, Lambda, LambdaResult, LambdaReturn, NativeLambda,
+            NativeLambdaContext,
         },
         value::{ConsCell, ContinuationPtr, Number},
     };
@@ -1763,6 +1771,16 @@ mod list {
 
     #[derive(Collect, Debug, Clone)]
     #[collect(no_drop)]
+    struct MapState<'gc> {
+        index: usize,
+        max: usize,
+        lists: Vec<Vec<ValuePtr<'gc>>>,
+        proc: Procedure<'gc>,
+        results: Vec<ValuePtr<'gc>>,
+    }
+
+    #[derive(Collect, Debug, Clone)]
+    #[collect(no_drop)]
     enum Procedure<'gc> {
         Lambda(Lambda<'gc>),
         Continuation(ContinuationPtr<'gc>),
@@ -1775,16 +1793,6 @@ mod list {
                 Either::Right(cont) => Procedure::Continuation(cont),
             }
         }
-    }
-
-    #[derive(Collect, Debug, Clone)]
-    #[collect(no_drop)]
-    struct MapState<'gc> {
-        index: usize,
-        max: usize,
-        lists: Vec<Vec<ValuePtr<'gc>>>,
-        proc: Procedure<'gc>,
-        results: Vec<ValuePtr<'gc>>,
     }
 
     impl<'gc> NativeLambda<'gc> for Map<'gc> {
@@ -1834,6 +1842,13 @@ mod list {
                             lists.len()
                         ))?;
                     }
+                }
+
+                if lists.iter().all(|(self_ptr, c)| c.is_circular(*self_ptr)) {
+                    return Err(anyhow::anyhow!(
+                        "{}: all arguments are circular lists",
+                        self.name()
+                    ))?;
                 }
 
                 let lists: Vec<_> = lists
@@ -1889,7 +1904,9 @@ mod list {
                 }) = self.state.take()
                 else {
                     // if the stack is *not* empty, we should have some state
-                    unreachable!()
+                    // (if we don't, we are probably being called from a continuation after we've finished)
+                    // for map b/c we expect a value, we error
+                    return Err(anyhow::anyhow!("{}: terminated", self.name()))?;
                 };
 
                 let result = ctx.stack.last().copied().unwrap();
@@ -1927,8 +1944,168 @@ mod list {
             }
         }
 
-        fn continuation(&self, mc: &gc_arena::Mutation<'gc>) -> Option<NativeLambdaPtr<'gc>> {
-            Some(unsize! [
+        fn continuation(&self, mc: &gc_arena::Mutation<'gc>) -> ContinuationValue<'gc> {
+            ContinuationValue::Given(unsize! [
+                Gc::new(mc, RefLock::new(Self {
+                    state: self.state.clone()
+                })) => RefLock<dyn NativeLambda<'gc> + 'gc>
+            ])
+        }
+    }
+
+    #[derive(Debug, Collect, Default)]
+    #[collect(no_drop)]
+    pub struct ForEach<'gc> {
+        state: Option<ForEachState<'gc>>,
+    }
+
+    #[derive(Collect, Debug, Clone)]
+    #[collect(no_drop)]
+    struct ForEachState<'gc> {
+        index: usize,
+        max: usize,
+        lists: Vec<Vec<ValuePtr<'gc>>>,
+        proc: Procedure<'gc>,
+    }
+
+    impl<'gc> NativeLambda<'gc> for ForEach<'gc> {
+        fn name(&self) -> &str {
+            "for-each"
+        }
+
+        fn arity(&self) -> Arity {
+            Arity::AtLeast(2)
+        }
+
+        fn run(
+            &mut self,
+            ctx: NativeLambdaContext<'_, 'gc>,
+            args: &[ValuePtr<'gc>],
+        ) -> Result<LambdaReturn<'gc>, crate::runtime::lambda::LambdaError> {
+            if let Some(ForEachState {
+                index,
+                max,
+                lists,
+                proc,
+            }) = self.state.take()
+            {
+                if index == max {
+                    Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]))
+                } else {
+                    // Still more results to evaluate
+                    let values: Vec<_> = lists.iter().map(|l| l[index]).collect();
+                    self.state = Some(ForEachState {
+                        index: index + 1,
+                        max,
+                        lists,
+                        proc: proc.clone(),
+                    });
+
+                    match proc {
+                        Procedure::Lambda(lambda) => Ok(LambdaReturn::Call {
+                            lambda,
+                            args: values,
+                            env: None,
+                            dynamic_wind: None,
+                        }),
+                        Procedure::Continuation(cont) => {
+                            Ok(LambdaReturn::Continue { cont, args: values })
+                        }
+                    }
+                }
+            } else if ctx.stack.is_empty() {
+                // We are in a fresh call, reset state and start work
+                let proc = match *args[0].borrow() {
+                    Value::Lambda(l) => Either::Left(l),
+                    Value::Continuation(c) => Either::Right(c),
+                    _ => {
+                        return Err(anyhow::anyhow!(
+                            "{} expects a procedure as its first argument",
+                            self.name()
+                        ))?;
+                    }
+                };
+
+                let lists = args
+                    .iter()
+                    .skip(1)
+                    .map(|v| match *v.borrow() {
+                        Value::Cons(c) if c.is_list(*v, ctx.thread_ctx.null_value) => Ok((*v, c)),
+                        Value::Cons(_) => Err(anyhow::anyhow!(
+                            "{} expects a proper list for the rest of its arguments",
+                            self.name()
+                        )),
+                        _ => Err(anyhow::anyhow!(
+                            "{} expects lists for the rest of its arguments",
+                            self.name()
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                if let Either::Left(lam) = &proc {
+                    if !lam.arity().is_satisfied(lists.len()) {
+                        return Err(anyhow::anyhow!(
+                            "{} expects a procedure that can accept {} arguments as its first argument",
+                            self.name(),
+                            lists.len()
+                        ))?;
+                    }
+                }
+
+                if lists.iter().all(|(self_ptr, c)| c.is_circular(*self_ptr)) {
+                    return Err(anyhow::anyhow!(
+                        "{}: all arguments are circular lists",
+                        self.name()
+                    ))?;
+                }
+
+                let lists: Vec<_> = lists
+                    .into_iter()
+                    .map(|(v, l)| {
+                        l.list_values(v, ctx.thread_ctx.null_value)
+                            .into_iter()
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+
+                let max = lists.iter().map(|l| l.len()).min().unwrap_or_default();
+
+                if max == 0 {
+                    // If the longest list is the empty list, then we know the result is an empty list!
+                    return Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]));
+                }
+
+                // Get the first value of each list to call the proc!
+                let first_values: Vec<_> = lists.iter().map(|l| l[0]).collect();
+
+                let state = ForEachState {
+                    index: 1,
+                    max,
+                    lists,
+                    proc: proc.into(),
+                };
+
+                self.state = Some(state);
+
+                match proc {
+                    Either::Left(lambda) => Ok(LambdaReturn::Call {
+                        lambda,
+                        args: first_values,
+                        env: None,
+                        dynamic_wind: None,
+                    }),
+                    Either::Right(cont) => Ok(LambdaReturn::Continue {
+                        cont,
+                        args: first_values,
+                    }),
+                }
+            } else {
+                return Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]));
+            }
+        }
+
+        fn continuation(&self, mc: &gc_arena::Mutation<'gc>) -> ContinuationValue<'gc> {
+            ContinuationValue::Given(unsize! [
                 Gc::new(mc, RefLock::new(Self {
                     state: self.state.clone()
                 })) => RefLock<dyn NativeLambda<'gc> + 'gc>

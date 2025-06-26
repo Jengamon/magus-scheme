@@ -97,7 +97,7 @@
     [ "base", "procedure", floor-remainder, true, "return floor modulo", "implemented in Scheme" ],
     [ "base", "procedure", floor/, true, "return floored value and its modulo", "" ],
     [ "base", "", flush-output-port, false, "", "" ],
-    [ "base", "", for-each, false, "", "" ],
+    [ "base", "procedure", for-each, true, "`map` but for side effects", "" ],
     [ "base", "procedure", gcd, true, "get the greatest common divisor of inputs", "" ],
     [ "base", "", get-output-bytevector, false, "", "" ],
     [ "base", "", get-output-string, false, "", "" ],

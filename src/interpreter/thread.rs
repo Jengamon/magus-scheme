@@ -12,8 +12,8 @@ use crate::{
         convert::IntoValue,
         error::{SchemeError, SchemeErrorPtr, SchemeErrorType, StackFrame},
         lambda::{
-            Arity, DynamicWind, Lambda, LambdaError, LambdaReturn, NativeLambdaContext,
-            NativeLambdaPtr,
+            Arity, ContinuationValue, DynamicWind, Lambda, LambdaError, LambdaReturn, NativeLambda,
+            NativeLambdaContext, NativeLambdaPtr,
         },
         port::{InputPort, OutputPort, PortType, Readable, Writeable},
     },
@@ -625,11 +625,7 @@ impl<'gc> Thread<'gc> {
         // used later
         let bottom = frame.bottom;
         let wind_frame = frame.wind_frame;
-        let dynamic_wind = frame.dynamic_wind;
-        let prev_upvalue = frame.upvalue_index;
         let frame_env = frame.env;
-        let parent_env = frame.env.borrow().parent();
-        let execution = frame.execution;
         // handle exception frame interaction with non-continuable errors
         if let Some(err) = frame.exception {
             if !err.error_type.is_continuable() {
@@ -686,7 +682,31 @@ impl<'gc> Thread<'gc> {
             }
         }
 
-        let after_frame = if let Some((_, after_lam)) = dynamic_wind {
+        let frame = if should_pop {
+            // eprintln!("{} -> ret!", self.frames.len());
+            self.frames.pop()
+        } else {
+            None
+        };
+
+        if let Some(frame) = frame {
+            self.calculate_after_frame(ctx, frame)
+        } else {
+            None
+        }
+    }
+
+    fn calculate_after_frame(
+        &self,
+        ctx: &Context<'_, 'gc>,
+        frame: ThreadFrame<'gc>,
+    ) -> Option<ThreadFrame<'gc>> {
+        // used later
+        let dynamic_wind = frame.dynamic_wind;
+        let prev_upvalue = frame.upvalue_index;
+        let parent_env = frame.env.borrow().parent();
+        let execution = frame.execution;
+        if let Some((_, after_lam)) = dynamic_wind {
             let (aft_ex, aft_upvalue_id, aft_env) = Execution::from_lambda(
                 ctx,
                 after_lam,
@@ -714,13 +734,7 @@ impl<'gc> Thread<'gc> {
             })
         } else {
             None
-        };
-
-        // TODO If dynamic-wind is present. call the after
-        if should_pop {
-            self.frames.pop();
         }
-        after_frame
     }
 
     fn make_backtrace(frames: &[ThreadFrame<'gc>]) -> Vec<StackFrame<'gc>> {
@@ -813,7 +827,11 @@ impl<'gc> Thread<'gc> {
         // Handle the previous frame return here
         let old_after = if is_tail {
             // Exiting the current frame
-            self.handle_frame_end(ctx, false, false)
+            if !self.frames.is_empty() {
+                self.handle_frame_end(ctx, false, false)
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -960,23 +978,45 @@ impl<'gc> Thread<'gc> {
     ///
     /// # Parameters
     /// - `is_tail`: will exclude the current frame if true.
-    pub fn create_continuation(&self, mc: &Mutation<'gc>, is_tail: bool) -> Continuation<'gc> {
-        let frames_copy: Vec<_> = if !is_tail {
-            &self.frames[..]
-        } else {
-            &self.frames[..self.frames.len() - 1]
-        }
-        .iter()
-        .map(|f| ThreadFrame {
-            execution: match f.execution {
-                Execution::Native { native } => Execution::Native {
-                    native: native.borrow().continuation(mc).unwrap_or(native),
-                },
-                _ => f.execution,
-            },
-            ..f.clone()
-        })
-        .collect();
+    pub fn create_continuation(
+        &self,
+        mc: &Mutation<'gc>,
+        in_native: Option<(NativeLambdaPtr<'gc>, &dyn NativeLambda<'gc>)>,
+    ) -> Continuation<'gc> {
+        let frames_copy =
+            (self.frames[..self.frames.len() - 1])
+                .iter()
+                .fold(vec![], |mut cont, f| {
+                    match f.execution {
+                        Execution::Native { native } => match if let Some((nptr, nbrw)) = in_native
+                        {
+                            if Gc::ptr_eq(native, nptr) {
+                                nbrw.continuation(mc)
+                            } else {
+                                native.borrow().continuation(mc)
+                            }
+                        } else {
+                            native.borrow().continuation(mc)
+                        } {
+                            ContinuationValue::Given(ptr) => cont.push(ThreadFrame {
+                                execution: Execution::Native { native: ptr },
+                                ..f.clone()
+                            }),
+                            ContinuationValue::CopySelf => {
+                                cont.push(f.clone());
+                            }
+                            ContinuationValue::Null => {
+                                cont.clear();
+                            }
+                            ContinuationValue::Empty => {}
+                        },
+                        _ => {
+                            cont.push(f.clone());
+                        }
+                    };
+
+                    cont
+                });
 
         Continuation::new(frames_copy)
     }
@@ -1180,31 +1220,6 @@ impl<'gc> Thread<'gc> {
             }
 
             // eprintln!("FRAMEC: {}", self.frames.len());
-
-            // if let Some(err) = self.error {
-            //     // Find an error handler and set it up to run (if not handling one)
-            //     if self.frames.last().unwrap().exception.is_none() {
-            //         if let Some(handler) = self.error_handler() {
-            //             if let Err(_err) = self.call_lambda(&ctx, handler, 1, true) {
-            //                 // not a valid handler, so *take* it
-            //                 let index = self.error_handler_frame_index().unwrap();
-            //                 self.frames[index].handler.take();
-            //                 make_error!(SchemeErrorType::HandlerFailed(Gc::new(
-            //                     &ctx,
-            //                     err.error_type.clone()
-            //                 )));
-            //                 continue;
-            //             }
-            //             // mark frame as exception
-            //             self.frames.last_mut().unwrap().exception = self.error.take();
-            //             continue;
-            //         } else {
-            //             // execution ends with this error
-            //             self.frames.drain(..);
-            //             return;
-            //         }
-            //     }
-            // }
 
             let current_env = Self::current_env(&self.frames).unwrap();
             let Some(frame) = self.frames.last_mut() else {
@@ -1892,7 +1907,22 @@ impl<'gc> Thread<'gc> {
                     // TODO Remember to handle dynamic-wind properly when processing LambdaReturn::Continue
                     fuel.consume(Self::NATIVE_COST);
                     // Make all our data fixed and nice to borrow
-                    let native = *native;
+                    let native = match native.borrow().continuation(&ctx) {
+                        ContinuationValue::Given(ptr) => ptr,
+                        _ => *native,
+                    };
+                    macro_rules! update_native {
+                        () => {{
+                            let Some(frame) = self.frames.last_mut() else {
+                                unreachable!();
+                            };
+                            let Execution::Native { native: native_ptr } = &mut frame.execution
+                            else {
+                                unreachable!();
+                            };
+                            *native_ptr = native;
+                        }};
+                    }
                     // reset stack if the frame is erroring, but doesn't have an exception set
                     if self.error.is_some()
                         && frame.exception.is_none()
@@ -1952,6 +1982,7 @@ impl<'gc> Thread<'gc> {
                             // Call interrupt (in case the lambda itself doesn't) so that
                             // the interpreter loop is disrupted
                             fuel.interrupt();
+                            update_native!();
                             continue;
                         }
                         Ok(LambdaReturn::Return(vals)) => {
@@ -1999,7 +2030,7 @@ impl<'gc> Thread<'gc> {
                             if is_continuable {
                                 make_error!(SchemeErrorType::RaiseContinuable(
                                     Value::resolve_into(error, interner.clone(), ctx.null_value),
-                                    Gc::new(&ctx, self.create_continuation(&ctx, true)),
+                                    Gc::new(&ctx, self.create_continuation(&ctx, None)),
                                 ));
                             } else {
                                 make_error!(SchemeErrorType::Raise(Value::resolve_into(
@@ -2040,6 +2071,7 @@ impl<'gc> Thread<'gc> {
                                 lambda
                             };
                             let wind_frame = frame.wind_frame;
+                            update_native!();
                             if let Err(err) = self.call_lambda(
                                 &ctx,
                                 lambda,
@@ -2059,6 +2091,7 @@ impl<'gc> Thread<'gc> {
                             let frame_ids = self.frames.iter().map(|f| f.id).collect::<Vec<_>>();
                             let base_value = parameter.borrow().base_value(&frame_ids);
                             self.stack.push(base_value);
+                            update_native!();
 
                             if let Some(convert) = parameter.borrow().convert {
                                 let convert = if convert.needs_label() {
@@ -2113,6 +2146,7 @@ impl<'gc> Thread<'gc> {
                                 lambda
                             };
                             let wind_frame = frame.wind_frame;
+                            update_native!();
                             if let Err(err) = self.call_lambda(
                                 &ctx,
                                 lambda,
@@ -2131,8 +2165,7 @@ impl<'gc> Thread<'gc> {
                             args,
                             dynamic_wind,
                         }) => {
-                            let args_len = args.len();
-                            self.stack.extend(args);
+                            let wind_frame = frame.wind_frame;
                             // label the lambda
                             let lambda = if lambda.needs_label() {
                                 lambda.label(
@@ -2144,7 +2177,8 @@ impl<'gc> Thread<'gc> {
                             } else {
                                 lambda
                             };
-                            let wind_frame = frame.wind_frame;
+                            let args_len = args.len();
+                            self.stack.extend(args);
                             if let Err(err) = self.call_lambda(
                                 &ctx,
                                 lambda,
@@ -2165,7 +2199,7 @@ impl<'gc> Thread<'gc> {
                                 LambdaError::Continuable(ce) => {
                                     make_error!(SchemeErrorType::RustContinuable(
                                         std::rc::Rc::new(ce),
-                                        Gc::new(&ctx, self.create_continuation(&ctx, true)),
+                                        Gc::new(&ctx, self.create_continuation(&ctx, None)),
                                     ));
                                 }
                                 LambdaError::NonContinuable(e) => {

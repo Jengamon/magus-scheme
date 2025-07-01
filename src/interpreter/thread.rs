@@ -164,6 +164,8 @@ pub struct ThreadFrame<'gc> {
     rest_args: Option<ValuePtr<'gc>>,
     // used for frame debug
     in_call: bool,
+    // used for return calculation
+    returning: Option<ValuePtr<'gc>>,
 }
 
 impl ThreadFrame<'_> {
@@ -333,6 +335,9 @@ pub struct Thread<'gc> {
     // counter for the upvalue mapping
     next_upvalue_index: usize,
 
+    // return register
+    return_reg: Option<ValuePtr<'gc>>,
+
     // port parameters~
     default_input_port: InputPort,
     input_port: ParameterPtr<'gc>,
@@ -366,6 +371,7 @@ impl<'gc> Thread<'gc> {
             quote_holes: fxhash::FxHashMap::default(),
             upvalue_mapping: Default::default(),
             next_upvalue_index: 0,
+            return_reg: None,
 
             input_port: Gc::new(
                 mc,
@@ -478,6 +484,7 @@ impl<'gc> Thread<'gc> {
             tail_call_args: Default::default(),
             rest_args: None,
             in_call: false,
+            returning: None,
         });
     }
 
@@ -496,6 +503,7 @@ impl<'gc> Thread<'gc> {
     /// Clears frames
     pub fn clear_frames(&mut self) {
         self.frames.clear();
+        let _ = self.return_reg.take();
         debug_assert!(self.is_finished());
     }
 
@@ -509,7 +517,7 @@ impl<'gc> Thread<'gc> {
     /// When a thread has no frames, then it is considered to be finished.
     #[inline]
     pub fn is_finished(&self) -> bool {
-        self.frames.is_empty()
+        self.return_reg.is_some() || self.frames.is_empty()
     }
 
     /// If finished, returns the values that the program resulted in
@@ -526,7 +534,7 @@ impl<'gc> Thread<'gc> {
             // no actually we want to reverse this stack to preserve source order
             // and actually only return the value at the top of the stack (if it's Value::Values, then it can be more than 1~)
             Ok(StackExpander {
-                stack: self.stack.iter().copied().rev().take(1).collect(),
+                stack: self.return_reg.into_iter().collect(),
                 encountered_values: Vec::new(),
                 in_progress: None,
             })
@@ -627,7 +635,6 @@ impl<'gc> Thread<'gc> {
     fn handle_frame_end(
         &mut self,
         ctx: &Context<'_, 'gc>,
-        should_pop: bool,
         preserve_stack: bool,
     ) -> Option<ThreadFrame<'gc>> {
         let Some(frame) = self.frames.last_mut() else {
@@ -638,6 +645,7 @@ impl<'gc> Thread<'gc> {
         let bottom = frame.bottom;
         let wind_frame = frame.wind_frame;
         let frame_env = frame.env;
+        let ret_val = frame.returning;
         // handle exception frame interaction with non-continuable errors
         if let Some(err) = frame.exception {
             if !err.error_type.is_continuable() {
@@ -668,16 +676,12 @@ impl<'gc> Thread<'gc> {
         // if 0, return Void, otherwise returns Values)
         // "Wind frames" don't actually return..., so we pop the return value, but ignore it
         if !preserve_stack {
+            if self.stack.len() >= bottom {
+                self.stack.drain(bottom..);
+            }
+
             if !wind_frame {
-                let possible_ret_vals = self
-                    .stack
-                    .drain(bottom.min(self.stack.len())..)
-                    .collect::<Vec<_>>();
-                let ret_val = possible_ret_vals
-                    .into_iter()
-                    .rfind(|v| !matches!(*v.borrow(), Value::Void));
-                // dbg!(ret_val);
-                // drain any extra value on stack
+                // This frame should return something, so push to stack the return value
                 if let Some(ret) = ret_val {
                     let ret = if let Value::Lambda(Lambda::Compiled(cl)) = *ret.borrow() {
                         // Capture the current env as a closure
@@ -693,17 +697,15 @@ impl<'gc> Thread<'gc> {
                 } else {
                     self.stack.push(Value::Void.into_ptr(ctx));
                 }
-            } else if self.stack.len() >= bottom {
-                self.stack.drain(bottom..);
             }
         }
 
-        let frame = if should_pop {
-            // eprintln!("{} -> ret!", self.frames.len());
-            self.frames.pop()
-        } else {
-            None
-        };
+        let frame = self.frames.pop();
+
+        if self.frames.is_empty() && !wind_frame {
+            // We exitted the last frame, so push the retvalue to the stack instead (if not a wind_frame)
+            self.return_reg = self.stack.pop();
+        }
 
         if let Some(frame) = frame {
             self.calculate_after_frame(ctx, &frame)
@@ -747,6 +749,7 @@ impl<'gc> Thread<'gc> {
                 tail_call_args: Default::default(),
                 rest_args: None,
                 in_call: false,
+                returning: None,
             })
         } else {
             None
@@ -843,8 +846,10 @@ impl<'gc> Thread<'gc> {
         // Handle the previous frame return here
         let old_after = if is_tail {
             // Exiting the current frame
-            if !self.frames.is_empty() {
-                self.handle_frame_end(ctx, false, false)
+            if !self.frames.is_empty()
+                && let Some(old_frame) = self.frames.last()
+            {
+                self.calculate_after_frame(ctx, old_frame)
             } else {
                 None
             }
@@ -902,6 +907,7 @@ impl<'gc> Thread<'gc> {
             tail_call_args: Default::default(),
             rest_args,
             in_call: false,
+            returning: None,
         };
         let before_frame = if let Some((before_lam, _)) = dynamic_wind {
             let (bef_ex, bef_upvalue_id, bef_env) = Execution::from_lambda(
@@ -930,6 +936,7 @@ impl<'gc> Thread<'gc> {
                 env,
                 rest_args: None,
                 in_call: false,
+                returning: None,
             })
         } else {
             None
@@ -1058,6 +1065,7 @@ impl<'gc> Thread<'gc> {
                             tail_call_args: Default::default(),
                             rest_args: None,
                             in_call: false,
+                            returning: None,
                         })
                     } else {
                         None
@@ -1098,6 +1106,7 @@ impl<'gc> Thread<'gc> {
                             tail_call_args: Default::default(),
                             rest_args: None,
                             in_call: false,
+                            returning: None,
                         })
                     } else {
                         None
@@ -1136,6 +1145,7 @@ impl<'gc> Thread<'gc> {
                             tail_call_args: Default::default(),
                             rest_args: None,
                             in_call: false,
+                            returning: None,
                         })
                     } else {
                         None
@@ -1219,6 +1229,10 @@ impl<'gc> Thread<'gc> {
         while fuel.should_continue() {
             // This is here b/c we could be finished while fuel still remains
             if self.is_finished() {
+                // If something is on top of the stack, return it.
+                if self.return_reg.is_none() {
+                    self.return_reg = self.stack.pop();
+                }
                 return;
             }
 
@@ -1242,14 +1256,15 @@ impl<'gc> Thread<'gc> {
                     frame.in_call = false;
                     // If error is set, kill this frame (bytecode shouldn't run if actively erroring)
                     if self.error.is_some() {
-                        if let Some(after) = self.handle_frame_end(&ctx, true, true) {
+                        if let Some(after) = self.handle_frame_end(&ctx, true) {
                             self.frames.push(after);
                         }
                         continue;
                     }
                     // If framepointer is oob, then that means execution of this frame is finished
                     if chunk.code.len() <= *pc {
-                        if let Some(after) = self.handle_frame_end(&ctx, true, false) {
+                        frame.returning = self.stack.pop();
+                        if let Some(after) = self.handle_frame_end(&ctx, false) {
                             self.frames.push(after);
                         }
                         continue;
@@ -1967,27 +1982,32 @@ impl<'gc> Thread<'gc> {
                             continue;
                         }
                         Ok(LambdaReturn::Return(vals)) => {
-                            if vals.len() == 1 {
-                                self.stack.push(vals[0]);
+                            let retval = if vals.len() == 1 {
+                                vals[0]
                             } else if vals.is_empty() {
-                                self.stack.push(Value::Void.into_ptr(&ctx));
+                                Value::Void.into_ptr(&ctx)
                             } else {
-                                self.stack
-                                    .push(Value::Values(Gc::new(&ctx, vals)).into_ptr(&ctx));
-                            }
+                                Value::Values(Gc::new(&ctx, vals)).into_ptr(&ctx)
+                            };
+
+                            // Set return value fo frame
+                            frame.returning = Some(retval);
+
                             if was_error {
                                 if let Some(cont) = error.and_then(|e| e.error_type.continuation())
                                 {
+                                    self.stack.push(retval);
                                     self.handle_continuation(&ctx, cont, 1);
                                 }
-                            } else if let Some(after) = self.handle_frame_end(&ctx, true, false) {
+                            } else if let Some(after) = self.handle_frame_end(&ctx, false) {
                                 self.frames.push(after);
                             }
                         }
                         Ok(LambdaReturn::ReturnHandler) if was_error => {
+                            // This kind of frame *can't* return.
                             if let Some(cont) = error.and_then(|e| e.error_type.continuation()) {
                                 self.handle_continuation(&ctx, cont, 1);
-                            } else if let Some(after) = self.handle_frame_end(&ctx, true, false) {
+                            } else if let Some(after) = self.handle_frame_end(&ctx, false) {
                                 self.frames.push(after);
                             }
                         }
@@ -2014,7 +2034,7 @@ impl<'gc> Thread<'gc> {
                                     interner.clone(),
                                     ctx.null_value
                                 )));
-                                if let Some(after) = self.handle_frame_end(&ctx, true, false) {
+                                if let Some(after) = self.handle_frame_end(&ctx, false) {
                                     self.frames.push(after);
                                 }
                             }
@@ -2023,7 +2043,7 @@ impl<'gc> Thread<'gc> {
                             // TODO Check if same error
                             // If not, store the current error in the new error irritants
                             self.error = Some(err);
-                            if let Some(after) = self.handle_frame_end(&ctx, true, true) {
+                            if let Some(after) = self.handle_frame_end(&ctx, true) {
                                 self.frames.push(after);
                             }
                         }
@@ -2176,7 +2196,7 @@ impl<'gc> Thread<'gc> {
                                 }
                                 LambdaError::NonContinuable(e) => {
                                     make_error!(SchemeErrorType::Rust(std::rc::Rc::new(e)));
-                                    if let Some(after) = self.handle_frame_end(&ctx, true, false) {
+                                    if let Some(after) = self.handle_frame_end(&ctx, false) {
                                         self.frames.push(after);
                                     }
                                 }

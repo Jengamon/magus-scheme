@@ -1971,7 +1971,7 @@ impl<'gc> Thread<'gc> {
                         *state = frame_state;
                     }
                     // if let Ok(ret) = res.as_ref() {
-                    //     println!("-> {ret}");
+                    //     eprintln!("-[{}]> {ret}", native.name());
                     // }
                     // now interpret the result!
                     match res {
@@ -1989,6 +1989,31 @@ impl<'gc> Thread<'gc> {
                             } else {
                                 Value::Values(Gc::new(&ctx, vals)).into_ptr(&ctx)
                             };
+
+                            // Set return value fo frame
+                            frame.returning = Some(retval);
+
+                            if was_error {
+                                if let Some(cont) = error.and_then(|e| e.error_type.continuation())
+                                {
+                                    self.stack.push(retval);
+                                    self.handle_continuation(&ctx, cont, 1);
+                                }
+                            } else if let Some(after) = self.handle_frame_end(&ctx, false) {
+                                self.frames.push(after);
+                            }
+                        }
+                        Ok(LambdaReturn::ReturnTransparent(vals)) => {
+                            let retval = if vals.len() == 1 {
+                                vals[0]
+                            } else if vals.is_empty() {
+                                Value::Void.into_ptr(&ctx)
+                            } else {
+                                Value::Values(Gc::new(&ctx, vals)).into_ptr(&ctx)
+                            };
+
+                            // set the current frame bottom to the top of stack, so that nothing gets cleared
+                            frame.bottom = self.stack.len();
 
                             // Set return value fo frame
                             frame.returning = Some(retval);

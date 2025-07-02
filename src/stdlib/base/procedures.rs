@@ -2109,7 +2109,10 @@ mod list {
             };
 
             if index == max {
-                Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]))
+                // Special form of return that doesn't clear the stack corresponding to this frame
+                Ok(LambdaReturn::ReturnTransparent(vec![
+                    Value::Void.into_ptr(&ctx),
+                ]))
             } else {
                 // Still more results to evaluate
                 let values: Vec<_> = lists.iter().map(|l| l[*index]).collect();

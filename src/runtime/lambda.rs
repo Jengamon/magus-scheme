@@ -48,6 +48,10 @@ pub enum LambdaReturn<'gc> {
     ///
     /// `[call-end]`
     Return(Vec<ValuePtr<'gc>>),
+    /// Return the given values, pushing them to the stack, and *not* clearing the returning frame's stack
+    ///
+    /// `[call-end]`
+    ReturnTransparent(Vec<ValuePtr<'gc>>),
     /// Return from an error handler
     ///
     /// `[call-end]`
@@ -104,6 +108,7 @@ impl std::fmt::Display for LambdaReturn<'_> {
         match self {
             LambdaReturn::Waiting => write!(f, "Waiting"),
             LambdaReturn::Return(_) => write!(f, "Return"),
+            LambdaReturn::ReturnTransparent(_) => write!(f, "ReturnTransparent"),
             LambdaReturn::ReturnHandler => write!(f, "ReturnHandler"),
             LambdaReturn::Continue { .. } => write!(f, "Continue"),
             LambdaReturn::Raise { .. } => write!(f, "Raise"),

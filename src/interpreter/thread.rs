@@ -707,6 +707,15 @@ impl<'gc> Thread<'gc> {
             self.return_reg = self.stack.pop();
         }
 
+        // eprintln!(
+        //     ">> RETURNING TO {} <<",
+        //     if let Some(f) = frame.as_ref() {
+        //         format!("[0x{:x}]", (&raw const *f.id).addr())
+        //     } else {
+        //         "[root]".to_string()
+        //     }
+        // );
+
         if let Some(frame) = frame {
             self.calculate_after_frame(ctx, &frame)
         } else {

@@ -22,6 +22,7 @@ use super::{
 };
 
 mod number;
+mod printing;
 
 pub use number::{ComplexNumber, ComplexNumberPtr, Number, NumberPtr};
 

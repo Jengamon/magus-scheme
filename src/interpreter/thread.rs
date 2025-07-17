@@ -338,6 +338,9 @@ pub struct Thread<'gc> {
     // return register
     return_reg: Option<ValuePtr<'gc>>,
 
+    // thread void value
+    void: ValuePtr<'gc>,
+
     // port parameters~
     default_input_port: InputPort,
     input_port: ParameterPtr<'gc>,
@@ -372,6 +375,7 @@ impl<'gc> Thread<'gc> {
             upvalue_mapping: Default::default(),
             next_upvalue_index: 0,
             return_reg: None,
+            void: Gc::new(mc, RefLock::new(Value::Void)),
 
             input_port: Gc::new(
                 mc,
@@ -1308,7 +1312,7 @@ impl<'gc> Thread<'gc> {
                             advance_to_next_inst!();
                         }
                         Bytecode::PushVoid => {
-                            self.stack.push(Gc::new(&ctx, RefLock::new(Value::Void)));
+                            self.stack.push(self.void);
                             advance_to_next_inst!();
                         }
                         Bytecode::PushBool { bool } => {
@@ -1946,6 +1950,7 @@ impl<'gc> Thread<'gc> {
                         self_ptr: native,
                         thread_ctx: ctx,
                         world,
+                        void_value: self.void,
                         stack: if frame.bottom < self.stack.len() {
                             &self.stack[frame.bottom..]
                         } else {

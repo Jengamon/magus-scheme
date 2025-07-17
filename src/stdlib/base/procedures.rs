@@ -2066,7 +2066,7 @@ mod list {
 
                 if max == 0 {
                     // If the longest list is the empty list, then we know the result is an empty list!
-                    return Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]));
+                    return Ok(LambdaReturn::Return(vec![ctx.void_value]));
                 }
 
                 // Get the first value of each list to call the proc!
@@ -2110,9 +2110,7 @@ mod list {
 
             if index == max {
                 // Special form of return that doesn't clear the stack corresponding to this frame
-                Ok(LambdaReturn::ReturnTransparent(vec![
-                    Value::Void.into_ptr(&ctx),
-                ]))
+                Ok(LambdaReturn::ReturnTransparent(vec![ctx.void_value]))
             } else {
                 // Still more results to evaluate
                 let values: Vec<_> = lists.iter().map(|l| l[*index]).collect();
@@ -2195,7 +2193,7 @@ mod list {
             c.car = Some(val);
             *ptr.borrow_mut(&ctx) = Value::Cons(c);
 
-            Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]))
+            Ok(LambdaReturn::Return(vec![ctx.void_value]))
         }
     }
 
@@ -2307,7 +2305,7 @@ mod list {
             // mutation magic
             *args[0].borrow_mut(&ctx) = Value::Cons(c);
 
-            Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]))
+            Ok(LambdaReturn::Return(vec![ctx.void_value]))
         }
     }
 
@@ -2351,7 +2349,7 @@ mod list {
             // mutation magic
             *args[0].borrow_mut(&ctx) = Value::Cons(c);
 
-            Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]))
+            Ok(LambdaReturn::Return(vec![ctx.void_value]))
         }
     }
 }

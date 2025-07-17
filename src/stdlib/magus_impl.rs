@@ -60,7 +60,7 @@ mod procedures {
             _args: &[crate::ValuePtr<'gc>],
         ) -> Result<crate::runtime::lambda::LambdaReturn<'gc>, crate::runtime::lambda::LambdaError>
         {
-            Ok(LambdaReturn::Return(vec![Value::Void.into_ptr(&ctx)]))
+            Ok(LambdaReturn::Return(vec![ctx.void_value]))
         }
     }
 

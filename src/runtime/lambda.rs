@@ -137,6 +137,7 @@ pub struct NativeLambdaContext<'a, 'gc> {
     /// Since we are in a borrow of the Thread, don't use ctx.thread, use this field instead
     pub thread_ref: &'a Thread<'gc>,
     pub thread_ctx: Context<'a, 'gc>,
+    pub void_value: ValuePtr<'gc>,
     pub world: &'a World,
     pub stack: &'a [ValuePtr<'gc>],
     pub interner: &'a mut lasso::Rodeo,
